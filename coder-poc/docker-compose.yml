@@ -339,6 +339,38 @@ services:
       retries: 3
 
   # ==========================================================================
+  # LITELLM PROXY - Centralized AI gateway with virtual keys and budgets
+  # OpenAI-compatible API with per-user keys, budgets, rate limiting
+  # Admin UI: http://localhost:4000/ui  API: http://localhost:4000
+  # ==========================================================================
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: litellm
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-poc-litellm-master-key-change-in-production}
+      - DATABASE_URL=${LITELLM_DATABASE_URL:-postgresql://litellm:litellm@postgres:5432/litellm}
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./litellm/config.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    networks:
+      - coder-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ==========================================================================
   # AUTHENTIK - Identity Provider & RBAC
   # Provides SSO, RBAC, approval workflows for contractor access
   # Optional Azure AD federation supported

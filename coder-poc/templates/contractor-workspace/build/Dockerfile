@@ -134,10 +134,6 @@ RUN mkdir -p /home/coder/.local/share/code-server/User
 # Copy VS Code settings
 COPY --chown=coder:coder settings.json /home/coder/.local/share/code-server/User/settings.json
 
-# Copy Continue AI assistant config
-RUN mkdir -p /home/coder/.continue
-COPY --chown=coder:coder continue-config.json /home/coder/.continue/config.json
-
 # Install common Python packages
 RUN pip3 install --user --no-cache-dir \
     pytest \
@@ -170,9 +166,9 @@ RUN code-server --install-extension redhat.java \
 # .NET/C# alternatives (Open VSX compatible)
 RUN code-server --install-extension muhammad-sammy.csharp || true
 
-# AI coding assistants (Claude CLI alternatives)
-RUN code-server --install-extension continue.continue \
-    && code-server --install-extension sourcegraph.cody-ai
+# AI coding agent - Roo Code (agentic AI assistant)
+# Pre-installed so every developer has it ready without manual setup
+RUN code-server --install-extension rooveterinaryinc.roo-cline
 
 # IntelliJ keymap for developers migrating from JetBrains
 RUN code-server --install-extension k--kato.intellij-idea-keybindings

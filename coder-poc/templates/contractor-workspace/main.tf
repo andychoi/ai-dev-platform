@@ -170,25 +170,32 @@ data "coder_parameter" "language_stack" {
 # AI assistant preference
 data "coder_parameter" "ai_assistant" {
   name         = "ai_assistant"
-  display_name = "AI Coding Assistant"
-  description  = "Enable AI coding assistance (requires API key)"
+  display_name = "AI Coding Agent"
+  description  = "AI coding agent for development assistance"
   type         = "string"
-  default      = "continue"
+  default      = "roo-code"
   mutable      = true
   icon         = "/icon/widgets.svg"
 
   option {
-    name  = "Continue (Open Source)"
-    value = "continue"
-  }
-  option {
-    name  = "Cody (Sourcegraph)"
-    value = "cody"
+    name  = "Roo Code (Recommended)"
+    value = "roo-code"
   }
   option {
     name  = "None"
     value = "none"
   }
+}
+
+# LiteLLM virtual key (generated per-user by admin)
+data "coder_parameter" "litellm_api_key" {
+  name         = "litellm_api_key"
+  display_name = "AI API Key"
+  description  = "Your AI API key (provided by platform admin)"
+  type         = "string"
+  default      = ""
+  mutable      = true
+  icon         = "/icon/widgets.svg"
 }
 
 # AI Provider selection
@@ -230,7 +237,7 @@ data "coder_parameter" "ai_model" {
     value = "claude-haiku"
   }
   option {
-    name  = "Claude Opus 4.5 (Advanced)"
+    name  = "Claude Opus 4 (Advanced)"
     value = "claude-opus"
   }
 }
@@ -239,9 +246,9 @@ data "coder_parameter" "ai_model" {
 data "coder_parameter" "ai_gateway_url" {
   name         = "ai_gateway_url"
   display_name = "AI Gateway URL"
-  description  = "URL of the AI Gateway proxy"
+  description  = "URL of the AI Gateway proxy (LiteLLM)"
   type         = "string"
-  default      = "http://ai-gateway:8090"
+  default      = "http://litellm:4000"
   mutable      = true
   icon         = "/icon/widgets.svg"
 }
@@ -427,107 +434,56 @@ password=${data.coder_parameter.git_password.value}
       coder dotfiles "${data.coder_parameter.dotfiles_repo.value}" -y || true
     fi
 
-    # Configure AI settings
-    echo "Configuring AI assistant..."
-    AI_GATEWAY_URL="${data.coder_parameter.ai_gateway_url.value}"
-    AI_PROVIDER="${data.coder_parameter.ai_provider.value}"
+    # ==========================================================================
+    # AI AGENT CONFIGURATION (Roo Code + LiteLLM)
+    # ==========================================================================
+    AI_ASSISTANT="${data.coder_parameter.ai_assistant.value}"
+    LITELLM_KEY="${data.coder_parameter.litellm_api_key.value}"
     AI_MODEL="${data.coder_parameter.ai_model.value}"
+    AI_GATEWAY_URL="${data.coder_parameter.ai_gateway_url.value}"
 
-    # Determine model IDs based on provider and selection
-    case "$AI_MODEL" in
-      "claude-sonnet")
-        BEDROCK_MODEL="us.anthropic.claude-sonnet-4-5-20250929-v1:0"
-        ANTHROPIC_MODEL="claude-sonnet-4-5-20250929"
-        ;;
-      "claude-haiku")
-        BEDROCK_MODEL="us.anthropic.claude-haiku-4-5-20251001-v1:0"
-        ANTHROPIC_MODEL="claude-haiku-4-5-20251001"
-        ;;
-      "claude-opus")
-        BEDROCK_MODEL="us.anthropic.claude-opus-4-20250514-v1:0"
-        ANTHROPIC_MODEL="claude-opus-4-20250514"
-        ;;
-      *)
-        BEDROCK_MODEL="us.anthropic.claude-sonnet-4-5-20250929-v1:0"
-        ANTHROPIC_MODEL="claude-sonnet-4-5-20250929"
-        ;;
-    esac
+    if [ "$AI_ASSISTANT" = "roo-code" ] && [ -n "$LITELLM_KEY" ]; then
+      echo "Configuring Roo Code with LiteLLM proxy..."
 
-    # Set environment variables for AI tools
-    cat >> ~/.bashrc << AICONFIG
-# AI Configuration
-export AI_GATEWAY_URL="${data.coder_parameter.ai_gateway_url.value}"
-export AI_PROVIDER="${data.coder_parameter.ai_provider.value}"
-export AI_MODEL="${data.coder_parameter.ai_model.value}"
+      # Determine model name for LiteLLM
+      case "$AI_MODEL" in
+        "claude-sonnet") LITELLM_MODEL="claude-sonnet-4-5" ;;
+        "claude-haiku")  LITELLM_MODEL="claude-haiku-4-5" ;;
+        "claude-opus")   LITELLM_MODEL="claude-opus-4" ;;
+        *)               LITELLM_MODEL="claude-sonnet-4-5" ;;
+      esac
 
-# AWS Bedrock Configuration
-export AWS_REGION="$${AWS_REGION:-us-east-1}"
-export BEDROCK_MODEL="$BEDROCK_MODEL"
+      # Generate Roo Code auto-import config with the user's virtual key
+      mkdir -p /home/coder/.config/roo-code
+      cat > /home/coder/.config/roo-code/settings.json << ROOCONFIG
+{
+  "apiProvider": "openai-compatible",
+  "openAiCompatibleApiConfiguration": {
+    "baseUrl": "http://litellm:4000/v1",
+    "apiKey": "$LITELLM_KEY",
+    "modelId": "$LITELLM_MODEL"
+  }
+}
+ROOCONFIG
 
-# Anthropic Configuration
-export ANTHROPIC_MODEL="$ANTHROPIC_MODEL"
-export ANTHROPIC_BASE_URL="${data.coder_parameter.ai_gateway_url.value}/v1"
+      echo "Roo Code configured: model=$LITELLM_MODEL, gateway=litellm:4000"
 
-# Alias for quick AI access
-alias ai-models="echo 'Provider: ${data.coder_parameter.ai_provider.value}, Model: ${data.coder_parameter.ai_model.value}'"
+      # Set environment variables for CLI AI tools
+      cat >> ~/.bashrc << AICONFIG
+# AI Configuration (Roo Code + LiteLLM)
+export AI_GATEWAY_URL="http://litellm:4000"
+export OPENAI_API_BASE="http://litellm:4000/v1"
+export OPENAI_API_KEY="$LITELLM_KEY"
+export AI_MODEL="$LITELLM_MODEL"
+alias ai-models="echo 'Agent: Roo Code, Model: $LITELLM_MODEL, Gateway: litellm:4000'"
+alias ai-usage="curl -s http://litellm:4000/user/info -H 'Authorization: Bearer $LITELLM_KEY' | python3 -m json.tool"
 AICONFIG
 
-    # Configure Continue extension based on provider
-    AWS_REGION="${data.coder_parameter.aws_region.value}"
-    mkdir -p ~/.continue
-    if [ "$AI_PROVIDER" = "bedrock" ]; then
-      cat > ~/.continue/config.json << CONTINUECONFIG
-{
-  "models": [
-    {
-      "title": "Claude ($AI_MODEL via Bedrock)",
-      "provider": "bedrock",
-      "model": "$BEDROCK_MODEL",
-      "region": "$AWS_REGION"
-    }
-  ],
-  "tabAutocompleteModel": {
-    "title": "Claude Haiku (Autocomplete)",
-    "provider": "bedrock",
-    "model": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
-    "region": "$AWS_REGION"
-  },
-  "embeddingsProvider": { "provider": "transformers.js" },
-  "contextProviders": [
-    { "name": "code" }, { "name": "docs" }, { "name": "diff" },
-    { "name": "terminal" }, { "name": "problems" }, { "name": "codebase" }
-  ],
-  "allowAnonymousTelemetry": false
-}
-CONTINUECONFIG
+    elif [ "$AI_ASSISTANT" = "none" ]; then
+      echo "AI assistant disabled"
     else
-      cat > ~/.continue/config.json << CONTINUECONFIG
-{
-  "models": [
-    {
-      "title": "Claude ($AI_MODEL via API)",
-      "provider": "anthropic",
-      "model": "$ANTHROPIC_MODEL",
-      "apiBase": "${data.coder_parameter.ai_gateway_url.value}/v1"
-    }
-  ],
-  "tabAutocompleteModel": {
-    "title": "Claude Haiku (Autocomplete)",
-    "provider": "anthropic",
-    "model": "claude-haiku-4-5-20251001",
-    "apiBase": "${data.coder_parameter.ai_gateway_url.value}/v1"
-  },
-  "embeddingsProvider": { "provider": "transformers.js" },
-  "contextProviders": [
-    { "name": "code" }, { "name": "docs" }, { "name": "diff" },
-    { "name": "terminal" }, { "name": "problems" }, { "name": "codebase" }
-  ],
-  "allowAnonymousTelemetry": false
-}
-CONTINUECONFIG
+      echo "Note: AI assistant requires an API key. Ask your platform admin for one."
     fi
-
-    echo "AI configured: Provider=$AI_PROVIDER, Model=$AI_MODEL"
 
     # ==========================================================================
     # DATABASE PROVISIONING
@@ -732,6 +688,7 @@ resource "docker_container" "workspace" {
     "AI_PROVIDER=${data.coder_parameter.ai_provider.value}",
     "AI_MODEL=${data.coder_parameter.ai_model.value}",
     "AI_GATEWAY_URL=${data.coder_parameter.ai_gateway_url.value}",
+    "LITELLM_API_KEY=${data.coder_parameter.litellm_api_key.value}",
     # AWS Configuration for Bedrock
     "AWS_REGION=${data.coder_parameter.aws_region.value}",
     "AWS_DEFAULT_REGION=${data.coder_parameter.aws_region.value}",

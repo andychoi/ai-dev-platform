@@ -18,6 +18,11 @@ CREATE USER platform WITH PASSWORD 'platform';
 CREATE DATABASE platform OWNER platform;
 GRANT ALL PRIVILEGES ON DATABASE platform TO platform;
 
+-- Create LiteLLM database and user (virtual keys, usage tracking, budgets)
+CREATE USER litellm WITH PASSWORD 'litellm';
+CREATE DATABASE litellm OWNER litellm;
+GRANT ALL PRIVILEGES ON DATABASE litellm TO litellm;
+
 -- Log successful initialization
 DO $$
 BEGIN
@@ -26,5 +31,6 @@ BEGIN
     RAISE NOTICE '  - coder     (user: coder)';
     RAISE NOTICE '  - authentik (user: authentik)';
     RAISE NOTICE '  - platform  (user: platform)';
+    RAISE NOTICE '  - litellm   (user: litellm)';
     RAISE NOTICE '===========================================';
 END $$;

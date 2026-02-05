@@ -159,6 +159,7 @@ This verifies:
 | Gitea (Git Server) | http://localhost:3000 | gitea / admin123 |
 | Drone CI | http://localhost:8080 | Via Gitea OAuth |
 | AI Gateway | http://localhost:8090 | N/A |
+| LiteLLM (AI Proxy) | http://localhost:4000 | Master key (see .env) |
 | MinIO Console | http://localhost:9001 | minioadmin / minioadmin |
 | Mailpit (Email) | http://localhost:8025 | N/A |
 | DevDB (Internal) | devdb:5432 | Trust auth (no password) |

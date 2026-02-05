@@ -83,9 +83,8 @@
   "sqltools.autoOpenSessionFiles": false,
   "sqltools.results.limit": 1000,
 
-  // AI assistant settings
-  "continue.enableTabAutocomplete": true,
-  "continue.showInlineTip": false,
+  // AI agent - Roo Code (auto-imports config on startup)
+  "roo-cline.autoImportSettingsPath": "/home/coder/.config/roo-code/settings.json",
 
   // Go settings
   "go.toolsManagement.autoUpdate": true,
