@@ -74,14 +74,12 @@ services:
       CODER_VERBOSE: "false"
       CODER_LOG_HUMAN: "/dev/stderr"
 
-      # AI Bridge - AWS Bedrock Configuration
-      # Enables built-in AI chat using your Bedrock credentials
-      CODER_AIBRIDGE_BEDROCK_ACCESS_KEY: ${AWS_ACCESS_KEY_ID:-}
-      CODER_AIBRIDGE_BEDROCK_ACCESS_KEY_SECRET: ${AWS_SECRET_ACCESS_KEY:-}
-      CODER_AIBRIDGE_BEDROCK_REGION: ${AWS_REGION:-us-east-1}
-      # Models (defaults are Claude Sonnet/Haiku)
-      # CODER_AIBRIDGE_BEDROCK_MODEL: "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
-      # CODER_AIBRIDGE_BEDROCK_SMALL_FAST_MODEL: "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+      # AI Bridge - DISABLED
+      # Coder's built-in AI chat is disabled because we use LiteLLM + Roo Code
+      # inside workspaces instead. This prevents the "Sign in to GitHub" popup
+      # and removes the AI chat sidebar from the Coder dashboard.
+      CODER_AIBRIDGE_ENABLED: "false"
+      CODER_HIDE_AI_TASKS: "true"
 
       # OIDC Configuration (Authentik SSO)
       # IMPORTANT: Must use host.docker.internal (NOT authentik-server) because Coder

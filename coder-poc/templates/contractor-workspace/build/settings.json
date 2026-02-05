@@ -56,6 +56,13 @@
   "security.workspace.trust.enabled": true,
   "telemetry.telemetryLevel": "off",
 
+  // Disable built-in AI features (we use Roo Code + LiteLLM instead)
+  "chat.agent.enabled": false,
+  "chat.commandCenter.enabled": false,
+
+  // Disable Cody extension if still present from old images
+  "cody.enabled": false,
+
   // Java settings (IntelliJ alternatives)
   "java.configuration.runtimes": [
     {
