@@ -28,9 +28,10 @@ AUTHENTIK_URL="${AUTHENTIK_URL:-http://localhost:9000}"
 AUTHENTIK_TOKEN="${AUTHENTIK_TOKEN:-}"  # Set via environment or will be fetched
 
 # Test users to create (username:password pairs)
-TEST_USERNAMES="contractor1 contractor2 contractor3 readonly"
+TEST_USERNAMES="appmanager contractor1 contractor2 contractor3 readonly"
 TEST_PASSWORD="Password123!"  # Coder requires strong passwords
 GITEA_PASSWORD="password123"   # Gitea allows simpler passwords
+AUTHENTIK_PASSWORD="password123"  # Authentik test user password
 
 log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 log_success() { echo -e "${GREEN}[OK]${NC} $1"; }
@@ -197,59 +198,58 @@ setup_authentik_users() {
     fi
     log_success "Authentik is running"
 
-    # Get API token if not provided
-    if [ -z "$AUTHENTIK_TOKEN" ]; then
-        log_info "Fetching Authentik API token..."
-        # Try to get token from bootstrap or create one
-        # Note: In production, use AUTHENTIK_BOOTSTRAP_TOKEN in docker-compose
-
-        # For PoC, we'll create users via the Authentik API with basic auth
-        # or skip if no token is available
-        log_warn "No AUTHENTIK_TOKEN provided"
-        log_info "To create Authentik users:"
-        echo "  1. Login to Authentik at ${AUTHENTIK_URL}"
-        echo "  2. Go to Admin -> Directory -> Users"
-        echo "  3. Create users: contractor1, contractor2, contractor3, readonly"
-        echo "  4. Or set AUTHENTIK_TOKEN env var and re-run this script"
+    # Check if authentik-server container exists
+    if ! docker ps --format '{{.Names}}' | grep -q '^authentik-server$'; then
+        log_warn "authentik-server container not found"
+        log_warn "Skipping Authentik user setup"
         return 0
     fi
 
-    # Create users via Authentik API
+    # Create users via ak shell (more reliable than API, no token required)
+    log_info "Creating Authentik users via ak shell..."
+
+    # Build Python script for user creation
+    USERS_PYTHON=""
     for username in $TEST_USERNAMES; do
-        password="$TEST_PASSWORD"
         email="${username}@example.com"
+        # Format display name: contractor1 -> Contractor 1, appmanager -> App Manager
+        display_name=$(echo "$username" | sed 's/\([a-z]\)\([0-9]\)/\1 \2/g' | sed 's/\(.\)/\U\1/')
+        USERS_PYTHON="${USERS_PYTHON}    ('${username}', '${email}', '${AUTHENTIK_PASSWORD}', '${display_name}'),
+"
+    done
 
-        log_info "Creating Authentik user: ${username}"
+    # Execute via ak shell
+    docker exec authentik-server ak shell -c "
+from authentik.core.models import User
 
-        result=$(curl -s -X POST "${AUTHENTIK_URL}/api/v3/core/users/" \
-            -H "Authorization: Bearer ${AUTHENTIK_TOKEN}" \
-            -H "Content-Type: application/json" \
-            -d @- <<EOF
-{
-    "username": "${username}",
-    "name": "${username}",
-    "email": "${email}",
-    "is_active": true,
-    "path": "users"
-}
-EOF
+test_users = [
+${USERS_PYTHON}]
+
+for username, email, password, name in test_users:
+    try:
+        user, created = User.objects.get_or_create(
+            username=username,
+            defaults={
+                'email': email,
+                'name': name,
+                'is_active': True,
+            }
         )
-
-        if echo "$result" | jq -e '.pk' > /dev/null 2>&1; then
-            user_pk=$(echo "$result" | jq -r '.pk')
-
-            # Set password
-            curl -s -X POST "${AUTHENTIK_URL}/api/v3/core/users/${user_pk}/set_password/" \
-                -H "Authorization: Bearer ${AUTHENTIK_TOKEN}" \
-                -H "Content-Type: application/json" \
-                -d "{\"password\": \"${password}\"}" > /dev/null
-
-            log_success "Created Authentik user: ${username}"
-        elif echo "$result" | grep -q "already exists"; then
-            log_warn "User ${username} already exists in Authentik"
-        else
-            error=$(echo "$result" | jq -r '.detail // .username[0] // "Unknown error"' 2>/dev/null || echo "Unknown error")
-            log_error "Failed to create ${username}: ${error}"
+        if created:
+            user.set_password(password)
+            user.save()
+            print(f'Created: {username}')
+        else:
+            print(f'Exists: {username}')
+    except Exception as e:
+        print(f'Error {username}: {e}')
+" 2>&1 | while read -r line; do
+        if echo "$line" | grep -q "^Created:"; then
+            log_success "$(echo "$line" | sed 's/Created:/Created Authentik user:/')"
+        elif echo "$line" | grep -q "^Exists:"; then
+            log_warn "$(echo "$line" | sed 's/Exists:/User already exists in Authentik:/')"
+        elif echo "$line" | grep -q "^Error"; then
+            log_error "$line"
         fi
     done
 }
@@ -332,13 +332,13 @@ echo -e "${BLUE}  Setup Complete${NC}"
 echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
 echo ""
 echo "Test Users Created:"
-echo "┌─────────────┬─────────────────────────┬────────────────┬─────────────┐"
-echo "│ Username    │ Email                   │ Coder Pass     │ Gitea Pass  │"
-echo "├─────────────┼─────────────────────────┼────────────────┼─────────────┤"
+echo "┌─────────────┬─────────────────────────┬────────────────┬─────────────┬───────────────┐"
+echo "│ Username    │ Email                   │ Coder Pass     │ Gitea Pass  │ Authentik Pass│"
+echo "├─────────────┼─────────────────────────┼────────────────┼─────────────┼───────────────┤"
 for username in $TEST_USERNAMES; do
-    printf "│ %-11s │ %-23s │ %-14s │ %-11s │\n" "$username" "${username}@example.com" "$TEST_PASSWORD" "$GITEA_PASSWORD"
+    printf "│ %-11s │ %-23s │ %-14s │ %-11s │ %-13s │\n" "$username" "${username}@example.com" "$TEST_PASSWORD" "$GITEA_PASSWORD" "$AUTHENTIK_PASSWORD"
 done
-echo "└─────────────┴─────────────────────────┴────────────────┴─────────────┘"
+echo "└─────────────┴─────────────────────────┴────────────────┴─────────────┴───────────────┘"
 echo ""
 echo "Access URLs:"
 echo "  - Coder:     ${CODER_URL}"

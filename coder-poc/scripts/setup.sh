@@ -48,7 +48,7 @@ print_info() {
 # Check prerequisites
 check_prerequisites() {
     echo ""
-    echo -e "${BLUE}[1/8] Checking prerequisites...${NC}"
+    echo -e "${BLUE}[1/10] Checking prerequisites...${NC}"
 
     # Check Docker
     if ! command -v docker &> /dev/null; then
@@ -97,7 +97,7 @@ check_prerequisites() {
 # Check and add hosts entry
 setup_hosts() {
     echo ""
-    echo -e "${BLUE}[2/8] Checking hosts configuration...${NC}"
+    echo -e "${BLUE}[2/10] Checking hosts configuration...${NC}"
 
     # Check for host.docker.internal
     if grep -q "host.docker.internal" /etc/hosts 2>/dev/null; then
@@ -121,7 +121,7 @@ setup_hosts() {
 # Start infrastructure (without SSO first to let Authentik initialize)
 start_infrastructure() {
     echo ""
-    echo -e "${BLUE}[3/8] Starting infrastructure...${NC}"
+    echo -e "${BLUE}[3/10] Starting infrastructure...${NC}"
 
     cd "$POC_DIR"
 
@@ -155,7 +155,7 @@ start_infrastructure() {
 # Wait for Authentik to be ready
 wait_for_authentik() {
     echo ""
-    echo -e "${BLUE}[4/8] Waiting for Authentik...${NC}"
+    echo -e "${BLUE}[4/10] Waiting for Authentik...${NC}"
 
     print_info "Authentik takes 30-60 seconds to initialize..."
     for i in {1..90}; do
@@ -176,7 +176,7 @@ wait_for_authentik() {
 # Setup SSO (providers + applications)
 setup_sso() {
     echo ""
-    echo -e "${BLUE}[5/8] Setting up Authentik SSO...${NC}"
+    echo -e "${BLUE}[5/10] Setting up Authentik SSO...${NC}"
 
     cd "$POC_DIR"
 
@@ -230,7 +230,7 @@ for a in apps:
 # Restart Coder with SSO
 restart_with_sso() {
     echo ""
-    echo -e "${BLUE}[6/8] Restarting Coder with SSO...${NC}"
+    echo -e "${BLUE}[6/10] Restarting Coder with SSO...${NC}"
 
     cd "$POC_DIR"
 
@@ -267,7 +267,7 @@ restart_with_sso() {
 # Create first user
 create_admin_user() {
     echo ""
-    echo -e "${BLUE}[7/8] Creating admin user...${NC}"
+    echo -e "${BLUE}[7/10] Creating admin user...${NC}"
 
     # Check if first user already exists
     FIRST_USER_CHECK=$(curl -sf "http://localhost:${CODER_PORT}/api/v2/users/first" 2>/dev/null || echo "error")
@@ -293,10 +293,77 @@ create_admin_user() {
     fi
 }
 
+# Push workspace template
+push_template() {
+    echo ""
+    echo -e "${BLUE}[8/10] Pushing workspace template...${NC}"
+
+    cd "$POC_DIR"
+
+    TEMPLATE_DIR="${POC_DIR}/templates/contractor-workspace"
+    TEMPLATE_NAME="contractor-workspace"
+
+    if [ ! -d "$TEMPLATE_DIR" ]; then
+        print_warning "Template directory not found: ${TEMPLATE_DIR}"
+        print_info "Skipping template push"
+        return 0
+    fi
+
+    # Check if coder CLI is installed
+    if ! command -v coder &> /dev/null; then
+        print_info "Installing Coder CLI..."
+        curl -fsSL https://coder.com/install.sh | sh 2>&1 | tail -1 || true
+    fi
+
+    # Login to Coder CLI
+    print_info "Configuring Coder CLI..."
+
+    # Get session token from admin login
+    LOGIN_RESPONSE=$(curl -sf -X POST "http://localhost:${CODER_PORT}/api/v2/users/login" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"email\": \"${ADMIN_EMAIL}\",
+            \"password\": \"${ADMIN_PASSWORD}\"
+        }" 2>/dev/null || echo "")
+
+    SESSION_TOKEN=""
+    if [ -n "$LOGIN_RESPONSE" ]; then
+        SESSION_TOKEN=$(echo "$LOGIN_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('session_token',''))" 2>/dev/null || echo "")
+    fi
+
+    if [ -z "$SESSION_TOKEN" ]; then
+        print_warning "Could not login to Coder CLI - template push skipped"
+        print_info "Manually push template: coder templates push contractor-workspace --directory templates/contractor-workspace"
+        return 0
+    fi
+
+    # Configure CLI
+    mkdir -p ~/.config/coderv2
+    echo "$SESSION_TOKEN" > ~/.config/coderv2/session
+    echo "http://localhost:${CODER_PORT}" > ~/.config/coderv2/url
+
+    # Build workspace image first
+    print_info "Building workspace Docker image..."
+    if [ -f "$TEMPLATE_DIR/build/Dockerfile" ]; then
+        docker build -t contractor-workspace:latest "$TEMPLATE_DIR/build" 2>&1 | tail -5 || true
+        print_status "Workspace image built"
+    fi
+
+    # Push template
+    print_info "Pushing template to Coder..."
+    if coder templates push "$TEMPLATE_NAME" --directory "$TEMPLATE_DIR" --yes 2>&1 | grep -E "(success|created|Updated)" > /dev/null; then
+        print_status "Template '${TEMPLATE_NAME}' pushed successfully"
+    else
+        # Try with more verbose output to see what happened
+        coder templates push "$TEMPLATE_NAME" --directory "$TEMPLATE_DIR" --yes 2>&1 | tail -3 || true
+        print_warning "Template push may have issues - check output above"
+    fi
+}
+
 # Setup additional services
 setup_additional_services() {
     echo ""
-    echo -e "${BLUE}[8/8] Setting up additional services...${NC}"
+    echo -e "${BLUE}[9/10] Setting up additional services...${NC}"
 
     cd "$POC_DIR"
 
@@ -306,12 +373,22 @@ setup_additional_services() {
         "$SCRIPT_DIR/setup-gitea.sh" 2>&1 | grep -E "(✓|Created|already exists)" || true
         print_status "Gitea configured"
     fi
+}
+
+# Setup test users (Coder, Gitea, Authentik)
+setup_test_users() {
+    echo ""
+    echo -e "${BLUE}[10/10] Creating test users...${NC}"
+
+    cd "$POC_DIR"
 
     # Setup test users if script exists
     if [ -f "$SCRIPT_DIR/setup-test-users.sh" ]; then
-        print_info "Creating test users..."
-        "$SCRIPT_DIR/setup-test-users.sh" 2>&1 | grep -E "(✓|Created|already exists)" || true
+        print_info "Creating test users in Coder, Gitea, and Authentik..."
+        "$SCRIPT_DIR/setup-test-users.sh" 2>&1 | grep -E "(✓|Created|already exists|OK|SUCCESS)" || true
         print_status "Test users created"
+    else
+        print_warning "setup-test-users.sh not found"
     fi
 }
 
@@ -348,10 +425,22 @@ print_summary() {
     echo "  └─────────────────┴─────────────────────┴─────────────────────┘"
 
     echo ""
+    echo -e "${BLUE}Test Users (for SSO login):${NC}"
+    echo "  ┌─────────────┬─────────────────────────┬─────────────────────┐"
+    echo "  │ Username    │ Email                   │ Password            │"
+    echo "  ├─────────────┼─────────────────────────┼─────────────────────┤"
+    echo "  │ appmanager  │ appmanager@example.com  │ password123         │"
+    echo "  │ contractor1 │ contractor1@example.com │ password123         │"
+    echo "  │ contractor2 │ contractor2@example.com │ password123         │"
+    echo "  │ contractor3 │ contractor3@example.com │ password123         │"
+    echo "  │ readonly    │ readonly@example.com    │ password123         │"
+    echo "  └─────────────┴─────────────────────────┴─────────────────────┘"
+
+    echo ""
     echo -e "${BLUE}SSO Login:${NC}"
     echo "  1. Go to http://host.docker.internal:${CODER_PORT}"
     echo "  2. Click 'Login with OIDC'"
-    echo "  3. Use Authentik credentials (akadmin / admin)"
+    echo "  3. Use any test user above OR Authentik admin (akadmin / admin)"
     echo ""
     echo -e "${YELLOW}IMPORTANT:${NC} Use host.docker.internal (not localhost) for Coder!"
 
@@ -381,7 +470,9 @@ main() {
     setup_sso
     restart_with_sso
     create_admin_user
+    push_template
     setup_additional_services
+    setup_test_users
     print_summary
 }
 
