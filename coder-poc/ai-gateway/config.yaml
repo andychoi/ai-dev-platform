@@ -1,0 +1,120 @@
+# AI Gateway Configuration
+# Multi-provider AI API proxy for secure development environments
+
+server:
+  port: 8090
+  host: "0.0.0.0"
+  read_timeout: 120s
+  write_timeout: 120s
+
+# Provider configurations
+providers:
+  # Anthropic Claude API
+  anthropic:
+    enabled: true
+    base_url: "https://api.anthropic.com"
+    api_version: "2023-06-01"
+    models:
+      # Claude 4.5 models (latest)
+      - claude-sonnet-4-5-20250929
+      - claude-haiku-4-5-20251001
+      - claude-opus-4-20250514
+      # Claude 3.x models (legacy)
+      - claude-3-opus-20240229
+      - claude-3-sonnet-20240229
+      - claude-3-haiku-20240307
+      - claude-3-5-sonnet-20241022
+    default_model: claude-sonnet-4-5-20250929
+
+  # AWS Bedrock
+  bedrock:
+    enabled: true
+    region: "${AWS_REGION:-us-east-1}"
+    models:
+      # Claude 4.5 models (latest)
+      - us.anthropic.claude-sonnet-4-5-20250929-v1:0
+      - us.anthropic.claude-haiku-4-5-20251001-v1:0
+      - us.anthropic.claude-opus-4-20250514-v1:0
+      # Claude 3.x models (legacy)
+      - anthropic.claude-3-opus-20240229-v1:0
+      - anthropic.claude-3-sonnet-20240229-v1:0
+      - anthropic.claude-3-haiku-20240307-v1:0
+      - amazon.titan-text-express-v1
+      - amazon.titan-text-lite-v1
+    default_model: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+
+  # Google Gemini (planned)
+  gemini:
+    enabled: false  # Enable when ready
+    base_url: "https://generativelanguage.googleapis.com"
+    api_version: "v1"
+    models:
+      - gemini-pro
+      - gemini-pro-vision
+    default_model: gemini-pro
+
+# Rate limiting configuration
+rate_limits:
+  # Global limits
+  global:
+    requests_per_minute: 1000
+    tokens_per_minute: 1000000
+
+  # Default per-user limits
+  default:
+    requests_per_minute: 60
+    tokens_per_minute: 100000
+
+  # User-specific overrides
+  users:
+    admin:
+      requests_per_minute: 200
+      tokens_per_minute: 500000
+    contractor1:
+      requests_per_minute: 100
+      tokens_per_minute: 200000
+
+# Audit logging
+audit:
+  enabled: true
+  log_level: info
+  log_format: json
+  include_prompt: false  # Don't log full prompts (privacy)
+  include_response: false  # Don't log full responses
+  log_file: /var/log/ai-gateway/audit.log
+
+# Security settings
+security:
+  # Allowed origins for CORS
+  allowed_origins:
+    - "http://localhost:*"
+    - "http://coder-server:*"
+    - "http://*.coder.internal"
+
+  # Required headers
+  require_workspace_id: true
+
+  # IP allowlist (empty = allow all internal)
+  ip_allowlist: []
+
+  # Request validation
+  max_tokens_per_request: 4096
+  max_prompt_length: 100000
+
+# Caching (optional)
+cache:
+  enabled: false
+  ttl: 3600  # 1 hour
+  max_size_mb: 100
+
+# Health check endpoints
+health:
+  enabled: true
+  path: /health
+  include_providers: true
+
+# Metrics (Prometheus format)
+metrics:
+  enabled: true
+  path: /metrics
+  include_latency_histograms: true

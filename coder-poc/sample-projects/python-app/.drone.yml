@@ -1,0 +1,90 @@
+---
+# Drone CI Pipeline for Python Application
+# This pipeline runs on every push to the repository
+
+kind: pipeline
+type: docker
+name: python-ci
+
+# Pipeline steps
+steps:
+  # Step 1: Install dependencies
+  - name: install
+    image: python:3.11-slim
+    commands:
+      - pip install --upgrade pip
+      - pip install -r requirements.txt
+
+  # Step 2: Code formatting check (Black)
+  - name: format-check
+    image: python:3.11-slim
+    commands:
+      - pip install black
+      - black --check --diff .
+    depends_on:
+      - install
+
+  # Step 3: Linting (Flake8)
+  - name: lint
+    image: python:3.11-slim
+    commands:
+      - pip install flake8
+      - flake8 . --max-line-length=100 --exclude=.git,__pycache__
+    depends_on:
+      - install
+
+  # Step 4: Type checking (MyPy)
+  - name: type-check
+    image: python:3.11-slim
+    commands:
+      - pip install mypy
+      - mypy app.py --ignore-missing-imports
+    depends_on:
+      - install
+
+  # Step 5: Run tests with coverage
+  - name: test
+    image: python:3.11-slim
+    commands:
+      - pip install pytest pytest-cov
+      - pytest test_app.py -v --cov=app --cov-report=term-missing --cov-fail-under=80
+    depends_on:
+      - install
+
+  # Step 6: Build verification (run main)
+  - name: build
+    image: python:3.11-slim
+    commands:
+      - python app.py
+    depends_on:
+      - test
+
+# Trigger configuration
+trigger:
+  branch:
+    - main
+    - develop
+    - feature/*
+  event:
+    - push
+    - pull_request
+
+---
+# Separate pipeline for main branch only
+kind: pipeline
+type: docker
+name: release-check
+
+steps:
+  - name: version-check
+    image: python:3.11-slim
+    commands:
+      - echo "Release pipeline triggered for main branch"
+      - python --version
+      - echo "All checks passed - ready for release"
+
+trigger:
+  branch:
+    - main
+  event:
+    - push

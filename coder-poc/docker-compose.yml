@@ -1,0 +1,501 @@
+version: "3.9"
+
+# Coder WebIDE PoC - Docker Compose Configuration
+# This setup provides a complete local Coder environment for testing
+
+services:
+  # PostgreSQL database (shared by Coder, Authentik, Platform)
+  postgres:
+    image: postgres:17-alpine
+    container_name: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - coder-network
+
+  # Coder control plane
+  coder:
+    image: ghcr.io/coder/coder:latest
+    container_name: coder-server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Database connection
+      CODER_PG_CONNECTION_URL: "postgresql://coder:coder@postgres:5432/coder?sslmode=disable"
+
+      # Access URLs
+      # Use host.docker.internal so workspace containers can reach Coder server
+      CODER_ACCESS_URL: "${CODER_ACCESS_URL:-http://host.docker.internal:7080}"
+      CODER_HTTP_ADDRESS: "0.0.0.0:7080"
+
+      # Security settings
+      # SECURITY: Enable secure cookies in production (requires HTTPS)
+      CODER_SECURE_AUTH_COOKIE: "${CODER_SECURE_AUTH_COOKIE:-false}"
+      CODER_TELEMETRY: "false"
+
+      # Provisioner settings
+      CODER_PROVISIONER_DAEMONS: "3"
+
+      # Session settings - reduced for security
+      CODER_MAX_SESSION_EXPIRY: "${CODER_MAX_SESSION_EXPIRY:-8h}"
+
+      # Rate limiting - enabled by default, can disable for local testing only
+      # SECURITY: Do NOT set CODER_RATE_LIMIT_DISABLE_ALL in production
+      CODER_RATE_LIMIT_API: "${CODER_RATE_LIMIT_API:-512}"
+      CODER_RATE_LIMIT_DISABLE_ALL: "${CODER_RATE_LIMIT_DISABLE_ALL:-false}"
+
+      # Security: Workspace access controls
+      # Prevent admins from accessing other users' workspaces (optional - uncomment for strict)
+      # CODER_DISABLE_OWNER_WORKSPACE_ACCESS: "true"
+
+      # Disable workspace sharing between users
+      CODER_DISABLE_WORKSPACE_SHARING: "true"
+
+      # Path-based apps (required when not using wildcard DNS for subdomain routing)
+      # Set to "true" in production with proper subdomain setup
+      CODER_DISABLE_PATH_APPS: "false"
+
+      # Logging
+      CODER_VERBOSE: "false"
+      CODER_LOG_HUMAN: "/dev/stderr"
+
+      # AI Bridge - AWS Bedrock Configuration
+      # Enables built-in AI chat using your Bedrock credentials
+      CODER_AIBRIDGE_BEDROCK_ACCESS_KEY: ${AWS_ACCESS_KEY_ID:-}
+      CODER_AIBRIDGE_BEDROCK_ACCESS_KEY_SECRET: ${AWS_SECRET_ACCESS_KEY:-}
+      CODER_AIBRIDGE_BEDROCK_REGION: ${AWS_REGION:-us-east-1}
+      # Models (defaults are Claude Sonnet/Haiku)
+      # CODER_AIBRIDGE_BEDROCK_MODEL: "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+      # CODER_AIBRIDGE_BEDROCK_SMALL_FAST_MODEL: "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+    ports:
+      - "7080:7080"
+    volumes:
+      # Mount Docker socket for Docker-based templates
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Persistent Coder data
+      - coder_data:/home/coder/.config/coderv2
+    networks:
+      - coder-network
+    # Docker socket access via group membership
+    # Create coder user (UID 1000) and add to docker group
+    # On host: sudo usermod -aG docker $USER (or set DOCKER_GID to docker group ID)
+    group_add:
+      - ${DOCKER_GID:-1}
+    # SECURITY: Run as non-root user (UID 1000)
+    # If Docker socket access fails, check DOCKER_GID matches host's docker group
+    user: "1000:1000"
+
+  # ==========================================================================
+  # TEST DATABASE - PostgreSQL for connectivity testing
+  # Internal network only - NOT exposed to host
+  # Simulates internal company database that workspaces can access
+  # ==========================================================================
+  testdb:
+    image: postgres:17-alpine
+    container_name: testdb
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: appuser
+      POSTGRES_PASSWORD: ${TESTDB_PASSWORD:-testpassword}
+      POSTGRES_DB: testapp
+    volumes:
+      - testdb_data:/var/lib/postgresql/data
+      - ./testdb/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appuser -d testapp"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - coder-network
+    # NO ports mapping - internal network only
+
+  # ==========================================================================
+  # DEVDB - Developer Database Server
+  # Provides individual and team databases for workspace development
+  # Individual: dev_{username}  |  Team: team_{template_name}
+  # ==========================================================================
+  devdb:
+    image: postgres:17-alpine
+    container_name: devdb
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: devdb_admin
+      POSTGRES_PASSWORD: ${DEVDB_ADMIN_PASSWORD:-devdbadmin123}
+      POSTGRES_DB: devdb
+    volumes:
+      - devdb_data:/var/lib/postgresql/data
+      - ./devdb/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./devdb/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+    command: >
+      postgres
+      -c hba_file=/etc/postgresql/pg_hba.conf
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U devdb_admin -d devdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - coder-network
+    # NO ports mapping - internal network only (accessible from workspaces)
+
+  # ==========================================================================
+  # PLATFORM ADMIN - Unified Administration Dashboard
+  # Web UI for managing databases, services, and platform monitoring
+  # ==========================================================================
+  platform-admin:
+    build:
+      context: ./platform-admin
+      dockerfile: Dockerfile
+    container_name: platform-admin
+    restart: unless-stopped
+    depends_on:
+      devdb:
+        condition: service_healthy
+    environment:
+      # Database connection
+      DEVDB_HOST: devdb
+      DEVDB_PORT: "5432"
+      DEVDB_USER: devdb_admin
+      DEVDB_PASSWORD: ${DEVDB_ADMIN_PASSWORD:-devdbadmin123}
+      DEVDB_NAME: devdb
+      # Coder API
+      CODER_URL: http://coder-server:7080
+      CODER_ADMIN_EMAIL: admin@example.com
+      CODER_ADMIN_PASSWORD: ${CODER_ADMIN_PASSWORD:-CoderAdmin123!}
+      # Service URLs for monitoring
+      GITEA_URL: http://gitea:3000
+      DRONE_URL: http://drone-server:80
+      MINIO_URL: http://minio:9002
+      AI_GATEWAY_URL: http://ai-gateway:8090
+      AUTHENTIK_URL: http://authentik-server:9000
+      # Admin credentials
+      ADMIN_USERNAME: ${PLATFORM_ADMIN_USER:-admin}
+      ADMIN_PASSWORD: ${PLATFORM_ADMIN_PASSWORD:-admin123}
+    ports:
+      - "5050:5000"
+    networks:
+      - coder-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ==========================================================================
+  # GITEA - Self-hosted Git Server with native OIDC support
+  # Provides Git repositories with access control for testing
+  # ==========================================================================
+  gitea:
+    image: gitea/gitea:1.25.4
+    container_name: gitea
+    restart: unless-stopped
+    environment:
+      - USER_UID=1000
+      - USER_GID=1000
+      - GITEA__database__DB_TYPE=sqlite3
+      - GITEA__database__PATH=/data/gitea/gitea.db
+    ports:
+      - "3000:3000"   # Web UI
+      - "10022:22"    # SSH
+    volumes:
+      - gitea_data:/data
+      - ./gitea/app.ini:/data/gitea/conf/app.ini
+    networks:
+      - coder-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ==========================================================================
+  # DRONE CI - Continuous Integration Server
+  # Provides CI pipelines for Python apps
+  # ==========================================================================
+  drone-server:
+    image: drone/drone:2
+    container_name: drone-server
+    restart: unless-stopped
+    depends_on:
+      gitea:
+        condition: service_healthy
+    environment:
+      - DRONE_GITEA_SERVER=http://gitea:3000
+      - DRONE_RPC_SECRET=${DRONE_RPC_SECRET:-super-secret-rpc-key}
+      - DRONE_SERVER_HOST=${DRONE_SERVER_HOST:-localhost:8080}
+      - DRONE_SERVER_PROTO=http
+      - DRONE_DATABASE_DRIVER=sqlite3
+      - DRONE_DATABASE_DATASOURCE=/data/database.sqlite
+      - DRONE_GIT_ALWAYS_AUTH=false
+      - DRONE_USER_CREATE=username:admin,admin:true
+    ports:
+      - "8080:80"
+    volumes:
+      - drone_data:/data
+    networks:
+      - coder-network
+
+  drone-runner:
+    image: drone/drone-runner-docker:1
+    container_name: drone-runner
+    restart: unless-stopped
+    depends_on:
+      - drone-server
+    environment:
+      - DRONE_RPC_PROTO=http
+      - DRONE_RPC_HOST=drone-server
+      - DRONE_RPC_SECRET=${DRONE_RPC_SECRET:-super-secret-rpc-key}
+      - DRONE_RUNNER_CAPACITY=2
+      - DRONE_RUNNER_NAME=docker-runner
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - coder-network
+
+  # ==========================================================================
+  # AI GATEWAY - Multi-Provider AI API Proxy
+  # Supports: Anthropic Claude, AWS Bedrock, Google Gemini (planned)
+  # ==========================================================================
+  ai-gateway:
+    build:
+      context: ./ai-gateway
+      dockerfile: Dockerfile
+    container_name: ai-gateway
+    restart: unless-stopped
+    depends_on:
+      devdb:
+        condition: service_healthy
+    environment:
+      # Anthropic Claude API
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+
+      # AWS Bedrock
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+
+      # Google Gemini (planned)
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+
+      # Gateway settings
+      - AI_GATEWAY_PORT=8090
+      - RATE_LIMIT_RPM=${AI_RATE_LIMIT_RPM:-60}
+      - CONFIG_PATH=/app/config.yaml
+
+      # SECURITY: Authentication settings
+      # Set AI_GATEWAY_AUTH_ENABLED=false only for local development
+      - AI_GATEWAY_AUTH_ENABLED=${AI_GATEWAY_AUTH_ENABLED:-true}
+      - AI_GATEWAY_AUTH_SECRET=${AI_GATEWAY_AUTH_SECRET:-}
+      - AI_GATEWAY_ALLOWED_ORIGINS=${AI_GATEWAY_ALLOWED_ORIGINS:-http://localhost:7080,http://host.docker.internal:7080}
+      - CODER_URL=http://coder-server:7080
+
+      # DevDB connection for usage tracking
+      - DEVDB_HOST=devdb
+      - DEVDB_PORT=5432
+      - DEVDB_USER=ai_gateway
+      - DEVDB_PASSWORD=${DEVDB_AI_GATEWAY_PASSWORD:-aigateway123}
+      - DEVDB_NAME=devdb
+    ports:
+      - "8090:8090"
+    volumes:
+      - ./ai-gateway/config.yaml:/app/config.yaml:ro
+      - ai_gateway_logs:/var/log/ai-gateway
+    networks:
+      - coder-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ==========================================================================
+  # AUTHENTIK - Identity Provider & RBAC
+  # Provides SSO, RBAC, approval workflows for contractor access
+  # Optional Azure AD federation supported
+  # Uses shared PostgreSQL with separate 'authentik' database
+  # ==========================================================================
+  authentik-redis:
+    image: redis:7-alpine
+    container_name: authentik-redis
+    restart: unless-stopped
+    command: --save 60 1 --loglevel warning
+    volumes:
+      - authentik_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - coder-network
+
+  authentik-server:
+    image: ghcr.io/goauthentik/server:2024.2
+    container_name: authentik-server
+    restart: unless-stopped
+    command: server
+    depends_on:
+      postgres:
+        condition: service_healthy
+      authentik-redis:
+        condition: service_healthy
+    environment:
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:-change-me-to-a-long-random-string}
+      AUTHENTIK_REDIS__HOST: authentik-redis
+      AUTHENTIK_POSTGRESQL__HOST: postgres
+      AUTHENTIK_POSTGRESQL__USER: authentik
+      AUTHENTIK_POSTGRESQL__PASSWORD: authentik
+      AUTHENTIK_POSTGRESQL__NAME: authentik
+      # Bootstrap admin user
+      AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_ADMIN_PASSWORD:-admin}
+      AUTHENTIK_BOOTSTRAP_EMAIL: admin@localhost
+      # Optional Azure AD Federation (uncomment to enable)
+      # AUTHENTIK_SOURCES__AZURE__CLIENT_ID: ${AZURE_CLIENT_ID:-}
+      # AUTHENTIK_SOURCES__AZURE__CLIENT_SECRET: ${AZURE_CLIENT_SECRET:-}
+    ports:
+      - "9000:9000"      # HTTP
+      - "9443:9443"      # HTTPS
+    volumes:
+      - authentik_media:/media
+      - authentik_templates:/templates
+    networks:
+      - coder-network
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:9000/-/health/ready/')\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  authentik-worker:
+    image: ghcr.io/goauthentik/server:2024.2
+    container_name: authentik-worker
+    restart: unless-stopped
+    command: worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      authentik-redis:
+        condition: service_healthy
+    environment:
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:-change-me-to-a-long-random-string}
+      AUTHENTIK_REDIS__HOST: authentik-redis
+      AUTHENTIK_POSTGRESQL__HOST: postgres
+      AUTHENTIK_POSTGRESQL__USER: authentik
+      AUTHENTIK_POSTGRESQL__PASSWORD: authentik
+      AUTHENTIK_POSTGRESQL__NAME: authentik
+    volumes:
+      - authentik_media:/media
+      - authentik_templates:/templates
+    networks:
+      - coder-network
+
+  # ==========================================================================
+  # MINIO - S3-Compatible Object Storage
+  # Provides artifact storage, build outputs, file sharing between workspaces
+  # Console: http://localhost:9001  API: http://localhost:9002
+  # ==========================================================================
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001" --address ":9002"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "9001:9001"   # Console UI
+      - "9002:9002"   # S3 API
+    volumes:
+      - minio_data:/data
+    networks:
+      - coder-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9002/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==========================================================================
+  # MAILPIT - Email Testing Server
+  # Captures all outgoing emails for testing/development
+  # Web UI: http://localhost:8025  SMTP: mailpit:1025
+  # ==========================================================================
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: mailpit
+    restart: unless-stopped
+    ports:
+      - "8025:8025"   # Web UI
+      - "1025:1025"   # SMTP
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+    networks:
+      - coder-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8025/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Optional: Grafana for monitoring (uncomment to enable)
+  # grafana:
+  #   image: grafana/grafana:latest
+  #   container_name: coder-grafana
+  #   restart: unless-stopped
+  #   environment:
+  #     GF_AUTH_ANONYMOUS_ENABLED: "true"
+  #     GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
+  #   ports:
+  #     - "3000:3000"
+  #   volumes:
+  #     - grafana_data:/var/lib/grafana
+  #   networks:
+  #     - coder-network
+
+volumes:
+  minio_data:
+    name: coder-poc-minio
+  postgres_data:
+    name: coder-poc-postgres
+  testdb_data:
+    name: coder-poc-testdb
+  devdb_data:
+    name: coder-poc-devdb
+  coder_data:
+    name: coder-poc-data
+  gitea_data:
+    name: coder-poc-gitea
+  drone_data:
+    name: coder-poc-drone
+  ai_gateway_logs:
+    name: coder-poc-ai-gateway-logs
+  authentik_redis:
+    name: coder-poc-authentik-redis
+  authentik_media:
+    name: coder-poc-authentik-media
+  authentik_templates:
+    name: coder-poc-authentik-templates
+  # grafana_data:
+  #   name: coder-poc-grafana
+
+networks:
+  coder-network:
+    name: coder-network
+    driver: bridge

@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Usage - Platform Admin</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #f5f7fa;
+            color: #333;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        /* Header */
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px 0;
+            margin-bottom: 30px;
+        }
+
+        header .container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        header h1 {
+            font-size: 1.8em;
+            font-weight: 600;
+        }
+
+        header nav a {
+            color: white;
+            text-decoration: none;
+            padding: 5px 10px;
+            border-radius: 4px;
+        }
+
+        header nav a:hover, header nav a.active {
+            background: rgba(255,255,255,0.2);
+        }
+
+        .refresh-btn {
+            background: none;
+            border: none;
+            color: white;
+            cursor: pointer;
+            padding: 8px;
+            border-radius: 50%;
+            transition: background 0.2s;
+        }
+
+        .refresh-btn:hover {
+            background: rgba(255,255,255,0.2);
+        }
+
+        /* Summary Cards */
+        .summary-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        .card-value {
+            font-size: 2em;
+            font-weight: 700;
+            color: #667eea;
+        }
+
+        .card-label {
+            color: #666;
+            font-size: 0.85em;
+            margin-top: 5px;
+        }
+
+        .card.tokens .card-value {
+            color: #27ae60;
+        }
+
+        .card.users .card-value {
+            color: #e67e22;
+        }
+
+        /* Section Headers */
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .section-header h2 {
+            font-size: 1.2em;
+            font-weight: 600;
+            color: #333;
+        }
+
+        /* Charts Container */
+        .charts-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .chart-card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        .chart-card h3 {
+            font-size: 1em;
+            font-weight: 600;
+            margin-bottom: 15px;
+            color: #666;
+        }
+
+        /* Simple Bar Chart */
+        .bar-chart {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .bar-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .bar-label {
+            width: 100px;
+            font-size: 0.85em;
+            color: #666;
+            text-overflow: ellipsis;
+            overflow: hidden;
+            white-space: nowrap;
+        }
+
+        .bar-container {
+            flex: 1;
+            height: 24px;
+            background: #f0f0f0;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .bar {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            padding-left: 8px;
+            color: white;
+            font-size: 0.75em;
+            min-width: 40px;
+        }
+
+        .bar.provider-anthropic { background: #d4a574; }
+        .bar.provider-bedrock { background: #ff9900; }
+        .bar.provider-gemini { background: #4285f4; }
+
+        .bar-value {
+            width: 80px;
+            text-align: right;
+            font-size: 0.85em;
+            color: #666;
+        }
+
+        /* Tables */
+        .table-container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+
+        .table-header {
+            padding: 15px 20px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .table-header h3 {
+            font-size: 1.1em;
+            font-weight: 600;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 12px 20px;
+            text-align: left;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        th {
+            background: #f8f9fa;
+            font-weight: 600;
+            font-size: 0.8em;
+            text-transform: uppercase;
+            color: #666;
+        }
+
+        tr:hover {
+            background: #f8f9fa;
+        }
+
+        /* Badges */
+        .badge {
+            padding: 3px 8px;
+            border-radius: 10px;
+            font-size: 0.75em;
+            font-weight: 500;
+        }
+
+        .badge-anthropic {
+            background: #fdf2e9;
+            color: #b8860b;
+        }
+
+        .badge-bedrock {
+            background: #fff4e6;
+            color: #ff9900;
+        }
+
+        .badge-gemini {
+            background: #e8f4fd;
+            color: #4285f4;
+        }
+
+        /* Token formatting */
+        .tokens {
+            font-family: monospace;
+            color: #27ae60;
+        }
+
+        .tokens-out {
+            color: #e67e22;
+        }
+
+        /* Empty state */
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .empty-state svg {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 15px;
+            opacity: 0.3;
+        }
+
+        /* Footer */
+        .footer {
+            margin-top: 30px;
+            text-align: center;
+            color: #666;
+            font-size: 0.9em;
+        }
+
+        .footer a {
+            color: #667eea;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .charts-row {
+                grid-template-columns: 1fr;
+            }
+
+            .summary-cards {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            table {
+                font-size: 0.9em;
+            }
+
+            th, td {
+                padding: 8px 12px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div style="display: flex; align-items: center; gap: 20px;">
+                <h1>Platform Admin</h1>
+                <nav style="display: flex; gap: 15px;">
+                    <a href="{{ url_for('dashboard') }}">Databases</a>
+                    <a href="{{ url_for('services') }}">Services</a>
+                    <a href="{{ url_for('ai_usage') }}" class="active" style="background: rgba(255,255,255,0.2);">AI Usage</a>
+                    <a href="{{ url_for('users') }}">Users</a>
+                    <a href="{{ url_for('workspaces') }}">Workspaces</a>
+                </nav>
+            </div>
+            <div class="status">
+                <span style="font-size: 0.9em; opacity: 0.8;">This Week</span>
+                {% if current_user %}
+                <span style="color: rgba(255,255,255,0.9); font-size: 0.9em;">
+                    {{ current_user.username }}
+                    {% if current_user.auth_type == 'oidc' %}
+                    <small style="opacity: 0.7;">(SSO)</small>
+                    {% endif %}
+                </span>
+                <a href="{{ url_for('logout') }}" style="color: white; text-decoration: none; padding: 5px 12px; background: rgba(255,255,255,0.2); border-radius: 4px; font-size: 0.85em;">Logout</a>
+                {% endif %}
+                <button class="refresh-btn" onclick="location.reload()" title="Refresh">
+                    <svg width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
+                        <path d="M11.534 7h3.932a.25.25 0 0 1 .192.41l-1.966 2.36a.25.25 0 0 1-.384 0l-1.966-2.36a.25.25 0 0 1 .192-.41zm-11 2h3.932a.25.25 0 0 0 .192-.41L2.692 6.23a.25.25 0 0 0-.384 0L.342 8.59A.25.25 0 0 0 .534 9z"/>
+                        <path fill-rule="evenodd" d="M8 3c-1.552 0-2.94.707-3.857 1.818a.5.5 0 1 1-.771-.636A6.002 6.002 0 0 1 13.917 7H12.9A5.002 5.002 0 0 0 8 3zM3.1 9a5.002 5.002 0 0 0 8.757 2.182.5.5 0 1 1 .771.636A6.002 6.002 0 0 1 2.083 9H3.1z"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- Summary Cards -->
+        <div class="summary-cards">
+            <div class="card">
+                <div class="card-value">{{ "{:,}".format(week_totals.total_requests) }}</div>
+                <div class="card-label">Total Requests</div>
+            </div>
+            <div class="card tokens">
+                <div class="card-value">{{ "{:,}".format(week_totals.total_tokens_in) }}</div>
+                <div class="card-label">Tokens In</div>
+            </div>
+            <div class="card tokens">
+                <div class="card-value">{{ "{:,}".format(week_totals.total_tokens_out) }}</div>
+                <div class="card-label">Tokens Out</div>
+            </div>
+            <div class="card users">
+                <div class="card-value">{{ week_totals.unique_users }}</div>
+                <div class="card-label">Unique Users</div>
+            </div>
+            <div class="card">
+                <div class="card-value">{{ week_totals.unique_workspaces }}</div>
+                <div class="card-label">Active Workspaces</div>
+            </div>
+        </div>
+
+        {% if week_totals.total_requests > 0 %}
+        <!-- Charts Row -->
+        <div class="charts-row">
+            <!-- By Provider -->
+            <div class="chart-card">
+                <h3>Usage by Provider</h3>
+                <div class="bar-chart">
+                    {% for row in by_provider %}
+                    {% set max_tokens = by_provider[0].tokens_out if by_provider else 1 %}
+                    {% set pct = (row.tokens_out / max_tokens * 100) if max_tokens > 0 else 0 %}
+                    <div class="bar-item">
+                        <div class="bar-label">{{ row.provider }}</div>
+                        <div class="bar-container">
+                            <div class="bar provider-{{ row.provider }}" style="width: {{ pct }}%">
+                                {{ row.requests }} req
+                            </div>
+                        </div>
+                        <div class="bar-value">{{ "{:,}".format(row.tokens_out) }}</div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- By Template -->
+            <div class="chart-card">
+                <h3>Usage by Template</h3>
+                <div class="bar-chart">
+                    {% for row in by_template %}
+                    {% set max_tokens = by_template[0].tokens_out if by_template else 1 %}
+                    {% set pct = (row.tokens_out / max_tokens * 100) if max_tokens > 0 else 0 %}
+                    <div class="bar-item">
+                        <div class="bar-label" title="{{ row.template_name }}">{{ row.template_name }}</div>
+                        <div class="bar-container">
+                            <div class="bar" style="width: {{ pct }}%">
+                                {{ row.unique_users }} users
+                            </div>
+                        </div>
+                        <div class="bar-value">{{ "{:,}".format(row.tokens_out) }}</div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Top Users Table -->
+        <div class="table-container">
+            <div class="table-header">
+                <h3>Top Users This Week</h3>
+                <span style="color: #666; font-size: 0.9em;">{{ by_user|length }} users</span>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>User</th>
+                        <th>Requests</th>
+                        <th>Tokens In</th>
+                        <th>Tokens Out</th>
+                        <th>Total Tokens</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in by_user %}
+                    <tr>
+                        <td><strong>{{ row.user_id }}</strong></td>
+                        <td>{{ "{:,}".format(row.requests) }}</td>
+                        <td class="tokens">{{ "{:,}".format(row.tokens_in) }}</td>
+                        <td class="tokens tokens-out">{{ "{:,}".format(row.tokens_out) }}</td>
+                        <td><strong>{{ "{:,}".format(row.tokens_in + row.tokens_out) }}</strong></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Active Workspaces Table -->
+        <div class="table-container">
+            <div class="table-header">
+                <h3>Active Workspaces</h3>
+                <span style="color: #666; font-size: 0.9em;">{{ by_workspace|length }} workspaces</span>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Workspace</th>
+                        <th>User</th>
+                        <th>Requests</th>
+                        <th>Tokens In</th>
+                        <th>Tokens Out</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in by_workspace %}
+                    <tr>
+                        <td><code style="font-size: 0.85em;">{{ row.workspace_id[:16] }}{% if row.workspace_id|length > 16 %}...{% endif %}</code></td>
+                        <td>{{ row.user_id }}</td>
+                        <td>{{ "{:,}".format(row.requests) }}</td>
+                        <td class="tokens">{{ "{:,}".format(row.tokens_in) }}</td>
+                        <td class="tokens tokens-out">{{ "{:,}".format(row.tokens_out) }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Recent Requests -->
+        <div class="table-container">
+            <div class="table-header">
+                <h3>Recent Requests</h3>
+                <span style="color: #666; font-size: 0.9em;">Last 50 requests</span>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>User</th>
+                        <th>Provider</th>
+                        <th>Model</th>
+                        <th>Tokens</th>
+                        <th>Latency</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in recent_requests %}
+                    <tr>
+                        <td style="font-size: 0.85em; color: #666;">{{ row.timestamp.strftime('%m-%d %H:%M:%S') }}</td>
+                        <td>{{ row.user_id }}</td>
+                        <td>
+                            <span class="badge badge-{{ row.provider }}">{{ row.provider }}</span>
+                        </td>
+                        <td style="font-size: 0.85em;">{{ row.model[:30] }}{% if row.model|length > 30 %}...{% endif %}</td>
+                        <td>
+                            <span class="tokens">{{ row.tokens_in }}</span> /
+                            <span class="tokens tokens-out">{{ row.tokens_out }}</span>
+                        </td>
+                        <td>{{ row.latency_ms }}ms</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% else %}
+        <!-- Empty State -->
+        <div class="table-container">
+            <div class="empty-state">
+                <svg viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M5 0a.5.5 0 0 1 .5.5V2h1V.5a.5.5 0 0 1 1 0V2h1V.5a.5.5 0 0 1 1 0V2h1V.5a.5.5 0 0 1 1 0V2A2.5 2.5 0 0 1 14 4.5h1.5a.5.5 0 0 1 0 1H14v1h1.5a.5.5 0 0 1 0 1H14v1h1.5a.5.5 0 0 1 0 1H14v1h1.5a.5.5 0 0 1 0 1H14a2.5 2.5 0 0 1-2.5 2.5v1.5a.5.5 0 0 1-1 0V14h-1v1.5a.5.5 0 0 1-1 0V14h-1v1.5a.5.5 0 0 1-1 0V14h-1v1.5a.5.5 0 0 1-1 0V14A2.5 2.5 0 0 1 2 11.5H.5a.5.5 0 0 1 0-1H2v-1H.5a.5.5 0 0 1 0-1H2v-1H.5a.5.5 0 0 1 0-1H2v-1H.5a.5.5 0 0 1 0-1H2A2.5 2.5 0 0 1 4.5 2V.5A.5.5 0 0 1 5 0z"/>
+                </svg>
+                <h3>No AI Usage Data Yet</h3>
+                <p>AI usage will appear here when workspaces start making API calls through the AI Gateway.</p>
+                <p style="margin-top: 10px; font-size: 0.9em;">
+                    Workspaces should send requests to <code>http://ai-gateway:8090</code> with headers:<br>
+                    <code>X-Workspace-ID</code>, <code>X-User-ID</code>, <code>X-Template-Name</code>
+                </p>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Footer -->
+        <div class="footer">
+            <p>Platform Admin - Coder WebIDE Platform</p>
+            <p><a href="/api/ai-usage">Usage API</a> · <a href="/api/ai-usage?period=month">Monthly Data</a></p>
+        </div>
+    </div>
+</body>
+</html>
