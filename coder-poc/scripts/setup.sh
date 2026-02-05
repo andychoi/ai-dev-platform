@@ -85,13 +85,14 @@ check_prerequisites() {
         exit 1
     fi
 
-    # Get Docker group ID for Linux
+    # Get Docker group ID for socket access
     if [[ "$(uname)" == "Linux" ]]; then
         export DOCKER_GID=$(getent group docker | cut -d: -f3 2>/dev/null || echo "999")
-        print_status "Docker group ID: $DOCKER_GID"
     else
-        export DOCKER_GID=999
+        # Docker Desktop (Mac/Windows): socket is owned by root:root (GID 0)
+        export DOCKER_GID=0
     fi
+    print_status "Docker group ID: $DOCKER_GID"
 }
 
 # Check and add hosts entry
@@ -108,14 +109,8 @@ setup_hosts() {
         print_status "Added host.docker.internal to /etc/hosts"
     fi
 
-    # Check for authentik-server
-    if grep -q "authentik-server" /etc/hosts 2>/dev/null; then
-        print_status "authentik-server already in /etc/hosts"
-    else
-        print_warning "Adding authentik-server to /etc/hosts (requires sudo)"
-        echo "127.0.0.1 authentik-server" | sudo tee -a /etc/hosts > /dev/null
-        print_status "Added authentik-server to /etc/hosts"
-    fi
+    # Note: authentik-server hosts entry is not needed
+    # OIDC uses host.docker.internal for both container and browser access
 }
 
 # Start infrastructure (without SSO first to let Authentik initialize)
@@ -234,9 +229,10 @@ restart_with_sso() {
 
     cd "$POC_DIR"
 
-    # Restart Coder with SSO overlay
+    # Recreate containers to pick up new OIDC secrets from .env
+    # No overlay needed — docker-compose.yml reads secrets via ${VAR} from .env
     print_info "Applying SSO configuration..."
-    docker compose -f docker-compose.yml -f docker-compose.sso.yml up -d coder minio platform-admin 2>&1 | grep -v "^time=" || true
+    docker compose up -d coder minio platform-admin 2>&1 | grep -v "^time=" || true
 
     # Wait for Coder to be ready
     print_info "Waiting for Coder to restart..."
@@ -300,63 +296,21 @@ push_template() {
 
     cd "$POC_DIR"
 
-    TEMPLATE_DIR="${POC_DIR}/templates/contractor-workspace"
-    TEMPLATE_NAME="contractor-workspace"
-
-    if [ ! -d "$TEMPLATE_DIR" ]; then
-        print_warning "Template directory not found: ${TEMPLATE_DIR}"
-        print_info "Skipping template push"
-        return 0
-    fi
-
-    # Check if coder CLI is installed
-    if ! command -v coder &> /dev/null; then
-        print_info "Installing Coder CLI..."
-        curl -fsSL https://coder.com/install.sh | sh 2>&1 | tail -1 || true
-    fi
-
-    # Login to Coder CLI
-    print_info "Configuring Coder CLI..."
-
-    # Get session token from admin login
-    LOGIN_RESPONSE=$(curl -sf -X POST "http://localhost:${CODER_PORT}/api/v2/users/login" \
-        -H "Content-Type: application/json" \
-        -d "{
-            \"email\": \"${ADMIN_EMAIL}\",
-            \"password\": \"${ADMIN_PASSWORD}\"
-        }" 2>/dev/null || echo "")
-
-    SESSION_TOKEN=""
-    if [ -n "$LOGIN_RESPONSE" ]; then
-        SESSION_TOKEN=$(echo "$LOGIN_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('session_token',''))" 2>/dev/null || echo "")
-    fi
-
-    if [ -z "$SESSION_TOKEN" ]; then
-        print_warning "Could not login to Coder CLI - template push skipped"
-        print_info "Manually push template: coder templates push contractor-workspace --directory templates/contractor-workspace"
-        return 0
-    fi
-
-    # Configure CLI
-    mkdir -p ~/.config/coderv2
-    echo "$SESSION_TOKEN" > ~/.config/coderv2/session
-    echo "http://localhost:${CODER_PORT}" > ~/.config/coderv2/url
-
-    # Build workspace image first
-    print_info "Building workspace Docker image..."
-    if [ -f "$TEMPLATE_DIR/build/Dockerfile" ]; then
-        docker build -t contractor-workspace:latest "$TEMPLATE_DIR/build" 2>&1 | tail -5 || true
-        print_status "Workspace image built"
-    fi
-
-    # Push template
-    print_info "Pushing template to Coder..."
-    if coder templates push "$TEMPLATE_NAME" --directory "$TEMPLATE_DIR" --yes 2>&1 | grep -E "(success|created|Updated)" > /dev/null; then
-        print_status "Template '${TEMPLATE_NAME}' pushed successfully"
+    # Call setup-workspace.sh which handles:
+    # - Building Docker image
+    # - Authenticating with Coder
+    # - Pushing template via Docker (no host CLI required)
+    if [ -f "$SCRIPT_DIR/setup-workspace.sh" ]; then
+        print_info "Running workspace setup script..."
+        CODER_URL="http://localhost:${CODER_PORT}" \
+        CODER_ADMIN_EMAIL="${ADMIN_EMAIL}" \
+        CODER_ADMIN_USERNAME="${ADMIN_USER}" \
+        CODER_ADMIN_PASSWORD="${ADMIN_PASSWORD}" \
+        "$SCRIPT_DIR/setup-workspace.sh" 2>&1 | grep -E "(SUCCESS|✓|success|pushed|Created|template|built)" || true
+        print_status "Template setup complete"
     else
-        # Try with more verbose output to see what happened
-        coder templates push "$TEMPLATE_NAME" --directory "$TEMPLATE_DIR" --yes 2>&1 | tail -3 || true
-        print_warning "Template push may have issues - check output above"
+        print_warning "setup-workspace.sh not found - template not pushed"
+        print_info "Manually run: ./scripts/setup-workspace.sh"
     fi
 }
 
@@ -448,7 +402,7 @@ print_summary() {
     echo -e "${BLUE}Quick Commands:${NC}"
     echo "  View logs:        docker compose logs -f"
     echo "  Stop all:         docker compose down"
-    echo "  Restart with SSO: docker compose -f docker-compose.yml -f docker-compose.sso.yml up -d"
+    echo "  Restart with SSO: docker compose up -d"
     echo "  Run validation:   ./scripts/validate.sh"
 
     echo ""

@@ -1,7 +1,8 @@
 #!/bin/bash
 # =============================================================================
 # Coder Workspace Setup Script
-# Automates: User creation, CLI login, template push, sample workspace creation
+# Automates: User creation, template push (via container), sample workspace
+# NO HOST CLI REQUIRED - uses Docker to push templates
 # =============================================================================
 
 set -e
@@ -14,32 +15,24 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+POC_DIR="$(dirname "$SCRIPT_DIR")"
 CODER_URL="${CODER_URL:-http://localhost:7080}"
-ADMIN_EMAIL="${CODER_ADMIN_EMAIL:-admin@localhost}"
+CODER_INTERNAL_URL="http://host.docker.internal:7080"  # URL from inside container
+ADMIN_EMAIL="${CODER_ADMIN_EMAIL:-admin@example.com}"
 ADMIN_USERNAME="${CODER_ADMIN_USERNAME:-admin}"
-ADMIN_PASSWORD="${CODER_ADMIN_PASSWORD:-Password123!}"
-TEMPLATE_DIR="$(dirname "$0")/../templates/contractor-workspace"
+ADMIN_PASSWORD="${CODER_ADMIN_PASSWORD:-CoderAdmin123!}"
+TEMPLATE_DIR="${POC_DIR}/templates/contractor-workspace"
 TEMPLATE_NAME="contractor-workspace"
 
 # =============================================================================
 # Helper Functions
 # =============================================================================
 
-log_info() {
-    echo -e "${BLUE}[INFO]${NC} $1"
-}
-
-log_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
-}
-
-log_warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
-}
-
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
+log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
+log_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
+log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
 print_header() {
     echo ""
@@ -47,13 +40,6 @@ print_header() {
     echo -e "${BLUE}  $1${NC}"
     echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
     echo ""
-}
-
-check_command() {
-    if ! command -v "$1" &> /dev/null; then
-        log_error "$1 is required but not installed."
-        return 1
-    fi
 }
 
 wait_for_coder() {
@@ -76,45 +62,29 @@ wait_for_coder() {
 }
 
 # =============================================================================
-# Check Prerequisites
+# Main Script
 # =============================================================================
 
-print_header "Checking Prerequisites"
+print_header "Coder Workspace Setup (No Host CLI Required)"
 
-check_command curl
-check_command docker
-check_command jq
+# Check prerequisites
+log_info "Checking prerequisites..."
+command -v curl &> /dev/null || { log_error "curl is required"; exit 1; }
+command -v docker &> /dev/null || { log_error "docker is required"; exit 1; }
+log_success "Prerequisites met"
 
-# Check if coder CLI is installed
-if ! command -v coder &> /dev/null; then
-    log_warn "Coder CLI not found. Installing..."
-    curl -fsSL https://coder.com/install.sh | sh
-fi
-
-log_success "All prerequisites met"
-
-# =============================================================================
-# Wait for Services
-# =============================================================================
-
-print_header "Waiting for Services"
-
+# Wait for Coder
 wait_for_coder
 
-# Check if first user needs to be created
-FIRST_USER_NEEDED=$(curl -sf "${CODER_URL}/api/v2/users/first" 2>/dev/null || echo "error")
-
 # =============================================================================
-# Create First User (if needed)
+# Get Session Token
 # =============================================================================
 
-print_header "User Setup"
+print_header "Authentication"
 
-if echo "$FIRST_USER_NEEDED" | grep -q "error"; then
-    log_info "Checking if first user setup is required..."
-fi
+# Try to create first user or login
+log_info "Authenticating with Coder..."
 
-# Try to create first user
 FIRST_USER_RESPONSE=$(curl -sf -X POST "${CODER_URL}/api/v2/users/first" \
     -H "Content-Type: application/json" \
     -d "{
@@ -123,12 +93,10 @@ FIRST_USER_RESPONSE=$(curl -sf -X POST "${CODER_URL}/api/v2/users/first" \
         \"password\": \"${ADMIN_PASSWORD}\"
     }" 2>/dev/null || echo "")
 
-if [ -n "$FIRST_USER_RESPONSE" ] && echo "$FIRST_USER_RESPONSE" | jq -e '.session_token' > /dev/null 2>&1; then
-    SESSION_TOKEN=$(echo "$FIRST_USER_RESPONSE" | jq -r '.session_token')
+if [ -n "$FIRST_USER_RESPONSE" ] && echo "$FIRST_USER_RESPONSE" | grep -q "session_token"; then
+    SESSION_TOKEN=$(echo "$FIRST_USER_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('session_token',''))" 2>/dev/null)
     log_success "First user created: ${ADMIN_USERNAME}"
 else
-    log_info "First user already exists, attempting login..."
-
     # Login to get session token
     LOGIN_RESPONSE=$(curl -sf -X POST "${CODER_URL}/api/v2/users/login" \
         -H "Content-Type: application/json" \
@@ -137,56 +105,39 @@ else
             \"password\": \"${ADMIN_PASSWORD}\"
         }" 2>/dev/null || echo "")
 
-    if [ -n "$LOGIN_RESPONSE" ] && echo "$LOGIN_RESPONSE" | jq -e '.session_token' > /dev/null 2>&1; then
-        SESSION_TOKEN=$(echo "$LOGIN_RESPONSE" | jq -r '.session_token')
+    if [ -n "$LOGIN_RESPONSE" ] && echo "$LOGIN_RESPONSE" | grep -q "session_token"; then
+        SESSION_TOKEN=$(echo "$LOGIN_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('session_token',''))" 2>/dev/null)
         log_success "Logged in as: ${ADMIN_USERNAME}"
     else
-        log_error "Failed to login. Please check credentials or create user manually at ${CODER_URL}"
-        echo ""
-        echo "Manual setup:"
-        echo "  1. Open ${CODER_URL} in browser"
-        echo "  2. Create admin account"
-        echo "  3. Run: coder login ${CODER_URL}"
-        echo "  4. Run: coder templates push ${TEMPLATE_NAME} --directory ${TEMPLATE_DIR}"
+        log_error "Failed to authenticate with Coder"
         exit 1
     fi
 fi
 
-# =============================================================================
-# Configure Coder CLI
-# =============================================================================
-
-print_header "Configuring Coder CLI"
-
-# Create coder config directory
-mkdir -p ~/.config/coderv2
-
-# Write session file
-cat > ~/.config/coderv2/session << EOF
-${SESSION_TOKEN}
-EOF
-
-# Write URL file
-cat > ~/.config/coderv2/url << EOF
-${CODER_URL}
-EOF
-
-log_success "Coder CLI configured"
-
-# Verify CLI connection
-if coder whoami > /dev/null 2>&1; then
-    CURRENT_USER=$(coder whoami --output json | jq -r '.username')
-    log_success "CLI authenticated as: ${CURRENT_USER}"
-else
-    log_warn "CLI authentication verification failed, attempting direct login..."
-    echo "${ADMIN_PASSWORD}" | coder login "${CODER_URL}" --username "${ADMIN_USERNAME}" --password-stdin
+if [ -z "$SESSION_TOKEN" ]; then
+    log_error "Failed to get session token"
+    exit 1
 fi
 
 # =============================================================================
-# Push Template
+# Build Workspace Image
 # =============================================================================
 
-print_header "Pushing Workspace Template"
+print_header "Building Workspace Image"
+
+if [ -f "$TEMPLATE_DIR/build/Dockerfile" ]; then
+    log_info "Building contractor-workspace:latest..."
+    docker build -t contractor-workspace:latest "$TEMPLATE_DIR/build" 2>&1 | tail -5
+    log_success "Workspace image built"
+else
+    log_warn "Dockerfile not found at $TEMPLATE_DIR/build/Dockerfile"
+fi
+
+# =============================================================================
+# Push Template via Docker
+# =============================================================================
+
+print_header "Pushing Template to Coder"
 
 if [ ! -d "$TEMPLATE_DIR" ]; then
     log_error "Template directory not found: ${TEMPLATE_DIR}"
@@ -196,65 +147,59 @@ fi
 log_info "Template directory: ${TEMPLATE_DIR}"
 log_info "Template name: ${TEMPLATE_NAME}"
 
-# Check if template exists
-EXISTING_TEMPLATE=$(coder templates list --output json 2>/dev/null | jq -r ".[] | select(.name==\"${TEMPLATE_NAME}\") | .name" || echo "")
+# Copy template into the coder-server container and push from there
+log_info "Copying template to coder-server container..."
 
-if [ "$EXISTING_TEMPLATE" = "$TEMPLATE_NAME" ]; then
-    log_info "Template exists, updating..."
-    coder templates push "$TEMPLATE_NAME" \
-        --directory "$TEMPLATE_DIR" \
-        --yes \
-        --variable "cpu_cores=2" \
-        --variable "memory_gb=4" 2>&1 || {
-            log_warn "Template push with variables failed, trying without..."
-            coder templates push "$TEMPLATE_NAME" --directory "$TEMPLATE_DIR" --yes
-        }
+# Copy template directory to container
+docker cp "$TEMPLATE_DIR" coder-server:/tmp/template-to-push
+
+# Configure CLI and push template from inside the container
+log_info "Pushing template from inside coder-server..."
+
+# Use environment variables for CLI authentication (no file writes needed)
+docker exec \
+    -e CODER_URL="${CODER_INTERNAL_URL}" \
+    -e CODER_SESSION_TOKEN="${SESSION_TOKEN}" \
+    coder-server sh -c "
+    # Verify authentication
+    echo 'Verifying authentication...'
+    coder whoami 2>&1 || { echo 'Auth failed'; exit 1; }
+
+    # Push template
+    echo 'Pushing template...'
+    cd /tmp/template-to-push
+    coder templates push ${TEMPLATE_NAME} --directory . --yes 2>&1 || \
+    coder templates create ${TEMPLATE_NAME} --directory . --yes 2>&1
+
+    # Cleanup
+    rm -rf /tmp/template-to-push
+" 2>&1 | while read -r line; do
+    echo "  $line"
+done
+
+PUSH_RESULT=${PIPESTATUS[0]}
+
+if [ $PUSH_RESULT -eq 0 ]; then
+    log_success "Template '${TEMPLATE_NAME}' pushed successfully"
 else
-    log_info "Creating new template..."
-    coder templates push "$TEMPLATE_NAME" \
-        --directory "$TEMPLATE_DIR" \
-        --yes 2>&1 || {
-            log_error "Failed to push template"
-            exit 1
-        }
+    log_warn "Template push may have had issues - check output above"
 fi
 
-log_success "Template '${TEMPLATE_NAME}' pushed successfully"
-
 # =============================================================================
-# Create Sample Workspaces
+# Verify Template
 # =============================================================================
 
-print_header "Creating Sample Workspaces"
+print_header "Verifying Template"
 
-create_workspace() {
-    local ws_name=$1
-    local git_repo=$2
+# Check if template exists via API
+TEMPLATES=$(curl -sf "${CODER_URL}/api/v2/templates" \
+    -H "Coder-Session-Token: ${SESSION_TOKEN}" 2>/dev/null || echo "[]")
 
-    log_info "Creating workspace: ${ws_name}"
-
-    # Check if workspace exists
-    if coder list --output json 2>/dev/null | jq -e ".[] | select(.name==\"${ws_name}\")" > /dev/null 2>&1; then
-        log_warn "Workspace '${ws_name}' already exists, skipping..."
-        return 0
-    fi
-
-    # Create workspace
-    coder create "$ws_name" \
-        --template "$TEMPLATE_NAME" \
-        --parameter "git_repo=${git_repo}" \
-        --parameter "git_server_url=http://gitea:3000" \
-        --parameter "ai_gateway_url=http://ai-gateway:8090" \
-        --yes 2>&1 || {
-            log_warn "Failed to create workspace with parameters, trying basic creation..."
-            coder create "$ws_name" --template "$TEMPLATE_NAME" --yes 2>&1 || return 1
-        }
-
-    log_success "Workspace '${ws_name}' created"
-}
-
-# Create a demo workspace
-create_workspace "demo-workspace" ""
+if echo "$TEMPLATES" | grep -q "$TEMPLATE_NAME"; then
+    log_success "Template '${TEMPLATE_NAME}' is available in Coder"
+else
+    log_warn "Template may not be visible yet - try refreshing Coder UI"
+fi
 
 # =============================================================================
 # Summary
@@ -262,25 +207,13 @@ create_workspace "demo-workspace" ""
 
 print_header "Setup Complete"
 
-echo -e "${GREEN}Coder WebIDE Platform is ready!${NC}"
+echo -e "${GREEN}Workspace template is ready!${NC}"
 echo ""
-echo "Access Points:"
-echo "  - Coder Dashboard:  ${CODER_URL}"
-echo "  - Git Server:       http://localhost:3000"
-echo "  - AI Gateway:       http://localhost:8090"
-echo "  - MinIO Console:    http://localhost:9001"
-echo "  - Mailpit:          http://localhost:8025"
-echo "  - Authentik:        http://localhost:9000"
-echo ""
-echo "Credentials:"
-echo "  - Coder Admin:      ${ADMIN_USERNAME} / ${ADMIN_PASSWORD}"
-echo "  - MinIO:            minioadmin / minioadmin"
-echo "  - Authentik:        admin / admin"
-echo ""
-echo "CLI Commands:"
-echo "  - List workspaces:  coder list"
-echo "  - Create workspace: coder create <name> --template ${TEMPLATE_NAME}"
-echo "  - Open workspace:   coder open <name>"
-echo "  - SSH to workspace: coder ssh <name>"
+echo "Next steps:"
+echo "  1. Go to ${CODER_URL} (use host.docker.internal:7080 for OIDC)"
+echo "  2. Login via OIDC or local account"
+echo "  3. Click 'Create Workspace'"
+echo "  4. Select '${TEMPLATE_NAME}' template"
+echo "  5. Configure workspace options and create"
 echo ""
 log_success "Setup completed successfully!"

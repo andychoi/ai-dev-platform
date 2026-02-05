@@ -32,6 +32,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      authentik-server:
+        condition: service_healthy
     environment:
       # Database connection
       CODER_PG_CONNECTION_URL: "postgresql://coder:coder@postgres:5432/coder?sslmode=disable"
@@ -80,6 +82,18 @@ services:
       # Models (defaults are Claude Sonnet/Haiku)
       # CODER_AIBRIDGE_BEDROCK_MODEL: "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
       # CODER_AIBRIDGE_BEDROCK_SMALL_FAST_MODEL: "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+
+      # OIDC Configuration (Authentik SSO)
+      # IMPORTANT: Must use host.docker.internal (NOT authentik-server) because Coder
+      # redirects the browser to the authorization_endpoint from the discovery document.
+      # Authentik echoes back the hostname it was accessed from, so if Coder fetches
+      # discovery via "authentik-server", the browser gets redirected to an unresolvable hostname.
+      CODER_OIDC_ISSUER_URL: "http://host.docker.internal:9000/application/o/coder/"
+      CODER_OIDC_CLIENT_ID: "${CODER_OIDC_CLIENT_ID:-coder}"
+      CODER_OIDC_CLIENT_SECRET: "${CODER_OIDC_CLIENT_SECRET:-}"
+      CODER_OIDC_ALLOW_SIGNUPS: "true"
+      # Disable default GitHub OAuth2 (shows by default in Coder 2.x)
+      CODER_OAUTH2_GITHUB_DEFAULT_PROVIDER_ENABLE: "false"
     ports:
       - "7080:7080"
     volumes:
@@ -93,9 +107,10 @@ services:
     # Create coder user (UID 1000) and add to docker group
     # On host: sudo usermod -aG docker $USER (or set DOCKER_GID to docker group ID)
     group_add:
-      - ${DOCKER_GID:-1}
+      - ${DOCKER_GID:-0}  # Default to root group (0) for Docker Desktop Mac compatibility
     # SECURITY: Run as non-root user (UID 1000)
-    # If Docker socket access fails, check DOCKER_GID matches host's docker group
+    # Docker Desktop Mac: socket is owned by root:root, use DOCKER_GID=0
+    # Linux: set DOCKER_GID to your docker group ID (usually 999 or 998)
     user: "1000:1000"
 
   # ==========================================================================

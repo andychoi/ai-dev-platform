@@ -108,7 +108,8 @@ EOF
             continue
         fi
 
-        # Create user
+        # Create user with OIDC login type so they can login via Authentik SSO
+        # OIDC users authenticate through the identity provider, not via Coder password
         result=$(curl -s -X POST "${CODER_URL}/api/v2/users" \
             -H "Content-Type: application/json" \
             -H "Coder-Session-Token: ${CODER_TOKEN}" \
@@ -116,8 +117,8 @@ EOF
 {
     "email": "${email}",
     "username": "${username}",
-    "password": "${password}",
-    "login_type": "password",
+    "password": "",
+    "login_type": "oidc",
     "organization_ids": ["${ORG_ID}"]
 }
 EOF

@@ -202,7 +202,7 @@ for p in data.get('results', []):
 }
 
 # Create providers for each service
-create_oauth_provider "Coder OIDC" "coder" "http://localhost:7080/api/v2/users/oidc/callback"
+create_oauth_provider "Coder OIDC" "coder" "http://localhost:7080/api/v2/users/oidc/callback\nhttp://host.docker.internal:7080/api/v2/users/oidc/callback"
 create_oauth_provider "Gitea OIDC" "gitea" "http://localhost:3000/user/oauth2/Authentik/callback"
 create_oauth_provider "MinIO OIDC" "minio" "http://localhost:9001/oauth_callback"
 create_oauth_provider "Platform Admin OIDC" "platform-admin" "http://localhost:5050/auth/callback"
@@ -257,55 +257,61 @@ EOF
 echo -e "${GREEN}✓ Configuration saved to ${SSO_ENV_FILE}${NC}"
 
 # -----------------------------------------------------------------------------
-# Step 6: Update docker-compose.yml
+# Step 5b: Update .env with generated secrets
+# Docker Compose auto-loads .env (not .env.sso), so secrets must be here
 # -----------------------------------------------------------------------------
-echo -e "${BLUE}[6/6] Updating docker-compose.yml...${NC}"
+ENV_FILE="${PROJECT_DIR}/.env"
 
-# Check if SSO config already exists
-if grep -q "CODER_OIDC_ISSUER_URL" "${PROJECT_DIR}/docker-compose.yml" 2>/dev/null; then
-    echo -e "${YELLOW}  SSO configuration already exists in docker-compose.yml${NC}"
-    echo "  To update, manually add these to the coder service environment:"
+if [ -f "$ENV_FILE" ]; then
+    echo "  Updating .env with generated secrets..."
+
+    # Helper: update or append a key=value in .env
+    update_env_var() {
+        local key=$1
+        local value=$2
+        if grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
+            # Use | as sed delimiter since values may contain /
+            sed -i.bak "s|^${key}=.*|${key}=${value}|" "$ENV_FILE"
+        else
+            echo "${key}=${value}" >> "$ENV_FILE"
+        fi
+    }
+
+    update_env_var "CODER_OIDC_CLIENT_SECRET" "$CODER_CLIENT_SECRET"
+    update_env_var "CODER_OIDC_CLIENT_ID" "$CODER_CLIENT_ID"
+    update_env_var "GITEA_OIDC_CLIENT_ID" "$GITEA_CLIENT_ID"
+    update_env_var "GITEA_OIDC_CLIENT_SECRET" "$GITEA_CLIENT_SECRET"
+    update_env_var "MINIO_IDENTITY_OPENID_CLIENT_ID" "$MINIO_CLIENT_ID"
+    update_env_var "MINIO_IDENTITY_OPENID_CLIENT_SECRET" "$MINIO_CLIENT_SECRET"
+    update_env_var "PLATFORM_ADMIN_OIDC_CLIENT_ID" "$PLATFORM_ADMIN_CLIENT_ID"
+    update_env_var "PLATFORM_ADMIN_OIDC_CLIENT_SECRET" "$PLATFORM_ADMIN_CLIENT_SECRET"
+
+    # Clean up sed backup file
+    rm -f "${ENV_FILE}.bak"
+
+    echo -e "${GREEN}✓ .env updated with OIDC secrets${NC}"
 else
-    # Create a patch file for docker-compose
-    PATCH_FILE="${PROJECT_DIR}/docker-compose.sso.yml"
-    cat > "$PATCH_FILE" << EOF
-# SSO Configuration Override
-# Use with: docker compose -f docker-compose.yml -f docker-compose.sso.yml up -d
+    echo -e "${YELLOW}  Warning: ${ENV_FILE} not found. Create it from .env.example first.${NC}"
+fi
 
-services:
-  coder:
-    environment:
-      # Authentik OIDC
-      CODER_OIDC_ISSUER_URL: "${AUTHENTIK_INTERNAL_URL}/application/o/coder/"
-      CODER_OIDC_CLIENT_ID: "${CODER_CLIENT_ID}"
-      CODER_OIDC_CLIENT_SECRET: "${CODER_CLIENT_SECRET}"
-      CODER_OIDC_ALLOW_SIGNUPS: "true"
-      CODER_OIDC_EMAIL_DOMAIN: ""
-      # Disable default GitHub OAuth (device flow)
-      CODER_OAUTH2_GITHUB_DEFAULT_PROVIDER_ENABLE: "false"
-      # Keep local login as fallback
-      CODER_DISABLE_PASSWORD_AUTH: "false"
+# -----------------------------------------------------------------------------
+# Step 6: Verify configuration
+# docker-compose.yml reads OIDC secrets from .env via ${VAR} references
+# No overlay file needed — .env is the single source of truth
+# -----------------------------------------------------------------------------
+echo -e "${BLUE}[6/6] Verifying configuration...${NC}"
 
-  minio:
-    environment:
-      # Authentik OIDC
-      MINIO_IDENTITY_OPENID_CONFIG_URL: "${AUTHENTIK_INTERNAL_URL}/application/o/minio/.well-known/openid-configuration"
-      MINIO_IDENTITY_OPENID_CLIENT_ID: "${MINIO_CLIENT_ID}"
-      MINIO_IDENTITY_OPENID_CLIENT_SECRET: "${MINIO_CLIENT_SECRET}"
-      MINIO_IDENTITY_OPENID_CLAIM_NAME: "policy"
-      MINIO_IDENTITY_OPENID_SCOPES: "openid,profile,email"
-      MINIO_IDENTITY_OPENID_REDIRECT_URI: "http://localhost:9001/oauth_callback"
+# Remove stale overlay if it exists (secrets were hardcoded and go stale)
+if [ -f "${PROJECT_DIR}/docker-compose.sso.yml" ]; then
+    rm -f "${PROJECT_DIR}/docker-compose.sso.yml"
+    echo "  Removed stale docker-compose.sso.yml (secrets now managed via .env)"
+fi
 
-  platform-admin:
-    environment:
-      # Authentik OIDC
-      OIDC_ENABLED: "true"
-      OIDC_ISSUER_URL: "${AUTHENTIK_INTERNAL_URL}/application/o/platform-admin/"
-      OIDC_CLIENT_ID: "${PLATFORM_ADMIN_CLIENT_ID}"
-      OIDC_CLIENT_SECRET: "${PLATFORM_ADMIN_CLIENT_SECRET}"
-      LOCAL_AUTH_ENABLED: "true"
-EOF
-    echo -e "${GREEN}✓ Created docker-compose.sso.yml${NC}"
+if grep -q "CODER_OIDC_ISSUER_URL" "${PROJECT_DIR}/docker-compose.yml" 2>/dev/null; then
+    echo -e "${GREEN}✓ OIDC config found in docker-compose.yml${NC}"
+else
+    echo -e "${YELLOW}  Warning: OIDC config not found in docker-compose.yml${NC}"
+    echo "  Add CODER_OIDC_* environment variables to the coder service"
 fi
 
 # -----------------------------------------------------------------------------
@@ -321,9 +327,9 @@ echo "Gitea:          ID=${GITEA_CLIENT_ID}"
 echo "MinIO:          ID=${MINIO_CLIENT_ID}"
 echo "Platform Admin: ID=${PLATFORM_ADMIN_CLIENT_ID}"
 echo ""
-echo "Files created:"
-echo "  - ${SSO_ENV_FILE} (environment variables)"
-echo "  - ${PROJECT_DIR}/docker-compose.sso.yml (compose override)"
+echo "Files updated:"
+echo "  - ${ENV_FILE} (OIDC secrets for Docker Compose)"
+echo "  - ${SSO_ENV_FILE} (reference copy)"
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
 echo ""
@@ -331,8 +337,8 @@ echo -e "${RED}0. REQUIRED - Add hosts entries (one-time):${NC}"
 echo "   sudo sh -c 'echo \"127.0.0.1    host.docker.internal authentik-server\" >> /etc/hosts'"
 echo "   This allows your browser to reach Coder (OIDC) and the SSO server."
 echo ""
-echo "1. Enable SSO for Coder and MinIO:"
-echo "   docker compose -f docker-compose.yml -f docker-compose.sso.yml up -d coder minio"
+echo "1. Restart services to pick up new secrets:"
+echo "   docker compose up -d coder minio"
 echo ""
 echo "2. Configure Gitea OIDC (one-time):"
 echo "   a. Go to http://localhost:3000/admin/auths/new"
