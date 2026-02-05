@@ -198,26 +198,6 @@ data "coder_parameter" "litellm_api_key" {
   icon         = "/icon/widgets.svg"
 }
 
-# AI Provider selection
-data "coder_parameter" "ai_provider" {
-  name         = "ai_provider"
-  display_name = "AI Provider"
-  description  = "Select the AI provider for coding assistance"
-  type         = "string"
-  default      = "bedrock"
-  mutable      = true
-  icon         = "/icon/widgets.svg"
-
-  option {
-    name  = "AWS Bedrock (Recommended)"
-    value = "bedrock"
-  }
-  option {
-    name  = "Anthropic API (Direct)"
-    value = "anthropic"
-  }
-}
-
 # AI Model selection
 data "coder_parameter" "ai_model" {
   name         = "ai_model"
@@ -251,34 +231,6 @@ data "coder_parameter" "ai_gateway_url" {
   default      = "http://litellm:4000"
   mutable      = true
   icon         = "/icon/widgets.svg"
-}
-
-# AWS Region for Bedrock
-data "coder_parameter" "aws_region" {
-  name         = "aws_region"
-  display_name = "AWS Region"
-  description  = "AWS region for Bedrock API (if using Bedrock provider)"
-  type         = "string"
-  default      = "us-east-1"
-  mutable      = true
-  icon         = "/icon/aws.svg"
-
-  option {
-    name  = "US East (N. Virginia)"
-    value = "us-east-1"
-  }
-  option {
-    name  = "US West (Oregon)"
-    value = "us-west-2"
-  }
-  option {
-    name  = "EU (Frankfurt)"
-    value = "eu-central-1"
-  }
-  option {
-    name  = "Asia Pacific (Tokyo)"
-    value = "ap-northeast-1"
-  }
 }
 
 # ==========================================================================
@@ -685,13 +637,9 @@ resource "docker_container" "workspace" {
     "GIT_COMMITTER_NAME=${data.coder_workspace_owner.me.name}",
     "GIT_COMMITTER_EMAIL=${data.coder_workspace_owner.me.email}",
     # AI Configuration
-    "AI_PROVIDER=${data.coder_parameter.ai_provider.value}",
     "AI_MODEL=${data.coder_parameter.ai_model.value}",
     "AI_GATEWAY_URL=${data.coder_parameter.ai_gateway_url.value}",
     "LITELLM_API_KEY=${data.coder_parameter.litellm_api_key.value}",
-    # AWS Configuration for Bedrock
-    "AWS_REGION=${data.coder_parameter.aws_region.value}",
-    "AWS_DEFAULT_REGION=${data.coder_parameter.aws_region.value}",
   ]
 
   # Start the Coder agent

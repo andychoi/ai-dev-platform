@@ -30,7 +30,7 @@ Manual verification:
 | Coder | http://localhost:7080/api/v2/buildinfo | JSON with version |
 | Gitea | http://localhost:3000 | Login page |
 | Drone CI | http://localhost:8080 | Login page |
-| AI Gateway | http://localhost:8090/health | `{"status":"healthy"}` |
+| LiteLLM | http://localhost:4000/health | `{"status":"healthy"}` |
 | MinIO Console | http://localhost:9001 | Login page |
 | MinIO S3 API | http://localhost:9002/minio/health/live | Health check response |
 | Mailpit | http://localhost:8025 | Web UI |
@@ -174,8 +174,8 @@ Test parameter selection during creation:
 |-----------|---------|--------------|
 | CPU Cores | 2, 4 | `nproc` in terminal |
 | Memory | 4GB, 8GB | `free -h` in terminal |
-| AI Provider | Bedrock, Anthropic | Check `~/.continue/config.json` |
-| AI Model | Sonnet, Haiku, Opus | Check `~/.continue/config.json` |
+| AI Provider | Bedrock, Anthropic | Check `~/.config/roo-code/settings.json` |
+| AI Model | Sonnet, Haiku, Opus | Check `~/.config/roo-code/settings.json` |
 | Git Repo | URL | Repo cloned to `/home/coder/workspace` |
 
 ### 3.3 Persistence Testing
@@ -219,7 +219,7 @@ cat ~/workspace/test-persistence.txt  # Should show "test data"
 
 # Should SUCCEED (internal services)
 curl http://gitea:3000          # Git server
-curl http://ai-gateway:8090    # AI Gateway
+curl http://litellm:4000       # LiteLLM (AI Proxy)
 curl http://testdb:5432        # Should timeout (no HTTP)
 
 # Should FAIL (if external blocked)
@@ -253,29 +253,29 @@ Prerequisites:
 - AWS credentials configured in docker-compose.yml
 - `CODER_AIBRIDGE_BEDROCK_*` environment variables set
 
-### 5.2 Continue Extension (VS Code)
+### 5.2 Roo Code Extension (VS Code)
 
 Inside workspace VS Code:
 
 | Test | Steps | Expected Result |
 |------|-------|-----------------|
-| Open Continue | Cmd/Ctrl+Shift+L | Continue sidebar opens |
-| Check models | Continue → Settings | Shows configured models |
-| Chat test | Ask a coding question | Response generated |
-| Code completion | Type partial code | Tab autocomplete works |
+| Verify installed | Check Activity Bar for Roo Code icon | Icon visible in sidebar |
+| Open Roo Code | Click Roo Code icon in Activity Bar | Roo Code panel opens |
+| Check LiteLLM config | Roo Code settings | Shows LiteLLM as API provider |
+| AI request test | Ask Roo Code to explain a code snippet | Response generated via LiteLLM |
 
 Verify configuration:
 ```bash
 # In workspace terminal
-cat ~/.continue/config.json
-# Should show bedrock or anthropic provider
+cat ~/.config/roo-code/settings.json
+# Should show LiteLLM provider configuration
 ```
 
-### 5.3 AI Gateway Logging
+### 5.3 LiteLLM Logging
 
 ```bash
-# Check AI Gateway logs for requests
-docker logs ai-gateway --tail 20
+# Check LiteLLM logs for requests
+docker logs litellm --tail 20
 
 # Should see request logs with workspace IDs
 ```

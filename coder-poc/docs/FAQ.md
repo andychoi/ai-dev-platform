@@ -172,7 +172,7 @@ Note: Some settings require recreating the workspace.
 - GitLens
 - Go, Java, C# support
 - SQLTools (database)
-- Continue (AI assistant)
+- Roo Code (AI coding agent)
 
 You can install additional extensions from the VS Code marketplace.
 
@@ -237,10 +237,10 @@ Note: Installed packages persist in your workspace.
 - Click the AI icon in the Coder dashboard
 - Ask questions, get code help
 
-**2. Continue (VS Code)**
-- Press `Cmd/Ctrl+L` to open chat
-- Press `Tab` for code autocomplete
-- Select code and press `Cmd/Ctrl+I` to edit with AI
+**2. Roo Code (VS Code)**
+- Click the Roo Code icon in the VS Code Activity Bar (sidebar) to open the AI panel
+- Roo Code is an agentic AI assistant that can edit files, run terminal commands, and review code
+- Describe what you need in natural language and Roo Code will execute multi-step tasks
 
 ---
 
@@ -289,10 +289,10 @@ You can change this when creating a workspace.
 
 ### Q: Can I use AI for code review?
 
-**A:** Yes! In Continue:
+**A:** Yes! In Roo Code:
 1. Select the code you want reviewed
-2. Press `Cmd/Ctrl+L` to open chat
-3. Type `/review` or "Review this code for bugs and improvements"
+2. Click the Roo Code icon in the sidebar to open the AI panel
+3. Ask "Review this code for bugs and improvements"
 
 ---
 
@@ -450,8 +450,8 @@ Admins may have visibility into all workspaces for support purposes.
 ### Q: AI is not working!
 
 **A:**
-1. **Check Continue**: Press `Cmd/Ctrl+L` - does the sidebar open?
-2. **Check config**: In terminal, run `cat ~/.continue/config.json`
+1. **Check Roo Code**: Click the Roo Code icon in the sidebar - does the AI panel open?
+2. **Check config**: In terminal, run `cat ~/.config/roo-code/settings.json`
 3. **Restart workspace**: Sometimes fixes configuration issues
 4. **Check model**: Try switching to a different AI model
 5. **Contact admin**: There may be a service issue
@@ -658,19 +658,16 @@ coder templates push <template-name> \
 ║                                                                            ║
 ║  KEYBOARD SHORTCUTS (VS Code)                                             ║
 ║  ───────────────────────────                                              ║
-║  Cmd/Ctrl + L         Open AI chat (Continue)                             ║
-║  Cmd/Ctrl + I         Edit with AI                                        ║
+║  Roo Code icon        Open AI agent (sidebar)                              ║
 ║  Cmd/Ctrl + `         Open terminal                                       ║
 ║  Cmd/Ctrl + P         Quick file open                                     ║
 ║  Cmd/Ctrl + Shift + P Command palette                                     ║
-║  Tab                  Accept AI autocomplete                               ║
 ║                                                                            ║
-║  USEFUL COMMANDS                                                          ║
-║  ───────────────                                                          ║
-║  /review              AI code review                                       ║
-║  /test                Generate tests                                       ║
-║  /explain             Explain selected code                                ║
-║  /edit                Edit with instructions                               ║
+║  ROO CODE (AI AGENT)                                                      ║
+║  ────────────────────                                                     ║
+║  • Click the Roo Code icon in the Activity Bar                            ║
+║  • Describe tasks in natural language                                     ║
+║  • Can edit files, run commands, review code                              ║
 ║                                                                            ║
 ║  GIT WORKFLOW                                                             ║
 ║  ────────────                                                             ║
@@ -680,7 +677,7 @@ coder templates push <template-name> \
 ║                                                                            ║
 ║  GETTING HELP                                                             ║
 ║  ────────────                                                             ║
-║  • AI Assistant: Cmd/Ctrl + L                                             ║
+║  • AI Agent: Roo Code icon in sidebar                                     ║
 ║  • Bug report: Create Issue in template-requests repo                     ║
 ║  • Platform admin: [Contact info]                                         ║
 ║                                                                            ║

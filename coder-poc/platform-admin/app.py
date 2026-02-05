@@ -150,10 +150,10 @@ SERVICES = {
         'icon': 'hard-drive'
     },
     'ai_gateway': {
-        'name': 'AI Gateway',
-        'url': os.environ.get('AI_GATEWAY_URL', 'http://ai-gateway:8090'),
+        'name': 'LiteLLM',
+        'url': os.environ.get('AI_GATEWAY_URL', 'http://litellm:4000'),
         'health_endpoint': '/health',
-        'dashboard_url': None,
+        'dashboard_url': 'http://localhost:4000/ui',
         'icon': 'cpu'
     },
     'authentik': {

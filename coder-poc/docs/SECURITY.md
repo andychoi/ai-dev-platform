@@ -60,8 +60,8 @@ This document describes the security architecture, controls, and best practices 
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                         INTERNAL NETWORK (coder-network)                     │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐          │
-│  │PostgreSQL│ │  Redis   │ │ AI Gate  │ │  MinIO   │ │ Mailpit  │          │
-│  │(internal)│ │(internal)│ │  (8090)  │ │(9001/02) │ │  (8025)  │          │
+│  │PostgreSQL│ │  Redis   │ │ LiteLLM  │ │  MinIO   │ │ Mailpit  │          │
+│  │(internal)│ │(internal)│ │ LiteLLM  │ │(9001/02) │ │  (8025)  │          │
 │  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘          │
 │                                                                              │
 │  ┌──────────────────────────────────────────────────────────────────────┐   │
@@ -86,7 +86,7 @@ This document describes the security architecture, controls, and best practices 
 | Gitea | Local | Username/password |
 | Authentik | Local + Federation | Can federate with Azure AD |
 | MinIO | Access Keys | Root credentials + service accounts |
-| AI Gateway | API Keys | Workspace-bound tokens |
+| LiteLLM | API Keys | Workspace-bound tokens |
 
 ### 2.2 Role-Based Access Control (RBAC)
 
@@ -153,7 +153,7 @@ User → Authentik → OIDC → Coder
 | 7080 | Coder | Host | WebIDE platform |
 | 3000 | Gitea | Host | Git server |
 | 8080 | Drone | Host | CI/CD |
-| 8090 | AI Gateway | Host | AI API proxy |
+| 4000 | LiteLLM | Host | AI API proxy |
 | 9000/9443 | Authentik | Host | Identity provider |
 | 9001/9002 | MinIO | Host | Object storage |
 | 8025 | Mailpit | Host | Email testing |
@@ -276,7 +276,7 @@ CODER_DISABLE_PATH_APPS: "false"          # Path apps allowed in PoC (set "true"
 | Credentials | Secret | Environment variables | In-transit (TLS) |
 | User data | Internal | PostgreSQL | At-rest + in-transit |
 | Audit logs | Internal | PostgreSQL | At-rest + in-transit |
-| AI conversations | Confidential | AI Gateway logs | At-rest |
+| AI conversations | Confidential | LiteLLM logs | At-rest |
 
 ### 5.2 Secrets Management
 
@@ -319,29 +319,28 @@ docker run --rm -v coder-poc-postgres:/data -v $(pwd):/backup \
 
 ## 6. AI Security
 
-### 6.1 AI Gateway Security
+### 6.1 LiteLLM Proxy Security
 
 | Control | Implementation | Status |
 |---------|----------------|--------|
-| Authentication | JWT token validation | Configurable (default: enabled) |
-| Rate limiting | Per-IP request limits | Enabled (60 RPM default) |
+| Authentication | API key validation | Configurable (default: enabled) |
+| Rate limiting | Per-key request limits | Enabled (60 RPM default) |
 | CORS | Configurable allowed origins | Configured |
 | Audit logging | All requests logged with workspace ID | Planned |
 | API key rotation | Managed centrally, not exposed to users | Yes |
 | Provider abstraction | Users don't see actual API keys | Yes |
 
-**Current AI Gateway Configuration:**
+**Current LiteLLM Configuration:**
 ```yaml
-# docker-compose.yml - AI Gateway authentication
-AI_GATEWAY_AUTH_ENABLED: "${AI_GATEWAY_AUTH_ENABLED:-true}"
-AI_GATEWAY_ALLOWED_ORIGINS: "${AI_GATEWAY_ALLOWED_ORIGINS:-http://localhost:7080,http://host.docker.internal:7080}"
+# docker-compose.yml - LiteLLM authentication
+LITELLM_MASTER_KEY: "${LITELLM_MASTER_KEY}"
 RATE_LIMIT_RPM: "${AI_RATE_LIMIT_RPM:-60}"
 ```
 
 ### 6.2 AI Data Flow
 
 ```
-Workspace → AI Gateway → AWS Bedrock / Anthropic API
+Workspace → LiteLLM Proxy → AWS Bedrock / Anthropic API
     │            │
     │            └─→ Audit Log (request/response metadata)
     │
@@ -357,17 +356,15 @@ CODER_AIBRIDGE_BEDROCK_ACCESS_KEY_SECRET: ${AWS_SECRET_ACCESS_KEY}
 CODER_AIBRIDGE_BEDROCK_REGION: "us-east-1"
 ```
 
-### 6.4 Continue Extension Security
+### 6.4 Roo Code Extension Security
 
 ```json
-// Workspace-level config (~/.continue/config.json)
+// Workspace-level config (~/.config/roo-code/settings.json)
 {
-  "models": [{
-    "provider": "bedrock",
-    "region": "us-east-1"
-    // No API keys stored - uses instance credentials
-  }],
-  "allowAnonymousTelemetry": false
+  "apiProvider": "openai-compatible",
+  "openAiBaseUrl": "http://litellm:4000",
+  "openAiModelId": "anthropic/claude-sonnet-4-20250514"
+  // No upstream API keys stored - LiteLLM proxy handles credentials
 }
 ```
 
@@ -392,7 +389,7 @@ CODER_AIBRIDGE_BEDROCK_REGION: "us-east-1"
 |-----------|--------------|--------|
 | Coder | `docker logs coder-server` | JSON |
 | Gitea | `/data/gitea/log/` | Text |
-| AI Gateway | `/var/log/ai-gateway/` | JSON |
+| LiteLLM | `docker logs litellm` | JSON |
 | PostgreSQL | `docker logs postgres` | Text |
 | Workspaces | Coder dashboard | Streaming |
 

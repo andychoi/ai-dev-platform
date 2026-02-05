@@ -41,8 +41,8 @@ This document describes the infrastructure architecture, components, and deploym
 │  └─────────────────────────────────────────────────────────────────────┘   │
 │                                                                              │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐   │
-│  │  Authentik   │  │    Gitea      │  │   Drone CI   │  │  AI Gateway  │   │
-│  │    (9000)    │  │   (3000)     │  │    (8080)    │  │    (8090)    │   │
+│  │  Authentik   │  │    Gitea      │  │   Drone CI   │  │   LiteLLM    │   │
+│  │    (9000)    │  │   (3000)     │  │    (8080)    │  │    (4000)    │   │
 │  │  Identity    │  │  Git Server  │  │   CI/CD      │  │  AI Proxy    │   │
 │  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘   │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -88,7 +88,7 @@ This document describes the infrastructure architecture, components, and deploym
 | Identity | Authentik | 2024.2 |
 | Object Storage | MinIO | Latest |
 | Email Testing | Mailpit | Latest |
-| AI Gateway | Custom Python | 3.11 |
+| LiteLLM | LiteLLM | Latest |
 
 ---
 
@@ -103,7 +103,7 @@ This document describes the infrastructure architecture, components, and deploym
 | gitea | gitea | 3000, 10022 | Git server | - |
 | drone-server | drone-server | 8080 | CI server | gitea |
 | drone-runner | drone-runner | - | CI runner | drone-server |
-| ai-gateway | ai-gateway | 8090 | AI API proxy | devdb |
+| litellm | litellm | 4000 | AI API proxy (LiteLLM) | postgres |
 
 ### 2.2 Supporting Services
 
@@ -126,7 +126,7 @@ This document describes the infrastructure architecture, components, and deploym
 | postgres | 0.5-1 core | 256MB-1GB | 10GB+ |
 | gitea | 0.25-0.5 core | 256MB-512MB | 5GB+ |
 | drone-server | 0.25 core | 256MB | 1GB |
-| ai-gateway | 0.25 core | 256MB | 100MB |
+| litellm | 0.25 core | 256MB | 100MB |
 | authentik-server | 0.5 core | 512MB | 500MB |
 | minio | 0.25 core | 512MB | 50GB+ |
 | **Per Workspace** | 2-4 cores | 4-8GB | 10-50GB |
@@ -145,7 +145,7 @@ images:
   redis: redis:7-alpine
   minio: minio/minio:latest
   mailpit: axllent/mailpit:latest
-  ai-gateway: coder-poc-ai-gateway (local build)
+  litellm: ghcr.io/berriai/litellm:main-latest
   workspace: contractor-workspace (local build)
 ```
 
@@ -158,7 +158,7 @@ images:
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        HOST NETWORK                                  │
-│  Ports: 7080, 3000, 8080, 8090, 9000, 9001, 9002, 8025              │
+│  Ports: 7080, 3000, 4000, 8080, 9000, 9001, 9002, 8025              │
 └─────────────────────────────────────────────────────────────────────┘
                               │
                               │ Bridge
@@ -167,7 +167,7 @@ images:
 │                   coder-network (172.18.0.0/16)                      │
 │                                                                      │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                 │
-│  │ coder-server│  │    gitea     │  │ ai-gateway  │                 │
+│  │ coder-server│  │    gitea     │  │   litellm   │                 │
 │  │ 172.18.0.x  │  │ 172.18.0.x  │  │ 172.18.0.x  │                 │
 │  └─────────────┘  └─────────────┘  └─────────────┘                 │
 │                                                                      │
@@ -192,7 +192,7 @@ images:
 | PostgreSQL | postgres | 5432 |
 | Redis | authentik-redis | 6379 |
 | Gitea | gitea | 3000 |
-| AI Gateway | ai-gateway | 8090 |
+| LiteLLM | litellm | 4000 |
 | MinIO | minio | 9002 |
 | Mailpit SMTP | mailpit | 1025 |
 | TestDB | testdb | 5432 |
@@ -224,7 +224,7 @@ images:
 | coder-poc-authentik-* | authentik-* | /media, /templates | Identity data |
 | coder-poc-testdb | testdb | /var/lib/postgresql/data | Test database |
 | coder-poc-devdb | devdb | /var/lib/postgresql/data | Developer databases |
-| coder-poc-ai-gateway-logs | ai-gateway | /var/log/ai-gateway | AI Gateway logs |
+| coder-poc-litellm-logs | litellm | /var/log/litellm | LiteLLM logs |
 
 ### 4.2 Workspace Storage
 
@@ -236,7 +236,7 @@ images:
 │  └── /home/coder/                                                   │
 │      ├── workspace/        ← Project files (persistent)             │
 │      ├── .config/          ← User configuration                     │
-│      ├── .continue/        ← AI assistant config                    │
+│      ├── .config/roo-code/  ← AI agent config (Roo Code)            │
 │      ├── .local/           ← VS Code extensions/data                │
 │      └── .bashrc           ← Shell configuration                    │
 └─────────────────────────────────────────────────────────────────────┘
@@ -286,7 +286,7 @@ docker run --rm -v coder-poc-postgres:/source:ro -v $(pwd):/backup \
 | coder | unless-stopped | Core platform |
 | gitea | unless-stopped | Git availability |
 | drone-* | unless-stopped | CI availability |
-| ai-gateway | unless-stopped | AI service |
+| litellm | unless-stopped | AI service |
 | authentik-* | unless-stopped | Auth availability |
 | minio | unless-stopped | Storage availability |
 | mailpit | unless-stopped | Dev convenience |
@@ -299,7 +299,7 @@ docker run --rm -v coder-poc-postgres:/source:ro -v $(pwd):/backup \
 | postgres | pg_isready | 5s | 5s | 5 |
 | coder | - | - | - | - |
 | gitea | HTTP GET / | 10s | 5s | 5 |
-| ai-gateway | HTTP GET /health | 30s | 10s | 3 |
+| litellm | HTTP GET /health | 30s | 10s | 3 |
 | authentik | HTTP GET /-/health/ready/ | 30s | 10s | 5 |
 | minio | HTTP GET /minio/health/live | 10s | 5s | 5 |
 | mailpit | HTTP GET / | 10s | 5s | 3 |
@@ -315,7 +315,7 @@ docker run --rm -v coder-poc-postgres:/source:ro -v $(pwd):/backup \
 4. coder                # Platform (depends on postgres)
 5. drone-server         # CI (depends on gitea)
 6. drone-runner         # CI runner (depends on drone-server)
-7. ai-gateway, minio    # Supporting services
+7. litellm, minio       # Supporting services
 8. mailpit              # Dev tools
 ```
 
@@ -341,7 +341,7 @@ docker run --rm -v coder-poc-postgres:/source:ro -v $(pwd):/backup \
 │  │  • VS Code in browser (port 8080)                           │   │
 │  │  • Pre-installed extensions:                                 │   │
 │  │    - Python, ESLint, Prettier, GitLens, Go                  │   │
-│  │    - SQLTools, Java, C#, Continue AI                        │   │
+│  │    - SQLTools, Java, C#, Roo Code                           │   │
 │  └─────────────────────────────────────────────────────────────┘   │
 │                              │                                       │
 │  ┌─────────────────────────────────────────────────────────────┐   │
@@ -372,7 +372,7 @@ docker run --rm -v coder-poc-postgres:/source:ro -v $(pwd):/backup \
 | Destination | Access | Purpose |
 |-------------|--------|---------|
 | gitea:3000 | ✓ Allowed | Git operations |
-| ai-gateway:8090 | ✓ Allowed | AI API access |
+| litellm:4000 | ✓ Allowed | AI API access |
 | testdb:5432 | ✓ Allowed | Database testing |
 | minio:9002 | ✓ Allowed | Object storage |
 | mailpit:1025 | ✓ Allowed | Email testing |
@@ -399,7 +399,7 @@ docker run --rm -v coder-poc-postgres:/source:ro -v $(pwd):/backup \
           │                  │                  │
           ▼                  ▼                  ▼
 ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
-│    Authentik    │  │   AI Gateway    │  │    AI Gateway   │
+│    Authentik    │  │    LiteLLM      │  │     LiteLLM     │
 │   OIDC/SAML     │  │   /v1/bedrock   │  │   /v1/external  │
 └────────┬────────┘  └────────┬────────┘  └────────┬────────┘
          │                    │                    │
@@ -443,8 +443,8 @@ CODER_AIBRIDGE_BEDROCK_ACCESS_KEY: ${AWS_ACCESS_KEY_ID}
 CODER_AIBRIDGE_BEDROCK_ACCESS_KEY_SECRET: ${AWS_SECRET_ACCESS_KEY}
 CODER_AIBRIDGE_BEDROCK_REGION: us-east-1
 
-# Workspace AI (Continue extension)
-AI_GATEWAY_URL: http://ai-gateway:8090
+# Workspace AI (Roo Code extension)
+AI_GATEWAY_URL: http://litellm:4000
 AI_PROVIDER: bedrock
 AI_MODEL: claude-sonnet
 ```
@@ -545,7 +545,7 @@ done
 
 # 3. Configuration backup
 tar czf backups/config-$(date +%Y%m%d).tar.gz \
-  docker-compose.yml .env templates/ gitea/ ai-gateway/
+  docker-compose.yml .env templates/ gitea/ litellm/
 
 # 4. Upload to remote storage
 mc cp backups/* remote/platform-backups/
@@ -652,8 +652,7 @@ coder-poc/
 │       ├── main.tf            # Terraform template
 │       └── build/
 │           ├── Dockerfile     # Workspace image
-│           ├── settings.json  # VS Code settings
-│           └── continue-config.json  # AI config
+│           └── settings.json  # VS Code settings
 │
 ├── scripts/
 │   ├── setup.sh               # Initial setup
@@ -669,10 +668,8 @@ coder-poc/
 │   ├── app.ini                # Gitea configuration
 │   └── issue-templates/       # Issue templates
 │
-├── ai-gateway/
-│   ├── Dockerfile             # Gateway image
-│   ├── gateway.py             # Gateway code
-│   └── config.yaml            # Gateway config
+├── litellm/
+│   └── config.yaml            # LiteLLM proxy config
 │
 ├── postgres/
 │   └── init.sql               # Database initialization

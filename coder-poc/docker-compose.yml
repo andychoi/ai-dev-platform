@@ -195,7 +195,7 @@ services:
       GITEA_URL: http://gitea:3000
       DRONE_URL: http://drone-server:80
       MINIO_URL: http://minio:9002
-      AI_GATEWAY_URL: http://ai-gateway:8090
+      AI_GATEWAY_URL: http://litellm:4000
       AUTHENTIK_URL: http://authentik-server:9000
       # Admin credentials
       ADMIN_USERNAME: ${PLATFORM_ADMIN_USER:-admin}
@@ -283,60 +283,59 @@ services:
       - coder-network
 
   # ==========================================================================
-  # AI GATEWAY - Multi-Provider AI API Proxy
-  # Supports: Anthropic Claude, AWS Bedrock, Google Gemini (planned)
+  # AI GATEWAY - DEPRECATED: Replaced by LiteLLM proxy (see litellm service)
   # ==========================================================================
-  ai-gateway:
-    build:
-      context: ./ai-gateway
-      dockerfile: Dockerfile
-    container_name: ai-gateway
-    restart: unless-stopped
-    depends_on:
-      devdb:
-        condition: service_healthy
-    environment:
-      # Anthropic Claude API
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-
-      # AWS Bedrock
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
-      - AWS_REGION=${AWS_REGION:-us-east-1}
-
-      # Google Gemini (planned)
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
-
-      # Gateway settings
-      - AI_GATEWAY_PORT=8090
-      - RATE_LIMIT_RPM=${AI_RATE_LIMIT_RPM:-60}
-      - CONFIG_PATH=/app/config.yaml
-
-      # SECURITY: Authentication settings
-      # Set AI_GATEWAY_AUTH_ENABLED=false only for local development
-      - AI_GATEWAY_AUTH_ENABLED=${AI_GATEWAY_AUTH_ENABLED:-true}
-      - AI_GATEWAY_AUTH_SECRET=${AI_GATEWAY_AUTH_SECRET:-}
-      - AI_GATEWAY_ALLOWED_ORIGINS=${AI_GATEWAY_ALLOWED_ORIGINS:-http://localhost:7080,http://host.docker.internal:7080}
-      - CODER_URL=http://coder-server:7080
-
-      # DevDB connection for usage tracking
-      - DEVDB_HOST=devdb
-      - DEVDB_PORT=5432
-      - DEVDB_USER=ai_gateway
-      - DEVDB_PASSWORD=${DEVDB_AI_GATEWAY_PASSWORD:-aigateway123}
-      - DEVDB_NAME=devdb
-    ports:
-      - "8090:8090"
-    volumes:
-      - ./ai-gateway/config.yaml:/app/config.yaml:ro
-      - ai_gateway_logs:/var/log/ai-gateway
-    networks:
-      - coder-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+  # ai-gateway:
+  #   build:
+  #     context: ./ai-gateway
+  #     dockerfile: Dockerfile
+  #   container_name: ai-gateway
+  #   restart: unless-stopped
+  #   depends_on:
+  #     devdb:
+  #       condition: service_healthy
+  #   environment:
+  #     # Anthropic Claude API
+  #     - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+  #
+  #     # AWS Bedrock
+  #     - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+  #     - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+  #     - AWS_REGION=${AWS_REGION:-us-east-1}
+  #
+  #     # Google Gemini (planned)
+  #     - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+  #
+  #     # Gateway settings
+  #     - AI_GATEWAY_PORT=8090
+  #     - RATE_LIMIT_RPM=${AI_RATE_LIMIT_RPM:-60}
+  #     - CONFIG_PATH=/app/config.yaml
+  #
+  #     # SECURITY: Authentication settings
+  #     # Set AI_GATEWAY_AUTH_ENABLED=false only for local development
+  #     - AI_GATEWAY_AUTH_ENABLED=${AI_GATEWAY_AUTH_ENABLED:-true}
+  #     - AI_GATEWAY_AUTH_SECRET=${AI_GATEWAY_AUTH_SECRET:-}
+  #     - AI_GATEWAY_ALLOWED_ORIGINS=${AI_GATEWAY_ALLOWED_ORIGINS:-http://localhost:7080,http://host.docker.internal:7080}
+  #     - CODER_URL=http://coder-server:7080
+  #
+  #     # DevDB connection for usage tracking
+  #     - DEVDB_HOST=devdb
+  #     - DEVDB_PORT=5432
+  #     - DEVDB_USER=ai_gateway
+  #     - DEVDB_PASSWORD=${DEVDB_AI_GATEWAY_PASSWORD:-aigateway123}
+  #     - DEVDB_NAME=devdb
+  #   ports:
+  #     - "8090:8090"
+  #   volumes:
+  #     - ./ai-gateway/config.yaml:/app/config.yaml:ro
+  #     - ai_gateway_logs:/var/log/ai-gateway
+  #   networks:
+  #     - coder-network
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
 
   # ==========================================================================
   # LITELLM PROXY - Centralized AI gateway with virtual keys and budgets
@@ -531,8 +530,8 @@ volumes:
     name: coder-poc-gitea
   drone_data:
     name: coder-poc-drone
-  ai_gateway_logs:
-    name: coder-poc-ai-gateway-logs
+  # ai_gateway_logs:
+  #   name: coder-poc-ai-gateway-logs
   authentik_redis:
     name: coder-poc-authentik-redis
   authentik_media:
