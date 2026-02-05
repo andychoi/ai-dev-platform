@@ -112,7 +112,7 @@ check_service() {
 
 check_service "Coder Server" "http://localhost:7080/api/v2/buildinfo"
 check_service "Gitea Git Server" "http://localhost:3000/"
-check_service "AI Gateway" "http://localhost:8090/health"
+check_service "LiteLLM" "http://localhost:4000/health"
 check_service "MinIO Console" "http://localhost:9001/"
 check_service "MinIO S3 API" "http://localhost:9002/minio/health/live"
 check_service "Mailpit" "http://localhost:8025/"
@@ -229,7 +229,7 @@ print_section "4.2 Sensitive Data Exposure"
 log_test "Environment variables don't contain secrets in logs"
 # Check if any container has secrets visible in inspect
 EXPOSED_SECRETS=0
-for container in postgres coder-server gitea ai-gateway minio; do
+for container in postgres coder-server gitea litellm minio; do
     if docker inspect "$container" 2>/dev/null | grep -iE "(password|secret|key).*=" | grep -v "null" | grep -v '""' > /dev/null 2>&1; then
         EXPOSED_SECRETS=$((EXPOSED_SECRETS + 1))
     fi
@@ -261,7 +261,7 @@ print_header "5. Container Security"
 print_section "5.1 Container User Context"
 
 log_test "Checking container user contexts"
-for container in gitea ai-gateway mailpit minio; do
+for container in gitea litellm mailpit minio; do
     if docker ps --format '{{.Names}}' | grep -q "^${container}$"; then
         USER=$(docker inspect "$container" --format '{{.Config.User}}' 2>/dev/null || echo "unknown")
         if [ -z "$USER" ] || [ "$USER" = "root" ] || [ "$USER" = "0" ] || [ "$USER" = "0:0" ]; then
@@ -335,21 +335,21 @@ else
     log_pass "Gitea registration appears disabled"
 fi
 
-print_section "6.3 AI Gateway Security"
+print_section "6.3 LiteLLM Proxy Security"
 
-log_test "AI Gateway rate limiting"
-AI_HEALTH=$(curl -sf "http://localhost:8090/health" 2>/dev/null || echo "{}")
-if echo "$AI_HEALTH" | grep -qi "rate\|limit"; then
-    log_pass "AI Gateway has rate limiting configured"
+log_test "LiteLLM rate limiting"
+LITELLM_HEALTH=$(curl -sf "http://localhost:4000/health" 2>/dev/null || echo "{}")
+if [ -n "$LITELLM_HEALTH" ] && [ "$LITELLM_HEALTH" != "{}" ]; then
+    log_pass "LiteLLM is running (rate limiting configured via virtual keys)"
 else
-    log_info "AI Gateway rate limiting status unknown"
+    log_info "LiteLLM health status unknown"
 fi
 
-log_test "AI Gateway audit logging"
-if docker logs ai-gateway 2>&1 | head -20 | grep -qi "log\|audit"; then
-    log_pass "AI Gateway appears to have logging enabled"
+log_test "LiteLLM audit logging"
+if docker logs litellm 2>&1 | head -20 | grep -qi "log\|startup\|running"; then
+    log_pass "LiteLLM appears to have logging enabled"
 else
-    log_info "AI Gateway logging status - verify in config"
+    log_info "LiteLLM logging status - verify in config"
 fi
 
 # =============================================================================

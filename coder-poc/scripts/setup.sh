@@ -364,7 +364,7 @@ print_summary() {
     echo "  │ MinIO Storage   │ http://localhost:9001                     │"
     echo "  │ Platform Admin  │ http://localhost:5050                     │"
     echo "  │ Drone CI        │ http://localhost:8080                     │"
-    echo "  │ AI Gateway      │ http://localhost:8090                     │"
+    echo "  │ LiteLLM (AI)    │ http://localhost:4000                     │"
     echo "  └─────────────────┴───────────────────────────────────────────┘"
 
     echo ""

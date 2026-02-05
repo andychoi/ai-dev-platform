@@ -86,7 +86,7 @@ create_application "Gitea Git Server" "gitea" "http://localhost:3000" "fa://git"
 create_application "Drone CI" "drone" "http://localhost:8080" "fa://play"
 create_application "MinIO Storage" "minio" "http://localhost:9001" "fa://database"
 create_application "Platform Admin" "platform-admin" "http://localhost:5050" "fa://cog"
-create_application "AI Gateway" "ai-gateway" "http://localhost:8090" "fa://robot"
+create_application "LiteLLM" "litellm" "http://localhost:4000" "fa://robot"
 
 echo ""
 echo -e "${GREEN}Creating OAuth2 providers...${NC}"

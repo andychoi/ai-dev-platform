@@ -122,7 +122,7 @@ VOLUMES_TO_REMOVE=(
     "coder-poc-devdb"
     "coder-poc-gitea"
     "coder-poc-drone"
-    "coder-poc-ai-gateway-logs"
+    # "coder-poc-ai-gateway-logs"  # Deprecated: replaced by LiteLLM
     "coder-poc-authentik-redis"
     "coder-poc-authentik-media"
     "coder-poc-authentik-templates"
@@ -226,11 +226,18 @@ if [ "${1:-}" == "--images" ] || [ "${2:-}" == "--images" ] || [ "${1:-}" == "--
         print_status "Workspace images removed"
     fi
 
-    # Remove AI gateway image
+    # Remove old AI gateway image (deprecated, replaced by LiteLLM)
     AI_GATEWAY_IMAGES=$(docker images --filter "reference=*ai-gateway*" -q 2>/dev/null || true)
     if [ -n "$AI_GATEWAY_IMAGES" ]; then
         docker rmi $AI_GATEWAY_IMAGES 2>/dev/null || true
         print_status "AI Gateway image removed"
+    fi
+
+    # Remove LiteLLM image
+    LITELLM_IMAGES=$(docker images --filter "reference=*litellm*" -q 2>/dev/null || true)
+    if [ -n "$LITELLM_IMAGES" ]; then
+        docker rmi $LITELLM_IMAGES 2>/dev/null || true
+        print_status "LiteLLM image removed"
     fi
 
     # Remove platform-admin image
