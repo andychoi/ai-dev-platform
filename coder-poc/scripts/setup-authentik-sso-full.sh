@@ -11,7 +11,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 AUTHENTIK_URL="${AUTHENTIK_URL:-http://localhost:9000}"
-AUTHENTIK_INTERNAL_URL="http://authentik-server:9000"
+AUTHENTIK_INTERNAL_URL="http://host.docker.internal:9000"
 
 # Colors
 RED='\033[0;31m'

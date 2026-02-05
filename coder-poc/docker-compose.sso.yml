@@ -5,9 +5,9 @@ services:
   coder:
     environment:
       # Authentik OIDC
-      CODER_OIDC_ISSUER_URL: "http://authentik-server:9000/application/o/coder/"
+      CODER_OIDC_ISSUER_URL: "http://host.docker.internal:9000/application/o/coder/"
       CODER_OIDC_CLIENT_ID: "coder"
-      CODER_OIDC_CLIENT_SECRET: "y8DYRFdJvdhzyjquuPpy2pNB90MPEV9t7bZDRzMZ1KTLOv6EBT1rSrKgbLBGcqKmoKC5uQhZ2Kp7T8fAZ7y84ct0R9iY9fmPa5nbudeVsEEeBzJMoIN6TJNLws0L7eOE"
+      CODER_OIDC_CLIENT_SECRET: "YG1Zk9mDp71a13XBNJs04ylFcwBYzzLpNkd2GNf875GcBsjDLb4HfoCIDMP6LaqLUYRvAcKqTfagQA9rRwF5YkxSzIcEjf7aV2y49HROQgVv29gn3kNV9AfEaCNDguVS"
       CODER_OIDC_ALLOW_SIGNUPS: "true"
       CODER_OIDC_EMAIL_DOMAIN: ""
       # Disable default GitHub OAuth (device flow)
@@ -18,9 +18,9 @@ services:
   minio:
     environment:
       # Authentik OIDC
-      MINIO_IDENTITY_OPENID_CONFIG_URL: "http://authentik-server:9000/application/o/minio/.well-known/openid-configuration"
+      MINIO_IDENTITY_OPENID_CONFIG_URL: "http://host.docker.internal:9000/application/o/minio/.well-known/openid-configuration"
       MINIO_IDENTITY_OPENID_CLIENT_ID: "minio"
-      MINIO_IDENTITY_OPENID_CLIENT_SECRET: "WnS2CWdOkx6QAAUfwxx7zRNu4tz9JSkDZpqmCRtxe0NEkOFf3YXUSFgAOZRfIVBwxTt6PcX1cW7uaRsFPgoBf7OwhclFAtM01jWvwy5zQoQaDvtXEfOAloXTp0gnkwUN"
+      MINIO_IDENTITY_OPENID_CLIENT_SECRET: "VQd0HBCbrCxHLRcw5xzV2jTSx4Fwq8GbCSKus14aDrYVkaK0qme3JBytXAIJs0RY48MtP9Dn5XUsSqLSOaNSsCEs6X7OEAONNYJxYlEFoy6JHvdqCOrECC1sKZPi5IPj"
       MINIO_IDENTITY_OPENID_CLAIM_NAME: "policy"
       MINIO_IDENTITY_OPENID_SCOPES: "openid,profile,email"
       MINIO_IDENTITY_OPENID_REDIRECT_URI: "http://localhost:9001/oauth_callback"
@@ -29,7 +29,7 @@ services:
     environment:
       # Authentik OIDC
       OIDC_ENABLED: "true"
-      OIDC_ISSUER_URL: "http://authentik-server:9000/application/o/platform-admin/"
-      OIDC_CLIENT_ID: "platform-admin"
-      OIDC_CLIENT_SECRET: "RPOJEzoS13q0hvF2QakxPsZgx7pWtRCmFdBiDfrfVQevKuq4hLXOJAmmYB80kOlTPZfVL15C6KOGTbOPGHgqTO4bfFZS9AVcIYTrlqrgPhJBNLWmywZsC5LtjnOPNYQt"
+      OIDC_ISSUER_URL: "http://host.docker.internal:9000/application/o/platform-admin/"
+      OIDC_CLIENT_ID: ""
+      OIDC_CLIENT_SECRET: ""
       LOCAL_AUTH_ENABLED: "true"
