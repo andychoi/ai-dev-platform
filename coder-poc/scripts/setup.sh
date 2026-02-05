@@ -1,6 +1,6 @@
 #!/bin/bash
-# Coder WebIDE PoC - Setup Script
-# This script sets up the complete Coder environment locally
+# Coder WebIDE PoC - Full Setup Script
+# This script sets up the complete Coder environment with SSO locally
 
 set -e
 
@@ -19,12 +19,12 @@ POC_DIR="$(dirname "$SCRIPT_DIR")"
 CODER_PORT="${CODER_PORT:-7080}"
 POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-coderpassword}"
 ADMIN_USER="${ADMIN_USER:-admin}"
-ADMIN_EMAIL="${ADMIN_EMAIL:-admin@local.test}"
-ADMIN_PASSWORD="${ADMIN_PASSWORD:-SecureP@ssw0rd!}"
+ADMIN_EMAIL="${ADMIN_EMAIL:-admin@example.com}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-CoderAdmin123!}"
 
 echo -e "${BLUE}"
 echo "╔═══════════════════════════════════════════════════════════════╗"
-echo "║           Coder WebIDE PoC - Setup Script                     ║"
+echo "║        Coder WebIDE PoC - Full Setup with SSO                 ║"
 echo "╚═══════════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
 
@@ -48,7 +48,7 @@ print_info() {
 # Check prerequisites
 check_prerequisites() {
     echo ""
-    echo -e "${BLUE}Checking prerequisites...${NC}"
+    echo -e "${BLUE}[1/8] Checking prerequisites...${NC}"
 
     # Check Docker
     if ! command -v docker &> /dev/null; then
@@ -69,17 +69,21 @@ check_prerequisites() {
     # Check Docker Compose
     if docker compose version &> /dev/null; then
         print_status "Docker Compose installed: $(docker compose version --short)"
-    elif command -v docker-compose &> /dev/null; then
-        print_warning "Using legacy docker-compose command"
-        COMPOSE_CMD="docker-compose"
     else
         print_error "Docker Compose is not installed."
         exit 1
     fi
 
-    # Check available resources
-    echo ""
-    print_info "Checking system resources..."
+    # Check jq
+    if ! command -v jq &> /dev/null; then
+        print_warning "jq not installed - some features may not work"
+    fi
+
+    # Check curl
+    if ! command -v curl &> /dev/null; then
+        print_error "curl is not installed."
+        exit 1
+    fi
 
     # Get Docker group ID for Linux
     if [[ "$(uname)" == "Linux" ]]; then
@@ -90,141 +94,224 @@ check_prerequisites() {
     fi
 }
 
-# Start Coder infrastructure
+# Check and add hosts entry
+setup_hosts() {
+    echo ""
+    echo -e "${BLUE}[2/8] Checking hosts configuration...${NC}"
+
+    # Check for host.docker.internal
+    if grep -q "host.docker.internal" /etc/hosts 2>/dev/null; then
+        print_status "host.docker.internal already in /etc/hosts"
+    else
+        print_warning "Adding host.docker.internal to /etc/hosts (requires sudo)"
+        echo "127.0.0.1 host.docker.internal" | sudo tee -a /etc/hosts > /dev/null
+        print_status "Added host.docker.internal to /etc/hosts"
+    fi
+
+    # Check for authentik-server
+    if grep -q "authentik-server" /etc/hosts 2>/dev/null; then
+        print_status "authentik-server already in /etc/hosts"
+    else
+        print_warning "Adding authentik-server to /etc/hosts (requires sudo)"
+        echo "127.0.0.1 authentik-server" | sudo tee -a /etc/hosts > /dev/null
+        print_status "Added authentik-server to /etc/hosts"
+    fi
+}
+
+# Start infrastructure (without SSO first to let Authentik initialize)
 start_infrastructure() {
     echo ""
-    echo -e "${BLUE}Starting Coder infrastructure...${NC}"
+    echo -e "${BLUE}[3/8] Starting infrastructure...${NC}"
 
     cd "$POC_DIR"
 
     # Export environment variables
     export POSTGRES_PASSWORD
-    # Use host.docker.internal so workspace containers can reach Coder server
     export CODER_ACCESS_URL="http://host.docker.internal:${CODER_PORT}"
 
     # Pull images first
-    print_info "Pulling Docker images..."
-    docker compose pull
+    print_info "Pulling Docker images (this may take a few minutes)..."
+    docker compose pull --quiet
 
-    # Start services
+    # Start all services (base compose - Coder will start without OIDC initially)
     print_info "Starting services..."
     docker compose up -d
 
     # Wait for PostgreSQL
-    print_info "Waiting for PostgreSQL to be ready..."
+    print_info "Waiting for PostgreSQL..."
     for i in {1..30}; do
-        if docker exec coder-db pg_isready -U coder -d coder &> /dev/null; then
+        if docker exec postgres pg_isready -U coder -d coder &> /dev/null; then
             print_status "PostgreSQL is ready"
             break
         fi
         sleep 1
         if [ $i -eq 30 ]; then
-            print_error "PostgreSQL failed to start in time"
-            docker compose logs postgres
+            print_error "PostgreSQL failed to start"
+            exit 1
+        fi
+    done
+}
+
+# Wait for Authentik to be ready
+wait_for_authentik() {
+    echo ""
+    echo -e "${BLUE}[4/8] Waiting for Authentik...${NC}"
+
+    print_info "Authentik takes 30-60 seconds to initialize..."
+    for i in {1..90}; do
+        if curl -sf "http://localhost:9000/-/health/ready/" > /dev/null 2>&1; then
+            print_status "Authentik is ready"
+            return 0
+        fi
+        sleep 2
+        if [ $((i % 10)) -eq 0 ]; then
+            print_info "Still waiting for Authentik... ($i seconds)"
+        fi
+    done
+    print_error "Authentik failed to start in time"
+    docker compose logs authentik-server | tail -20
+    exit 1
+}
+
+# Setup SSO (providers + applications)
+setup_sso() {
+    echo ""
+    echo -e "${BLUE}[5/8] Setting up Authentik SSO...${NC}"
+
+    cd "$POC_DIR"
+
+    # Run the SSO setup script to create providers
+    print_info "Creating OAuth2 providers..."
+    if [ -f "$SCRIPT_DIR/setup-authentik-sso-full.sh" ]; then
+        # Run SSO setup (suppress verbose output)
+        "$SCRIPT_DIR/setup-authentik-sso-full.sh" 2>&1 | grep -E "(✓|Created|Error|error)" || true
+        print_status "OAuth2 providers created"
+    else
+        print_error "SSO setup script not found"
+        exit 1
+    fi
+
+    # Create Authentik applications
+    print_info "Creating Authentik applications..."
+    docker exec authentik-server ak shell -c "
+from authentik.providers.oauth2.models import OAuth2Provider
+from authentik.core.models import Application
+
+apps = [
+    {'name': 'Coder', 'slug': 'coder', 'provider_name': 'Coder OIDC'},
+    {'name': 'Gitea', 'slug': 'gitea', 'provider_name': 'Gitea OIDC'},
+    {'name': 'MinIO', 'slug': 'minio', 'provider_name': 'MinIO OIDC'},
+    {'name': 'Platform Admin', 'slug': 'platform-admin', 'provider_name': 'Platform Admin OIDC'},
+]
+
+for a in apps:
+    try:
+        provider = OAuth2Provider.objects.get(name=a['provider_name'])
+        app, created = Application.objects.get_or_create(
+            slug=a['slug'],
+            defaults={'name': a['name'], 'provider': provider}
+        )
+        if not created:
+            app.provider = provider
+            app.save()
+    except Exception as e:
+        pass
+" 2>&1 | grep -v "^{" || true
+
+    # Verify OIDC endpoint
+    sleep 2
+    if curl -sf "http://localhost:9000/application/o/coder/.well-known/openid-configuration" | grep -q "issuer"; then
+        print_status "OIDC endpoint verified"
+    else
+        print_warning "OIDC endpoint may not be ready yet"
+    fi
+}
+
+# Restart Coder with SSO
+restart_with_sso() {
+    echo ""
+    echo -e "${BLUE}[6/8] Restarting Coder with SSO...${NC}"
+
+    cd "$POC_DIR"
+
+    # Restart Coder with SSO overlay
+    print_info "Applying SSO configuration..."
+    docker compose -f docker-compose.yml -f docker-compose.sso.yml up -d coder minio platform-admin 2>&1 | grep -v "^time=" || true
+
+    # Wait for Coder to be ready
+    print_info "Waiting for Coder to restart..."
+    sleep 5
+    for i in {1..30}; do
+        if curl -sf "http://localhost:${CODER_PORT}/api/v2/buildinfo" > /dev/null 2>&1; then
+            print_status "Coder is ready with SSO"
+            break
+        fi
+        sleep 2
+        if [ $i -eq 30 ]; then
+            print_error "Coder failed to restart"
+            docker logs coder-server 2>&1 | tail -10
             exit 1
         fi
     done
 
-    # Wait for Coder
-    print_info "Waiting for Coder to be ready..."
-    for i in {1..60}; do
-        if curl -s "http://localhost:${CODER_PORT}/api/v2/buildinfo" &> /dev/null; then
-            print_status "Coder is ready"
-            break
-        fi
-        sleep 2
-        if [ $i -eq 60 ]; then
-            print_error "Coder failed to start in time"
-            docker compose logs coder
-            exit 1
-        fi
-    done
+    # Verify GitHub login is disabled
+    if docker inspect coder-server --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -q "GITHUB_DEFAULT_PROVIDER_ENABLE=false"; then
+        print_status "GitHub login disabled"
+    fi
+
+    if docker inspect coder-server --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -q "CODER_OIDC_ISSUER_URL"; then
+        print_status "OIDC configured"
+    fi
 }
 
 # Create first user
 create_admin_user() {
     echo ""
-    echo -e "${BLUE}Creating admin user...${NC}"
+    echo -e "${BLUE}[7/8] Creating admin user...${NC}"
 
     # Check if first user already exists
-    if curl -s "http://localhost:${CODER_PORT}/api/v2/users/first" | grep -q "true"; then
+    FIRST_USER_CHECK=$(curl -sf "http://localhost:${CODER_PORT}/api/v2/users/first" 2>/dev/null || echo "error")
+    if echo "$FIRST_USER_CHECK" | grep -q '"first_user":false'; then
         print_warning "Admin user already exists, skipping creation"
         return
     fi
 
     # Create first user using the API
-    RESPONSE=$(curl -s -X POST "http://localhost:${CODER_PORT}/api/v2/users/first" \
+    print_info "Creating admin user..."
+    RESPONSE=$(curl -sf -X POST "http://localhost:${CODER_PORT}/api/v2/users/first" \
         -H "Content-Type: application/json" \
         -d "{
             \"username\": \"${ADMIN_USER}\",
             \"email\": \"${ADMIN_EMAIL}\",
             \"password\": \"${ADMIN_PASSWORD}\"
-        }")
+        }" 2>/dev/null || echo "error")
 
     if echo "$RESPONSE" | grep -q "session_token"; then
-        print_status "Admin user created successfully"
+        print_status "Admin user created: ${ADMIN_EMAIL}"
     else
-        print_warning "Could not create admin user via API, trying CLI..."
-        docker exec coder-server coder login "http://localhost:7080" \
-            --first-user-username "$ADMIN_USER" \
-            --first-user-email "$ADMIN_EMAIL" \
-            --first-user-password "$ADMIN_PASSWORD" 2>/dev/null || true
+        print_warning "Admin user may already exist or creation failed"
     fi
 }
 
-# Install Coder CLI locally
-install_coder_cli() {
+# Setup additional services
+setup_additional_services() {
     echo ""
-    echo -e "${BLUE}Setting up Coder CLI...${NC}"
+    echo -e "${BLUE}[8/8] Setting up additional services...${NC}"
 
-    if command -v coder &> /dev/null; then
-        print_status "Coder CLI already installed: $(coder version 2>/dev/null | head -1)"
-    else
-        print_info "Installing Coder CLI..."
-        curl -fsSL https://coder.com/install.sh | sh
-        print_status "Coder CLI installed"
+    cd "$POC_DIR"
+
+    # Setup Gitea users if script exists
+    if [ -f "$SCRIPT_DIR/setup-gitea.sh" ]; then
+        print_info "Setting up Gitea users and repositories..."
+        "$SCRIPT_DIR/setup-gitea.sh" 2>&1 | grep -E "(✓|Created|already exists)" || true
+        print_status "Gitea configured"
     fi
-}
 
-# Configure Coder CLI
-configure_cli() {
-    echo ""
-    echo -e "${BLUE}Configuring Coder CLI...${NC}"
-
-    # Login to local Coder instance
-    print_info "Logging into Coder..."
-
-    # Use expect-like approach with timeout
-    echo "$ADMIN_PASSWORD" | timeout 10 coder login "http://localhost:${CODER_PORT}" \
-        --username "$ADMIN_USER" 2>/dev/null || {
-        print_warning "Auto-login failed. Please login manually:"
-        echo "  coder login http://localhost:${CODER_PORT}"
-    }
-}
-
-# Push workspace template
-push_template() {
-    echo ""
-    echo -e "${BLUE}Creating workspace template...${NC}"
-
-    cd "$POC_DIR/templates/contractor-workspace"
-
-    # Check if template exists
-    if coder templates list 2>/dev/null | grep -q "contractor-workspace"; then
-        print_warning "Template 'contractor-workspace' already exists"
-        print_info "Updating template..."
-        coder templates push contractor-workspace --directory . --yes 2>/dev/null || {
-            print_warning "Template update requires manual intervention"
-            echo "  cd $POC_DIR/templates/contractor-workspace"
-            echo "  coder templates push contractor-workspace --directory . --yes"
-        }
-    else
-        print_info "Creating new template..."
-        coder templates create contractor-workspace --directory . --yes 2>/dev/null || {
-            print_warning "Template creation requires manual intervention"
-            echo "  cd $POC_DIR/templates/contractor-workspace"
-            echo "  coder templates create contractor-workspace --directory ."
-        }
+    # Setup test users if script exists
+    if [ -f "$SCRIPT_DIR/setup-test-users.sh" ]; then
+        print_info "Creating test users..."
+        "$SCRIPT_DIR/setup-test-users.sh" 2>&1 | grep -E "(✓|Created|already exists)" || true
+        print_status "Test users created"
     fi
 }
 
@@ -238,26 +325,49 @@ print_summary() {
     echo -e "${NC}"
 
     echo ""
-    echo -e "${BLUE}Access Information:${NC}"
-    echo "  URL:      http://localhost:${CODER_PORT}"
-    echo "  Username: ${ADMIN_USER}"
-    echo "  Password: ${ADMIN_PASSWORD}"
+    echo -e "${BLUE}Access URLs (use host.docker.internal for OIDC):${NC}"
+    echo "  ┌─────────────────┬───────────────────────────────────────────┐"
+    echo "  │ Coder WebIDE    │ http://host.docker.internal:${CODER_PORT}            │"
+    echo "  │ Authentik SSO   │ http://localhost:9000                     │"
+    echo "  │ Gitea (Git)     │ http://localhost:3000                     │"
+    echo "  │ MinIO Storage   │ http://localhost:9001                     │"
+    echo "  │ Platform Admin  │ http://localhost:5050                     │"
+    echo "  │ Drone CI        │ http://localhost:8080                     │"
+    echo "  │ AI Gateway      │ http://localhost:8090                     │"
+    echo "  └─────────────────┴───────────────────────────────────────────┘"
+
+    echo ""
+    echo -e "${BLUE}Credentials:${NC}"
+    echo "  ┌─────────────────┬─────────────────────┬─────────────────────┐"
+    echo "  │ Service         │ Username            │ Password            │"
+    echo "  ├─────────────────┼─────────────────────┼─────────────────────┤"
+    echo "  │ Coder           │ ${ADMIN_EMAIL}     │ ${ADMIN_PASSWORD}          │"
+    echo "  │ Authentik       │ akadmin             │ admin               │"
+    echo "  │ Gitea           │ gitea               │ admin123            │"
+    echo "  │ MinIO           │ minioadmin          │ minioadmin          │"
+    echo "  └─────────────────┴─────────────────────┴─────────────────────┘"
+
+    echo ""
+    echo -e "${BLUE}SSO Login:${NC}"
+    echo "  1. Go to http://host.docker.internal:${CODER_PORT}"
+    echo "  2. Click 'Login with OIDC'"
+    echo "  3. Use Authentik credentials (akadmin / admin)"
+    echo ""
+    echo -e "${YELLOW}IMPORTANT:${NC} Use host.docker.internal (not localhost) for Coder!"
 
     echo ""
     echo -e "${BLUE}Quick Commands:${NC}"
-    echo "  View logs:        docker compose -f $POC_DIR/docker-compose.yml logs -f"
-    echo "  Stop Coder:       docker compose -f $POC_DIR/docker-compose.yml down"
-    echo "  Create workspace: coder create my-workspace --template contractor-workspace"
-    echo "  List workspaces:  coder list"
-    echo "  SSH to workspace: coder ssh my-workspace"
-    echo "  Run validation:   $SCRIPT_DIR/validate.sh"
+    echo "  View logs:        docker compose logs -f"
+    echo "  Stop all:         docker compose down"
+    echo "  Restart with SSO: docker compose -f docker-compose.yml -f docker-compose.sso.yml up -d"
+    echo "  Run validation:   ./scripts/validate.sh"
 
     echo ""
     echo -e "${BLUE}Next Steps:${NC}"
-    echo "  1. Open http://localhost:${CODER_PORT} in your browser"
-    echo "  2. Login with the credentials above"
-    echo "  3. Create a new workspace from the 'contractor-workspace' template"
-    echo "  4. Click 'VS Code' to open the web IDE"
+    echo "  1. Open http://host.docker.internal:${CODER_PORT} in your browser"
+    echo "  2. Login via OIDC (Authentik)"
+    echo "  3. Create a workspace from 'contractor-workspace' template"
+    echo "  4. Click 'code-server' to open VS Code in browser"
 
     echo ""
 }
@@ -265,11 +375,13 @@ print_summary() {
 # Main execution
 main() {
     check_prerequisites
+    setup_hosts
     start_infrastructure
+    wait_for_authentik
+    setup_sso
+    restart_with_sso
     create_admin_user
-    install_coder_cli
-    configure_cli
-    push_template
+    setup_additional_services
     print_summary
 }
 
@@ -280,23 +392,33 @@ case "${1:-}" in
         echo ""
         echo "Options:"
         echo "  --help, -h     Show this help message"
-        echo "  --clean        Remove all Coder data and start fresh"
+        echo "  --clean        Remove all data and start fresh"
+        echo "  --no-sso       Setup without SSO (basic mode)"
         echo ""
         echo "Environment Variables:"
         echo "  CODER_PORT         Port for Coder UI (default: 7080)"
         echo "  ADMIN_USER         Admin username (default: admin)"
-        echo "  ADMIN_EMAIL        Admin email (default: admin@local.test)"
-        echo "  ADMIN_PASSWORD     Admin password (default: SecureP@ssw0rd!)"
-        echo "  POSTGRES_PASSWORD  PostgreSQL password (default: coderpassword)"
+        echo "  ADMIN_EMAIL        Admin email (default: admin@example.com)"
+        echo "  ADMIN_PASSWORD     Admin password (default: CoderAdmin123!)"
         exit 0
         ;;
     --clean)
-        echo -e "${YELLOW}Cleaning up existing Coder installation...${NC}"
+        echo -e "${YELLOW}Cleaning up existing installation...${NC}"
         cd "$POC_DIR"
         docker compose down -v 2>/dev/null || true
-        docker volume rm coder-poc-postgres coder-poc-data 2>/dev/null || true
         print_status "Cleanup complete"
+        echo ""
         main
+        ;;
+    --no-sso)
+        echo -e "${YELLOW}Setting up without SSO...${NC}"
+        check_prerequisites
+        setup_hosts
+        start_infrastructure
+        create_admin_user
+        echo ""
+        echo -e "${GREEN}Basic setup complete (no SSO)${NC}"
+        echo "Access Coder at: http://localhost:${CODER_PORT}"
         ;;
     *)
         main

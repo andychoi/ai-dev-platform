@@ -7,7 +7,7 @@ services:
       # Authentik OIDC
       CODER_OIDC_ISSUER_URL: "http://authentik-server:9000/application/o/coder/"
       CODER_OIDC_CLIENT_ID: "coder"
-      CODER_OIDC_CLIENT_SECRET: "x9XPxAr97r59IwvlhgO8ZwpH89BddDMvzP3otPwpRDgFcPQX7weaIfNDclpYHLA0ZDgrOkdvyRHzNBhB7OD7XuJ9Zcs3zK3tzXy3CGXi2JjwpHQdoCvsP91fkHjvSxBg"
+      CODER_OIDC_CLIENT_SECRET: "y8DYRFdJvdhzyjquuPpy2pNB90MPEV9t7bZDRzMZ1KTLOv6EBT1rSrKgbLBGcqKmoKC5uQhZ2Kp7T8fAZ7y84ct0R9iY9fmPa5nbudeVsEEeBzJMoIN6TJNLws0L7eOE"
       CODER_OIDC_ALLOW_SIGNUPS: "true"
       CODER_OIDC_EMAIL_DOMAIN: ""
       # Disable default GitHub OAuth (device flow)
@@ -20,7 +20,7 @@ services:
       # Authentik OIDC
       MINIO_IDENTITY_OPENID_CONFIG_URL: "http://authentik-server:9000/application/o/minio/.well-known/openid-configuration"
       MINIO_IDENTITY_OPENID_CLIENT_ID: "minio"
-      MINIO_IDENTITY_OPENID_CLIENT_SECRET: "p2NGu8MWCPi5DF1udAT5AQ39lby3ykLq97xqDbOHWyiThaW2vtzcYdIYGAM1QCbjKdjyYUvARWn9SzQ38DBYSyaLHXlUfQ2NGV1qILDyIMXjQK778jfji2q4CaJFACNO"
+      MINIO_IDENTITY_OPENID_CLIENT_SECRET: "WnS2CWdOkx6QAAUfwxx7zRNu4tz9JSkDZpqmCRtxe0NEkOFf3YXUSFgAOZRfIVBwxTt6PcX1cW7uaRsFPgoBf7OwhclFAtM01jWvwy5zQoQaDvtXEfOAloXTp0gnkwUN"
       MINIO_IDENTITY_OPENID_CLAIM_NAME: "policy"
       MINIO_IDENTITY_OPENID_SCOPES: "openid,profile,email"
       MINIO_IDENTITY_OPENID_REDIRECT_URI: "http://localhost:9001/oauth_callback"
@@ -31,5 +31,5 @@ services:
       OIDC_ENABLED: "true"
       OIDC_ISSUER_URL: "http://authentik-server:9000/application/o/platform-admin/"
       OIDC_CLIENT_ID: "platform-admin"
-      OIDC_CLIENT_SECRET: "RILYoU8R30l8DCC1kl2GQGcKBC3aB9xsef1TnqCidVo0P3O7GF31rvqMmYFiAh5hDmz8I1IJxnDHzb2DK8us9t6HFxQUUzsHzUMIc36VmXk7QVIWcylye52v1rC5kpMk"
+      OIDC_CLIENT_SECRET: "RPOJEzoS13q0hvF2QakxPsZgx7pWtRCmFdBiDfrfVQevKuq4hLXOJAmmYB80kOlTPZfVL15C6KOGTbOPGHgqTO4bfFZS9AVcIYTrlqrgPhJBNLWmywZsC5LtjnOPNYQt"
       LOCAL_AUTH_ENABLED: "true"
