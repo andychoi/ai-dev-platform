@@ -48,7 +48,7 @@ print_info() {
 # Check prerequisites
 check_prerequisites() {
     echo ""
-    echo -e "${BLUE}[1/10] Checking prerequisites...${NC}"
+    echo -e "${BLUE}[1/11] Checking prerequisites...${NC}"
 
     # Check Docker
     if ! command -v docker &> /dev/null; then
@@ -98,7 +98,7 @@ check_prerequisites() {
 # Check and add hosts entry
 setup_hosts() {
     echo ""
-    echo -e "${BLUE}[2/10] Checking hosts configuration...${NC}"
+    echo -e "${BLUE}[2/11] Checking hosts configuration...${NC}"
 
     # Check for host.docker.internal
     if grep -q "host.docker.internal" /etc/hosts 2>/dev/null; then
@@ -116,7 +116,7 @@ setup_hosts() {
 # Start infrastructure (without SSO first to let Authentik initialize)
 start_infrastructure() {
     echo ""
-    echo -e "${BLUE}[3/10] Starting infrastructure...${NC}"
+    echo -e "${BLUE}[3/11] Starting infrastructure...${NC}"
 
     cd "$POC_DIR"
 
@@ -150,7 +150,7 @@ start_infrastructure() {
 # Wait for Authentik to be ready
 wait_for_authentik() {
     echo ""
-    echo -e "${BLUE}[4/10] Waiting for Authentik...${NC}"
+    echo -e "${BLUE}[4/11] Waiting for Authentik...${NC}"
 
     print_info "Authentik takes 30-60 seconds to initialize..."
     for i in {1..90}; do
@@ -171,7 +171,7 @@ wait_for_authentik() {
 # Setup SSO (providers + applications)
 setup_sso() {
     echo ""
-    echo -e "${BLUE}[5/10] Setting up Authentik SSO...${NC}"
+    echo -e "${BLUE}[5/11] Setting up Authentik SSO...${NC}"
 
     cd "$POC_DIR"
 
@@ -225,7 +225,7 @@ for a in apps:
 # Restart Coder with SSO
 restart_with_sso() {
     echo ""
-    echo -e "${BLUE}[6/10] Restarting Coder with SSO...${NC}"
+    echo -e "${BLUE}[6/11] Restarting Coder with SSO...${NC}"
 
     cd "$POC_DIR"
 
@@ -263,7 +263,7 @@ restart_with_sso() {
 # Create first user
 create_admin_user() {
     echo ""
-    echo -e "${BLUE}[7/10] Creating admin user...${NC}"
+    echo -e "${BLUE}[7/11] Creating admin user...${NC}"
 
     # Check if first user already exists
     FIRST_USER_CHECK=$(curl -sf "http://localhost:${CODER_PORT}/api/v2/users/first" 2>/dev/null || echo "error")
@@ -292,7 +292,7 @@ create_admin_user() {
 # Push workspace template
 push_template() {
     echo ""
-    echo -e "${BLUE}[8/10] Pushing workspace template...${NC}"
+    echo -e "${BLUE}[8/11] Pushing workspace template...${NC}"
 
     cd "$POC_DIR"
 
@@ -317,7 +317,7 @@ push_template() {
 # Setup additional services
 setup_additional_services() {
     echo ""
-    echo -e "${BLUE}[9/10] Setting up additional services...${NC}"
+    echo -e "${BLUE}[9/11] Setting up additional services...${NC}"
 
     cd "$POC_DIR"
 
@@ -329,10 +329,33 @@ setup_additional_services() {
     fi
 }
 
+# Setup LiteLLM virtual keys
+setup_litellm_keys() {
+    echo ""
+    echo -e "${BLUE}[10/11] Setting up LiteLLM virtual keys...${NC}"
+
+    cd "$POC_DIR"
+
+    if [ -f "$SCRIPT_DIR/setup-litellm-keys.sh" ]; then
+        print_info "Generating per-user API keys for AI assistant (Roo Code)..."
+        "$SCRIPT_DIR/setup-litellm-keys.sh" 2>&1 | grep -E "(✓|created|exists|FAILED|ready|complete)" || true
+        if [ -f /tmp/litellm-keys.txt ] && [ -s /tmp/litellm-keys.txt ]; then
+            print_status "LiteLLM virtual keys created ($(wc -l < /tmp/litellm-keys.txt | tr -d ' ') keys)"
+            print_info "Keys saved to /tmp/litellm-keys.txt"
+            print_info "Use these keys when creating workspaces (paste into 'LiteLLM API Key' field)"
+        else
+            print_warning "No keys file found — LiteLLM may not be running"
+        fi
+    else
+        print_warning "setup-litellm-keys.sh not found — AI keys not provisioned"
+        print_info "Roo Code will not work in workspaces without virtual keys"
+    fi
+}
+
 # Setup test users (Coder, Gitea, Authentik)
 setup_test_users() {
     echo ""
-    echo -e "${BLUE}[10/10] Creating test users...${NC}"
+    echo -e "${BLUE}[11/11] Creating test users...${NC}"
 
     cd "$POC_DIR"
 
@@ -406,11 +429,27 @@ print_summary() {
     echo "  Run validation:   ./scripts/validate.sh"
 
     echo ""
+    echo -e "${BLUE}LiteLLM Virtual Keys (for AI Assistant):${NC}"
+    if [ -f /tmp/litellm-keys.txt ] && [ -s /tmp/litellm-keys.txt ]; then
+        echo "  ┌─────────────┬──────────────────────────────────────────────┐"
+        while IFS='=' read -r user key; do
+            printf "  │ %-11s │ %-44s │\n" "$user" "${key:0:44}"
+        done < /tmp/litellm-keys.txt
+        echo "  └─────────────┴──────────────────────────────────────────────┘"
+        echo ""
+        echo "  Paste the user's key into the 'LiteLLM API Key' field when creating a workspace."
+    else
+        echo "  No keys generated. Run: ./scripts/setup-litellm-keys.sh"
+    fi
+
+    echo ""
     echo -e "${BLUE}Next Steps:${NC}"
     echo "  1. Open http://host.docker.internal:${CODER_PORT} in your browser"
     echo "  2. Login via OIDC (Authentik)"
     echo "  3. Create a workspace from 'contractor-workspace' template"
+    echo "     - Paste the user's LiteLLM key into the 'LiteLLM API Key' field"
     echo "  4. Click 'code-server' to open VS Code in browser"
+    echo "  5. Open Roo Code (sidebar icon) — AI chat should work immediately"
 
     echo ""
 }
@@ -426,6 +465,7 @@ main() {
     create_admin_user
     push_template
     setup_additional_services
+    setup_litellm_keys
     setup_test_users
     print_summary
 }

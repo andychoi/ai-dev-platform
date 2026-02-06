@@ -241,17 +241,37 @@ env | grep -i "password\|secret\|key" || echo "PASS: No secrets in env"
 
 ## 5. AI Integration Testing
 
-### 5.1 Coder AI Bridge (Built-in Chat)
+### 5.1 Disabled AI Features Verification
+
+Verify that all built-in AI and third-party extensions are properly disabled:
 
 | Test | Steps | Expected Result |
 |------|-------|-----------------|
-| Open AI Chat | Click AI icon in Coder | Chat panel opens |
-| Send message | Type question, send | Response from Bedrock |
-| No sign-in prompt | Start using | No Google/GitHub auth popup |
+| No AI Bridge chat | Open Coder dashboard | No AI chat icon/panel visible |
+| No Copilot extension | Open Extensions panel in workspace | `github.copilot` and `github.copilot-chat` NOT listed |
+| No Cody extension | Open Extensions panel in workspace | `sourcegraph.cody-ai` NOT listed |
+| No inline suggestions | Type code in editor | No ghost-text / inline suggestions from Copilot |
+| No inline chat | Press `Ctrl+I` / `Cmd+I` | Inline chat does NOT open |
+| No sign-in prompt | Navigate Coder UI | No Google/GitHub auth popup |
+| No chat command center | Check VS Code title bar | No chat icon in command center |
 
-Prerequisites:
-- AWS credentials configured in docker-compose.yml
-- `CODER_AIBRIDGE_BEDROCK_*` environment variables set
+Verify server-side settings:
+```bash
+# AI Bridge disabled
+docker exec coder-server env | grep AIBRIDGE
+# Expected: CODER_AIBRIDGE_ENABLED=false
+
+# GitHub default OAuth disabled
+docker exec coder-server env | grep GITHUB_DEFAULT
+# Expected: CODER_OAUTH2_GITHUB_DEFAULT_PROVIDER_ENABLE=false
+```
+
+Verify workspace settings:
+```bash
+# Inside workspace terminal
+code-server --list-extensions 2>/dev/null | grep -iE "copilot|cody"
+# Expected: no output (extensions not installed)
+```
 
 ### 5.2 Roo Code Extension (VS Code)
 

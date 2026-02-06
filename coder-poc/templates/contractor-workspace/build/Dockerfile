@@ -170,6 +170,11 @@ RUN code-server --install-extension muhammad-sammy.csharp || true
 # Pre-installed so every developer has it ready without manual setup
 RUN code-server --install-extension rooveterinaryinc.roo-cline
 
+# Explicitly remove Copilot/Cody if present from base image or sideload
+RUN code-server --uninstall-extension github.copilot 2>/dev/null || true \
+    && code-server --uninstall-extension github.copilot-chat 2>/dev/null || true \
+    && code-server --uninstall-extension sourcegraph.cody-ai 2>/dev/null || true
+
 # IntelliJ keymap for developers migrating from JetBrains
 RUN code-server --install-extension k--kato.intellij-idea-keybindings
 

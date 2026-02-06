@@ -347,14 +347,23 @@ Workspace → LiteLLM Proxy → AWS Bedrock / Anthropic API
     └─→ No API keys exposed to workspace
 ```
 
-### 6.3 AI Bridge Configuration
+### 6.3 Disabled AI Features (Copilot, Cody, AI Bridge)
 
-```yaml
-# Coder AI Bridge (server-level)
-CODER_AIBRIDGE_BEDROCK_ACCESS_KEY: ${AWS_ACCESS_KEY_ID}
-CODER_AIBRIDGE_BEDROCK_ACCESS_KEY_SECRET: ${AWS_SECRET_ACCESS_KEY}
-CODER_AIBRIDGE_BEDROCK_REGION: "us-east-1"
-```
+All built-in and third-party AI features are disabled to ensure AI traffic is routed exclusively through LiteLLM for auditing and cost control.
+
+| Feature | Disabled Via | Security Rationale |
+|---------|-------------|-------------------|
+| Coder AI Bridge | `CODER_AIBRIDGE_ENABLED=false` | Bypasses LiteLLM proxy; no per-user audit trail |
+| GitHub Copilot | Extension uninstalled + settings | Requires external GitHub auth; not auditable |
+| Copilot Chat | Extension uninstalled + settings | Same as Copilot |
+| VS Code inline chat | `inlineChat.mode=off` | Part of Copilot ecosystem |
+| Inline suggestions | `editor.inlineSuggest.enabled=false` | Prevents non-LiteLLM AI sources |
+| Sourcegraph Cody | Extension uninstalled + settings | Requires external auth; not auditable |
+
+**Three-layer lockdown:**
+1. **Server env vars** — `CODER_AIBRIDGE_ENABLED=false`
+2. **VS Code settings** — All `github.copilot.*`, `cody.*`, `chat.*` disabled
+3. **Dockerfile** — Explicit `--uninstall-extension` for Copilot, Copilot Chat, Cody
 
 ### 6.4 Roo Code Extension Security
 
@@ -362,8 +371,11 @@ CODER_AIBRIDGE_BEDROCK_REGION: "us-east-1"
 // Workspace-level config (~/.config/roo-code/settings.json)
 {
   "apiProvider": "openai-compatible",
-  "openAiBaseUrl": "http://litellm:4000",
-  "openAiModelId": "anthropic/claude-sonnet-4-20250514"
+  "openAiCompatibleApiConfiguration": {
+    "baseUrl": "http://litellm:4000/v1",
+    "apiKey": "<per-user-virtual-key>",
+    "modelId": "<selected-model>"
+  }
   // No upstream API keys stored - LiteLLM proxy handles credentials
 }
 ```

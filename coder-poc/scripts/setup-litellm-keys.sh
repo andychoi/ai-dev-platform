@@ -1,15 +1,22 @@
 #!/bin/bash
-# Setup LiteLLM virtual keys for all test users
-# Each key has per-user budget and rate limits
+# =============================================================================
+# Setup LiteLLM Virtual Keys for All Test Users
+# Creates per-user API keys with budget and rate limits
+# Keys are saved to a file for use during workspace provisioning
+# =============================================================================
 
 set -euo pipefail
 
-LITELLM_URL="http://localhost:4000"
-MASTER_KEY="${LITELLM_MASTER_KEY:-sk-poc-litellm-master-key-change-in-production}"
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
 
-# Default limits
-DEFAULT_RPM="${LITELLM_DEFAULT_RPM:-60}"
-DEFAULT_BUDGET="${LITELLM_DEFAULT_USER_BUDGET:-10.00}"
+LITELLM_URL="${LITELLM_URL:-http://localhost:4000}"
+MASTER_KEY="${LITELLM_MASTER_KEY:-sk-poc-litellm-master-key-change-in-production}"
+KEYS_FILE="${LITELLM_KEYS_FILE:-/tmp/litellm-keys.txt}"
 
 # Users to create keys for (username:budget:rpm)
 USERS=(
@@ -18,21 +25,22 @@ USERS=(
   "contractor1:10.00:60"
   "contractor2:10.00:60"
   "contractor3:10.00:60"
+  "readonly:5.00:30"
 )
 
-echo "=== Setting up LiteLLM virtual keys ==="
+echo -e "${BLUE}=== Setting up LiteLLM virtual keys ===${NC}"
 echo "LiteLLM URL: $LITELLM_URL"
 echo ""
 
-# Wait for LiteLLM to be ready
+# Wait for LiteLLM to be ready (use /health/readiness — no auth required)
 echo "Waiting for LiteLLM to be ready..."
-for i in $(seq 1 30); do
-  if curl -sf "$LITELLM_URL/health" > /dev/null 2>&1; then
-    echo "LiteLLM is ready!"
+for i in $(seq 1 60); do
+  if curl -sf "$LITELLM_URL/health/readiness" > /dev/null 2>&1; then
+    echo -e "${GREEN}LiteLLM is ready!${NC}"
     break
   fi
-  if [ "$i" -eq 30 ]; then
-    echo "ERROR: LiteLLM not ready after 30 seconds"
+  if [ "$i" -eq 60 ]; then
+    echo -e "${RED}ERROR: LiteLLM not ready after 60 seconds${NC}"
     exit 1
   fi
   sleep 1
@@ -40,10 +48,42 @@ done
 
 echo ""
 
+# Clear previous keys file
+> "$KEYS_FILE"
+
+KEYS_CREATED=0
+KEYS_FAILED=0
+
 for user_config in "${USERS[@]}"; do
   IFS=':' read -r username budget rpm <<< "$user_config"
 
-  echo "Creating key for: $username (budget: \$$budget, rpm: $rpm)"
+  echo -n "Creating key for $username (budget: \$$budget, rpm: $rpm)... "
+
+  # Check if key already exists for this user (by alias)
+  EXISTING=$(curl -s -X POST "$LITELLM_URL/key/info" \
+    -H "Authorization: Bearer $MASTER_KEY" \
+    -H "Content-Type: application/json" \
+    -d "{\"key_alias\": \"$username\"}" 2>/dev/null || echo "")
+
+  EXISTING_KEY=$(echo "$EXISTING" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    info = d.get('info', d.get('key_info', {}))
+    if isinstance(info, dict) and info.get('token'):
+        print(info['token'])
+    else:
+        print('')
+except:
+    print('')
+" 2>/dev/null || echo "")
+
+  if [ -n "$EXISTING_KEY" ] && [ "$EXISTING_KEY" != "" ]; then
+    echo -e "${YELLOW}exists (reusing)${NC}"
+    echo "$username=$EXISTING_KEY" >> "$KEYS_FILE"
+    KEYS_CREATED=$((KEYS_CREATED + 1))
+    continue
+  fi
 
   RESPONSE=$(curl -s -X POST "$LITELLM_URL/key/generate" \
     -H "Authorization: Bearer $MASTER_KEY" \
@@ -57,23 +97,35 @@ for user_config in "${USERS[@]}"; do
         \"workspace_user\": \"$username\",
         \"created_by\": \"setup-script\"
       }
-    }")
+    }" 2>/dev/null || echo "{}")
 
-  KEY=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('key', 'ERROR'))" 2>/dev/null || echo "ERROR")
+  KEY=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('key', ''))" 2>/dev/null || echo "")
 
-  if [ "$KEY" = "ERROR" ]; then
-    echo "  WARNING: Failed to create key for $username"
+  if [ -z "$KEY" ] || [ "$KEY" = "" ]; then
+    echo -e "${RED}FAILED${NC}"
     echo "  Response: $RESPONSE"
+    KEYS_FAILED=$((KEYS_FAILED + 1))
   else
-    echo "  Key created: ${KEY:0:20}..."
-    # Store key mapping for workspace provisioning
-    echo "$username=$KEY" >> /tmp/litellm-keys.txt
+    echo -e "${GREEN}${KEY:0:20}...${NC}"
+    echo "$username=$KEY" >> "$KEYS_FILE"
+    KEYS_CREATED=$((KEYS_CREATED + 1))
   fi
 done
 
 echo ""
-echo "=== LiteLLM keys setup complete ==="
-echo "Keys saved to /tmp/litellm-keys.txt"
+echo -e "${BLUE}=== LiteLLM keys setup complete ===${NC}"
+echo -e "  Keys created: ${GREEN}${KEYS_CREATED}${NC}"
+if [ "$KEYS_FAILED" -gt 0 ]; then
+  echo -e "  Keys failed:  ${RED}${KEYS_FAILED}${NC}"
+fi
+echo "  Keys file: $KEYS_FILE"
 echo ""
-echo "To retrieve a key later:"
-echo "  curl -s $LITELLM_URL/key/info -H 'Authorization: Bearer $MASTER_KEY' -d '{\"key\": \"sk-...\"}'"
+echo -e "${BLUE}Usage:${NC}"
+echo "  When creating a workspace, paste the user's key from $KEYS_FILE"
+echo "  into the 'LiteLLM API Key' parameter field."
+echo ""
+echo "  To look up a user's key:"
+echo "    grep 'username' $KEYS_FILE"
+echo ""
+echo "  To verify a key works:"
+echo "    curl -s http://localhost:4000/v1/models -H 'Authorization: Bearer <key>'"

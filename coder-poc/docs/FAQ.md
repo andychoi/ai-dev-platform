@@ -89,7 +89,7 @@ Think of it as your own virtual development machine.
 5. Configure options (CPU, memory, AI model)
 6. Click **"Create"**
 
-Your workspace will be ready in 2-5 minutes.
+Your workspace will be ready in 2-5 minutes. AI features are configured automatically — no API key entry needed.
 
 ---
 
@@ -231,22 +231,39 @@ Note: Installed packages persist in your workspace.
 
 ### Q: How do I use the AI assistant?
 
-**A:** There are two AI assistants:
+**A:** Use **Roo Code** — the AI coding agent pre-installed in your workspace:
 
-**1. Coder Chat (Built-in)**
-- Click the AI icon in the Coder dashboard
-- Ask questions, get code help
-
-**2. Roo Code (VS Code)**
-- Click the Roo Code icon in the VS Code Activity Bar (sidebar) to open the AI panel
+- Click the **Roo Code icon** in the VS Code Activity Bar (sidebar) to open the AI panel
 - Roo Code is an agentic AI assistant that can edit files, run terminal commands, and review code
 - Describe what you need in natural language and Roo Code will execute multi-step tasks
 
+> **Note:** The built-in Coder Chat, GitHub Copilot, and Cody are all disabled. Roo Code is the only AI interface, and it routes all requests through the platform's centralized LiteLLM proxy for auditing and cost control.
+
 ---
 
-### Q: Do I need to sign in for AI features?
+### Q: Do I need to sign in or enter an API key for AI features?
 
-**A:** No! AI features are pre-configured and work immediately. No Google, GitHub, or other sign-in required.
+**A:** No! When your workspace is created, a personal LiteLLM API key is automatically provisioned for you behind the scenes. Roo Code is pre-configured and works immediately — no sign-in, no key pasting, no setup required.
+
+Your key has per-user budget and rate limits managed by the platform. You can check your usage at any time:
+
+```bash
+ai-usage    # Shows your spend, remaining budget, and request count
+ai-models   # Shows your active model and gateway
+```
+
+---
+
+### Q: Why is GitHub Copilot / Cody disabled?
+
+**A:** These extensions are disabled for security and compliance reasons:
+
+1. **Audit trail** — Copilot and Cody bypass the centralized LiteLLM proxy, making AI usage untrackable
+2. **Cost control** — Without LiteLLM virtual keys, there's no per-user budget enforcement
+3. **External auth** — Both require signing in to external services (GitHub, Sourcegraph), which is not allowed in this isolated environment
+4. **Extension marketplace** — code-server uses Open VSX, not the Microsoft Marketplace; Copilot is not available on Open VSX
+
+Roo Code provides equivalent (and more powerful) capabilities through LiteLLM.
 
 ---
 
@@ -450,11 +467,12 @@ Admins may have visibility into all workspaces for support purposes.
 ### Q: AI is not working!
 
 **A:**
-1. **Check Roo Code**: Click the Roo Code icon in the sidebar - does the AI panel open?
-2. **Check config**: In terminal, run `cat ~/.config/roo-code/settings.json`
-3. **Restart workspace**: Sometimes fixes configuration issues
-4. **Check model**: Try switching to a different AI model
-5. **Contact admin**: There may be a service issue
+1. **Check Roo Code**: Click the Roo Code icon in the sidebar — does the AI panel open?
+2. **Check config**: In terminal, run `cat ~/.config/roo-code/settings.json` — verify `apiKey` is present (not empty)
+3. **Check budget**: Run `ai-usage` — you may have hit your spending limit
+4. **Rebuild workspace**: If the API key is missing, rebuilding will re-provision it automatically
+5. **Check model**: Try switching to a different AI model
+6. **Contact admin**: There may be a service issue with LiteLLM
 
 ---
 
@@ -646,6 +664,25 @@ coder templates push <template-name> \
 - **You**: Full access to your history
 - **Admins**: May see metadata (not content) in audit logs
 - **No one else**: Conversations are not shared
+
+---
+
+### Q: How are AI API keys managed?
+
+**A:** LiteLLM virtual keys are **automatically provisioned** when a workspace is created:
+
+1. User creates a workspace and selects an AI model
+2. Terraform calls the LiteLLM API to look up or generate a key for that user
+3. The key is injected into the workspace configuration (Roo Code, environment variables)
+4. Users never see or handle raw API keys
+
+**Admin tasks:**
+- **View keys**: LiteLLM Admin UI at `http://localhost:4000/ui`
+- **Adjust budgets**: Edit per-user limits in LiteLLM
+- **Revoke a key**: Delete the key in LiteLLM — the user's workspace will lose AI access until rebuilt
+- **Monitor usage**: Platform Admin dashboard → AI Usage page
+
+> Keys are scoped per-user (by Coder username) and include budget and rate limits. The `setup-litellm-keys.sh` script is no longer required for normal operation but can still be used for bulk key management.
 
 ---
 

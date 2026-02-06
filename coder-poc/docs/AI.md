@@ -6,7 +6,7 @@ This document describes how AI capabilities are integrated into the Coder WebIDE
 
 1. [AI Architecture Overview](#1-ai-architecture-overview)
 2. [AI Providers & Models](#2-ai-providers--models)
-3. [Coder AI Bridge](#3-coder-ai-bridge)
+3. [Disabled AI Features (Copilot, Cody, AI Bridge)](#3-disabled-ai-features-copilot-cody-coder-ai-bridge)
 4. [Roo Code Extension](#4-roo-code-extension)
 5. [LiteLLM Proxy](#5-litellm-proxy)
 6. [AI-Assisted Development Workflows](#6-ai-assisted-development-workflows)
@@ -28,18 +28,18 @@ This document describes how AI capabilities are integrated into the Coder WebIDE
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
 │  │                         USER INTERFACES                              │   │
 │  │  ┌───────────────┐  ┌───────────────┐  ┌───────────────┐           │   │
-│  │  │  Coder Chat   │  │   Roo Code   │  │  CLI Tools    │           │   │
-│  │  │  (Built-in)   │  │  (VS Code)    │  │  (Terminal)   │           │   │
-│  │  └───────┬───────┘  └───────┬───────┘  └───────┬───────┘           │   │
-│  └──────────┼──────────────────┼──────────────────┼─────────────────────┘   │
-│             │                  │                  │                          │
-│             ▼                  ▼                  ▼                          │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐              │
-│  │   AI Bridge     │  │  Roo Code API  │  │    LiteLLM      │              │
-│  │ (Coder Server)  │  │  (via LiteLLM) │  │    (Proxy)      │              │
-│  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘              │
-│           │                    │                    │                        │
-│           └────────────────────┼────────────────────┘                        │
+│  │  │ Coder Chat   │  │   Roo Code   │  │  CLI Tools    │           │   │
+│  │  │ (DISABLED)   │  │  (VS Code)    │  │  (Terminal)   │           │   │
+│  │  └──────────────┘  └───────┬───────┘  └───────┬───────┘           │   │
+│  └─────────────────────────────┼──────────────────┼─────────────────────┘   │
+│                                │                  │                          │
+│                                ▼                  ▼                          │
+│                        ┌─────────────────┐  ┌─────────────────┐              │
+│                        │  Roo Code API  │  │    LiteLLM      │              │
+│                        │  (via LiteLLM) │  │    (Proxy)      │              │
+│                        └────────┬────────┘  └────────┬────────┘              │
+│                                 │                    │                        │
+│                                 └────────────────────┘                        │
 │                                │                                             │
 │  ┌─────────────────────────────┼─────────────────────────────────────────┐  │
 │  │                    AI PROVIDER LAYER                                   │  │
@@ -55,7 +55,7 @@ This document describes how AI capabilities are integrated into the Coder WebIDE
 
 | Capability | Interface | Provider | Use Case |
 |------------|-----------|----------|----------|
-| Chat Assistant | Coder Built-in | Bedrock/Anthropic | Quick questions, explanations |
+| ~~Chat Assistant~~ | ~~Coder Built-in~~ | ~~Disabled~~ | Use Roo Code chat instead |
 | Code Completion | Roo Code | Bedrock/Anthropic (via LiteLLM) | Autocomplete while typing |
 | Code Generation | Roo Code | Bedrock/Anthropic (via LiteLLM) | Generate code from description |
 | Code Review | Roo Code | Bedrock/Anthropic (via LiteLLM) | Automated code review |
@@ -105,62 +105,69 @@ AI Model Options:
 
 ---
 
-## 3. Coder AI Bridge
+## 3. Disabled AI Features (Copilot, Cody, Coder AI Bridge)
 
 ### 3.1 Overview
 
-Coder AI Bridge is the **built-in AI chat** feature in Coder's web interface. It provides a ChatGPT-like experience directly within the platform.
+All built-in and third-party AI chat features are **explicitly disabled** in this platform. AI capabilities are provided exclusively through **Roo Code + LiteLLM** for centralized control, auditing, and cost management.
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                      CODER WEB INTERFACE                         │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │  [Workspaces] [Templates] [Users]              [AI Chat] │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                                                    │            │
-│  ┌────────────────────────────────────┐  ┌────────┴────────┐  │
-│  │                                    │  │   AI CHAT PANEL │  │
-│  │         MAIN CONTENT               │  │                 │  │
-│  │                                    │  │  User: How do   │  │
-│  │                                    │  │  I deploy...?   │  │
-│  │                                    │  │                 │  │
-│  │                                    │  │  AI: Here's     │  │
-│  │                                    │  │  how to...      │  │
-│  │                                    │  │                 │  │
-│  └────────────────────────────────────┘  └─────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-```
+### 3.2 What is Disabled
 
-### 3.2 Configuration
+| Feature | How Disabled | Why |
+|---------|-------------|-----|
+| **Coder AI Bridge** | `CODER_AIBRIDGE_ENABLED=false`, `CODER_HIDE_AI_TASKS=true` | Bypasses LiteLLM proxy; no per-user budgets or audit |
+| **GitHub Copilot** | Extension uninstalled in Dockerfile; all `github.copilot.*` settings set to `false` | Proprietary; requires GitHub sign-in; not available on Open VSX |
+| **Copilot Chat** | `github.copilot.chat.enabled=false`; extension uninstalled | Same as Copilot; not compatible with code-server |
+| **VS Code inline chat** | `inlineChat.mode=off` | Part of Copilot ecosystem |
+| **VS Code inline suggestions** | `editor.inlineSuggest.enabled=false` | Prevents ghost-text from non-LiteLLM sources |
+| **VS Code chat panel** | `chat.agent.enabled=false`, `chat.commandCenter.enabled=false` | Built-in chat not available in code-server (Copilot not in VS Code OSS core yet) |
+| **Sourcegraph Cody** | `cody.enabled=false`, `cody.autocomplete.enabled=false`; extension uninstalled | Requires external Sourcegraph auth |
+| **GitHub default OAuth** | `CODER_OAUTH2_GITHUB_DEFAULT_PROVIDER_ENABLE=false` | Prevents GitHub sign-in popup in Coder UI |
 
+### 3.3 Lockdown Implementation
+
+**Layer 1 — Coder Server (docker-compose.yml):**
 ```yaml
-# docker-compose.yml - Coder AI Bridge settings
 environment:
-  # AWS Bedrock Configuration (Recommended)
-  CODER_AIBRIDGE_BEDROCK_ACCESS_KEY: ${AWS_ACCESS_KEY_ID}
-  CODER_AIBRIDGE_BEDROCK_ACCESS_KEY_SECRET: ${AWS_SECRET_ACCESS_KEY}
-  CODER_AIBRIDGE_BEDROCK_REGION: us-east-1
-  CODER_AIBRIDGE_BEDROCK_MODEL: "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
-  CODER_AIBRIDGE_BEDROCK_SMALL_FAST_MODEL: "us.anthropic.claude-haiku-4-5-20251001-v1:0"
-
-  # OR Anthropic Direct API
-  # CODER_AIBRIDGE_ANTHROPIC_KEY: ${ANTHROPIC_API_KEY}
-  # CODER_AIBRIDGE_ANTHROPIC_BASE_URL: https://api.anthropic.com/
+  CODER_AIBRIDGE_ENABLED: "false"
+  CODER_HIDE_AI_TASKS: "true"
+  CODER_OAUTH2_GITHUB_DEFAULT_PROVIDER_ENABLE: "false"
 ```
 
-### 3.3 Features
+**Layer 2 — VS Code Settings (settings.json):**
+```json
+{
+  "chat.agent.enabled": false,
+  "chat.commandCenter.enabled": false,
+  "github.copilot.enable": { "*": false },
+  "github.copilot.editor.enableAutoCompletions": false,
+  "github.copilot.chat.enabled": false,
+  "github.copilot.renameSuggestions.triggerAutomatically": false,
+  "inlineChat.mode": "off",
+  "editor.inlineSuggest.enabled": false,
+  "cody.enabled": false,
+  "cody.autocomplete.enabled": false
+}
+```
 
-| Feature | Description |
-|---------|-------------|
-| **Chat Interface** | Conversational AI in sidebar |
-| **Context Awareness** | Can reference workspace/project |
-| **Code Blocks** | Syntax-highlighted code responses |
-| **Copy to Editor** | One-click copy code snippets |
-| **History** | Persisted conversation history |
+**Layer 3 — Dockerfile (explicit extension removal):**
+```dockerfile
+# Remove Copilot/Cody if present from base image or sideload
+RUN code-server --uninstall-extension github.copilot 2>/dev/null || true \
+    && code-server --uninstall-extension github.copilot-chat 2>/dev/null || true \
+    && code-server --uninstall-extension sourcegraph.cody-ai 2>/dev/null || true
+```
 
-### 3.4 No External Sign-in Required
+### 3.4 Why Not Use code-server's Built-in Chat?
 
-When configured with Bedrock or Anthropic API keys at the server level, users do **NOT** need to sign in with Google, GitHub, or other OAuth providers. The AI works immediately.
+code-server v4.108.2 (based on VS Code 1.108.2 stable) does **not** have a usable built-in AI chat:
+
+1. **`github.copilot.chat.customOAIModels`** (Bring Your Own Key) is VS Code Insiders-only — not graduated to stable
+2. **Copilot Chat** is not available on Open VSX (code-server's extension marketplace)
+3. **VS Code OSS core** has not yet fully integrated the open-sourced Copilot Chat (in progress as of early 2026)
+4. **Sideloading Copilot** causes authentication errors and hangs in code-server
+
+Once VS Code OSS integrates the open-sourced chat with custom model support, code-server will inherit it automatically. Until then, **Roo Code is the primary AI interface**.
 
 ---
 
@@ -636,13 +643,9 @@ Roo Code's agentic capabilities allow it to read multiple files, understand proj
 ### 9.1 Environment Variables
 
 ```bash
-# Coder AI Bridge (Server-level)
-CODER_AIBRIDGE_BEDROCK_ACCESS_KEY=${AWS_ACCESS_KEY_ID}
-CODER_AIBRIDGE_BEDROCK_ACCESS_KEY_SECRET=${AWS_SECRET_ACCESS_KEY}
-CODER_AIBRIDGE_BEDROCK_REGION=${AWS_REGION:-us-east-1}
-# Optional: Override default models
-# CODER_AIBRIDGE_BEDROCK_MODEL=us.anthropic.claude-sonnet-4-5-20250929-v1:0
-# CODER_AIBRIDGE_BEDROCK_SMALL_FAST_MODEL=us.anthropic.claude-haiku-4-5-20251001-v1:0
+# Coder AI Bridge (DISABLED - we use Roo Code + LiteLLM instead)
+CODER_AIBRIDGE_ENABLED=false
+CODER_HIDE_AI_TASKS=true
 
 # LiteLLM Proxy
 LITELLM_MASTER_KEY=sk-poc-litellm-master-key-change-in-production
@@ -666,24 +669,7 @@ AI_GATEWAY_URL=http://litellm:4000      # LiteLLM proxy endpoint
 ### 9.2 Workspace Template Parameters
 
 ```terraform
-# AI Provider selection
-data "coder_parameter" "ai_provider" {
-  name         = "ai_provider"
-  display_name = "AI Provider"
-  type         = "string"
-  default      = "bedrock"
-
-  option {
-    name  = "AWS Bedrock (Recommended)"
-    value = "bedrock"
-  }
-  option {
-    name  = "Anthropic API (Direct)"
-    value = "anthropic"
-  }
-}
-
-# AI Model selection
+# AI Model selection (routed through LiteLLM)
 data "coder_parameter" "ai_model" {
   name         = "ai_model"
   display_name = "AI Model"
@@ -713,7 +699,7 @@ data "coder_parameter" "ai_model" {
 
 | Issue | Cause | Solution |
 |-------|-------|----------|
-| AI chat shows sign-in prompt | Bedrock not configured | Add `CODER_AIBRIDGE_BEDROCK_*` env vars |
+| AI chat shows sign-in prompt | AI Bridge or Copilot not fully disabled | Verify `CODER_AIBRIDGE_ENABLED=false` and all Copilot settings in `settings.json` |
 | Roo Code not connecting | Wrong API key or URL | Check `LITELLM_API_KEY` env var and LiteLLM health |
 | Rate limit errors | Too many requests | Increase RPM limit in LiteLLM key settings |
 | Slow responses | Model overloaded | Try claude-haiku instead of claude-sonnet |
@@ -778,3 +764,4 @@ Model selection is configured per-workspace via the template parameter.
 |---------|------|--------|---------|
 | 1.0 | 2026-02-04 | Platform Team | Initial version |
 | 1.1 | 2026-02-05 | Platform Team | Replace Continue/Cody with Roo Code; replace AI Gateway with LiteLLM |
+| 1.2 | 2026-02-05 | Platform Team | Disable Copilot/Cody/AI Bridge; document three-layer lockdown |

@@ -56,12 +56,25 @@
   "security.workspace.trust.enabled": true,
   "telemetry.telemetryLevel": "off",
 
-  // Disable built-in AI features (we use Roo Code + LiteLLM instead)
+  // ── Disable ALL built-in AI / Copilot features ─────────────────────
+  // We use Roo Code + LiteLLM instead. These settings prevent any
+  // built-in chat, inline suggestions, or Copilot UI from appearing.
   "chat.agent.enabled": false,
   "chat.commandCenter.enabled": false,
+  "chat.editor.fontFamily": "",
+  "github.copilot.enable": {
+    "*": false
+  },
+  "github.copilot.editor.enableAutoCompletions": false,
+  "github.copilot.chat.enabled": false,
+  "github.copilot.advanced": {},
+  "github.copilot.renameSuggestions.triggerAutomatically": false,
+  "inlineChat.mode": "off",
+  "editor.inlineSuggest.enabled": false,
 
   // Disable Cody extension if still present from old images
   "cody.enabled": false,
+  "cody.autocomplete.enabled": false,
 
   // Java settings (IntelliJ alternatives)
   "java.configuration.runtimes": [
