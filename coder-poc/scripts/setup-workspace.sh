@@ -17,8 +17,8 @@ NC='\033[0m' # No Color
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 POC_DIR="$(dirname "$SCRIPT_DIR")"
-CODER_URL="${CODER_URL:-http://localhost:7080}"
-CODER_INTERNAL_URL="http://host.docker.internal:7080"  # URL from inside container
+CODER_URL="${CODER_URL:-http://localhost:7080}"  # HTTP for API calls (scripts)
+CODER_INTERNAL_URL="http://localhost:7080"  # HTTP for Coder CLI inside container (no cert needed)
 ADMIN_EMAIL="${CODER_ADMIN_EMAIL:-admin@example.com}"
 ADMIN_USERNAME="${CODER_ADMIN_USERNAME:-admin}"
 ADMIN_PASSWORD="${CODER_ADMIN_PASSWORD:-CoderAdmin123!}"
@@ -210,7 +210,7 @@ print_header "Setup Complete"
 echo -e "${GREEN}Workspace template is ready!${NC}"
 echo ""
 echo "Next steps:"
-echo "  1. Go to ${CODER_URL} (use host.docker.internal:7080 for OIDC)"
+echo "  1. Go to https://host.docker.internal:7443 (accept self-signed cert warning)"
 echo "  2. Login via OIDC or local account"
 echo "  3. Click 'Create Workspace'"
 echo "  4. Select '${TEMPLATE_NAME}' template"

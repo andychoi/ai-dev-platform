@@ -40,12 +40,21 @@ services:
 
       # Access URLs
       # Use host.docker.internal so workspace containers can reach Coder server
-      CODER_ACCESS_URL: "${CODER_ACCESS_URL:-http://host.docker.internal:7080}"
+      CODER_ACCESS_URL: "${CODER_ACCESS_URL:-https://host.docker.internal:7443}"
       CODER_HTTP_ADDRESS: "0.0.0.0:7080"
 
+      # TLS Configuration (required for browser secure context / crypto.subtle)
+      # Without HTTPS, extension webviews (Roo Code, etc.) render blank
+      CODER_TLS_ENABLE: "true"
+      CODER_TLS_ADDRESS: "0.0.0.0:7443"
+      CODER_TLS_CERT_FILE: "/certs/coder.crt"
+      CODER_TLS_KEY_FILE: "/certs/coder.key"
+      CODER_TLS_MIN_VERSION: "tls12"
+      # CODER_REDIRECT_TO_ACCESS_URL: "true"  # Disabled: keeps HTTP API working for scripts
+
       # Security settings
-      # SECURITY: Enable secure cookies in production (requires HTTPS)
-      CODER_SECURE_AUTH_COOKIE: "${CODER_SECURE_AUTH_COOKIE:-false}"
+      # Secure cookies enabled since we now use HTTPS
+      CODER_SECURE_AUTH_COOKIE: "${CODER_SECURE_AUTH_COOKIE:-true}"
       CODER_TELEMETRY: "false"
 
       # Provisioner settings
@@ -94,11 +103,14 @@ services:
       CODER_OAUTH2_GITHUB_DEFAULT_PROVIDER_ENABLE: "false"
     ports:
       - "7080:7080"
+      - "7443:7443"
     volumes:
       # Mount Docker socket for Docker-based templates
       - /var/run/docker.sock:/var/run/docker.sock
       # Persistent Coder data
       - coder_data:/home/coder/.config/coderv2
+      # TLS certificates for HTTPS
+      - ./certs:/certs:ro
     networks:
       - coder-network
     # Docker socket access via group membership

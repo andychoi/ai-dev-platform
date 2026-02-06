@@ -13,11 +13,25 @@ Coder is the WebIDE platform that provides browser-based development environment
 
 | Endpoint | URL | Notes |
 |----------|-----|-------|
-| Web UI | http://host.docker.internal:7080 | **Required for OIDC** |
-| API | http://host.docker.internal:7080/api/v2 | Use this for API calls |
-| Health Check | http://localhost:7080/api/v2/buildinfo | Health check (localhost OK) |
+| Web UI | https://host.docker.internal:7443 | **HTTPS required for webviews** |
+| API | https://host.docker.internal:7443/api/v2 | Use this for API calls |
+| Health Check | http://localhost:7080/api/v2/buildinfo | Health check (HTTP OK) |
+| HTTP (redirects) | http://host.docker.internal:7080 | Redirects to HTTPS |
 
-> ⚠️ **CRITICAL**: Always access Coder via `host.docker.internal:7080`, NOT `localhost:7080`. This is required for OIDC callbacks to work. See CLAUDE.md for details.
+> **CRITICAL**: Always access Coder via `https://host.docker.internal:7443`. HTTPS is required for browser secure context (`crypto.subtle` / extension webviews). Self-signed cert — accept the browser warning or install the cert in your OS trust store.
+
+### Trust the Self-Signed Certificate (Optional, Eliminates Browser Warning)
+
+```bash
+# macOS — add to system keychain
+sudo security add-trusted-cert -d -r trustRoot \
+  -k /Library/Keychains/System.keychain \
+  "$(pwd)/coder-poc/certs/coder.crt"
+
+# Linux — add to CA store
+sudo cp coder-poc/certs/coder.crt /usr/local/share/ca-certificates/coder.crt
+sudo update-ca-certificates
+```
 
 ## Credentials
 
@@ -508,6 +522,32 @@ resource "coder_app" "terminal" {
 ```
 
 **Fix:** Remove the custom `coder_app "terminal"` resource. The built-in `web_terminal = true` is sufficient and handles everything properly.
+
+### Extension Webviews Blank (Secure Context)
+
+**Symptom:** ALL extension webviews (Roo Code, etc.) show blank/white panels. Browser console shows `crypto.subtle` is `undefined`.
+
+**Root Cause:** Coder is accessed via `http://host.docker.internal:7080`. Since `host.docker.internal` is not `localhost`, the browser treats it as an insecure context. The `crypto.subtle` API (required by code-server for webview iframe nonce generation) is unavailable, breaking all webviews.
+
+**Diagnose:**
+```javascript
+// In browser console (F12) on the code-server page:
+console.log(crypto.subtle);        // undefined = insecure context
+console.log(window.isSecureContext); // false = confirms the issue
+```
+
+**Fix (Default — HTTPS enabled):** Coder now runs with TLS on port 7443. Access via `https://host.docker.internal:7443`. Accept the self-signed certificate warning or install the cert in your OS trust store.
+
+**Fix (If HTTPS is disabled for some reason):** Launch Chrome with the secure origin flag:
+```bash
+# macOS
+open -a "Google Chrome" --args --unsafely-treat-insecure-origin-as-secure="http://host.docker.internal:7080"
+
+# Linux
+google-chrome --unsafely-treat-insecure-origin-as-secure="http://host.docker.internal:7080"
+```
+
+**Important:** This affects ALL extensions with webviews, not just Roo Code. It is a platform-level issue with code-server + non-localhost HTTP origins.
 
 ### Startup Script "Output Pipes Not Closed" Warning
 

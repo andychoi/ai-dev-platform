@@ -202,7 +202,7 @@ for p in data.get('results', []):
 }
 
 # Create providers for each service
-create_oauth_provider "Coder OIDC" "coder" "http://localhost:7080/api/v2/users/oidc/callback\nhttp://host.docker.internal:7080/api/v2/users/oidc/callback"
+create_oauth_provider "Coder OIDC" "coder" "http://localhost:7080/api/v2/users/oidc/callback\nhttp://host.docker.internal:7080/api/v2/users/oidc/callback\nhttps://host.docker.internal:7443/api/v2/users/oidc/callback"
 create_oauth_provider "Gitea OIDC" "gitea" "http://localhost:3000/user/oauth2/Authentik/callback"
 create_oauth_provider "MinIO OIDC" "minio" "http://localhost:9001/oauth_callback"
 create_oauth_provider "Platform Admin OIDC" "platform-admin" "http://localhost:5050/auth/callback"
@@ -351,8 +351,8 @@ echo "   g. OpenID Connect Auto Discovery URL:"
 echo "      ${AUTHENTIK_INTERNAL_URL}/application/o/gitea/.well-known/openid-configuration"
 echo ""
 echo "3. Test SSO login:"
-echo "   - Coder: http://host.docker.internal:7080 (click 'Login with OIDC')"
-echo "     NOTE: Use host.docker.internal (not localhost) for OIDC cookies to work!"
+echo "   - Coder: https://host.docker.internal:7443 (accept cert warning, click 'Login with OIDC')"
+echo "     NOTE: HTTPS required for extension webviews. Accept the self-signed cert warning."
 echo "   - MinIO: http://localhost:9001 (click 'Login with SSO')"
 echo "   - Platform Admin: http://localhost:5050 (click 'Sign in with Authentik SSO')"
 echo ""

@@ -112,6 +112,8 @@ RUN echo "# Restricted sudo for coder user - security hardened" > /etc/sudoers.d
     && echo "coder ALL=(ALL) NOPASSWD: /usr/bin/apt-get update" >> /etc/sudoers.d/coder \
     && echo "coder ALL=(ALL) NOPASSWD: /usr/bin/apt-get install *" >> /etc/sudoers.d/coder \
     && echo "coder ALL=(ALL) NOPASSWD: /bin/systemctl status *" >> /etc/sudoers.d/coder \
+    && echo "coder ALL=(ALL) NOPASSWD: /usr/sbin/update-ca-certificates" >> /etc/sudoers.d/coder \
+    && echo "coder ALL=(ALL) NOPASSWD: /bin/cp * /usr/local/share/ca-certificates/*" >> /etc/sudoers.d/coder \
     && chmod 440 /etc/sudoers.d/coder
 
 # Set up home directory

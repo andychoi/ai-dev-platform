@@ -25,6 +25,9 @@ Thumbs.db
 *.swp
 *.swo
 
+# TLS certificates (private keys must not be committed)
+certs/*.key
+
 # Temporary files
 tmp/
 temp/

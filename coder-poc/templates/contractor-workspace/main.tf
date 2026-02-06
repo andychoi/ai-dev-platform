@@ -220,6 +220,14 @@ data "coder_parameter" "ai_model" {
     name  = "Claude Opus 4 (Advanced)"
     value = "claude-opus"
   }
+  option {
+    name  = "Bedrock Claude Sonnet (AWS)"
+    value = "bedrock-claude-sonnet"
+  }
+  option {
+    name  = "Bedrock Claude Haiku (AWS)"
+    value = "bedrock-claude-haiku"
+  }
 }
 
 # AI Gateway URL
@@ -399,21 +407,30 @@ password=${data.coder_parameter.git_password.value}
 
       # Determine model name for LiteLLM
       case "$AI_MODEL" in
-        "claude-sonnet") LITELLM_MODEL="claude-sonnet-4-5" ;;
-        "claude-haiku")  LITELLM_MODEL="claude-haiku-4-5" ;;
-        "claude-opus")   LITELLM_MODEL="claude-opus-4" ;;
-        *)               LITELLM_MODEL="claude-sonnet-4-5" ;;
+        "claude-sonnet")         LITELLM_MODEL="claude-sonnet-4-5" ;;
+        "claude-haiku")          LITELLM_MODEL="claude-haiku-4-5" ;;
+        "claude-opus")           LITELLM_MODEL="claude-opus-4" ;;
+        "bedrock-claude-sonnet") LITELLM_MODEL="bedrock-claude-sonnet" ;;
+        "bedrock-claude-haiku")  LITELLM_MODEL="bedrock-claude-haiku" ;;
+        *)                       LITELLM_MODEL="claude-sonnet-4-5" ;;
       esac
 
       # Generate Roo Code auto-import config with the user's virtual key
+      # Uses providerProfiles format required by Roo Code v3.x+
       mkdir -p /home/coder/.config/roo-code
       cat > /home/coder/.config/roo-code/settings.json << ROOCONFIG
 {
-  "apiProvider": "openai-compatible",
-  "openAiCompatibleApiConfiguration": {
-    "baseUrl": "http://litellm:4000/v1",
-    "apiKey": "$LITELLM_KEY",
-    "modelId": "$LITELLM_MODEL"
+  "providerProfiles": {
+    "currentApiConfigName": "litellm",
+    "apiConfigs": {
+      "litellm": {
+        "apiProvider": "openai",
+        "openAiBaseUrl": "http://litellm:4000/v1",
+        "openAiApiKey": "$LITELLM_KEY",
+        "openAiModelId": "$LITELLM_MODEL",
+        "id": "litellm-default"
+      }
+    }
   }
 }
 ROOCONFIG
@@ -640,15 +657,34 @@ resource "docker_container" "workspace" {
     "AI_MODEL=${data.coder_parameter.ai_model.value}",
     "AI_GATEWAY_URL=${data.coder_parameter.ai_gateway_url.value}",
     "LITELLM_API_KEY=${data.coder_parameter.litellm_api_key.value}",
+    # TLS: Trust the self-signed Coder certificate so the agent can connect via HTTPS
+    "SSL_CERT_FILE=/certs/coder.crt",
+    "NODE_EXTRA_CA_CERTS=/certs/coder.crt",
   ]
 
   # Start the Coder agent
-  entrypoint = ["sh", "-c", coder_agent.main.init_script]
+  # Install self-signed TLS cert into system trust store before agent init
+  # (agent downloads its binary via curl from Coder over HTTPS)
+  entrypoint = ["sh", "-c", <<-EOT
+    if [ -f /certs/coder.crt ]; then
+      sudo cp /certs/coder.crt /usr/local/share/ca-certificates/coder.crt
+      sudo update-ca-certificates
+    fi
+    ${coder_agent.main.init_script}
+  EOT
+  ]
 
   # Mount persistent volume
   volumes {
     volume_name    = docker_volume.workspace_data.name
     container_path = "/home/coder"
+  }
+
+  # Mount TLS certificate so agent trusts self-signed Coder cert
+  volumes {
+    host_path      = "/Users/andymini/ai/dev-platform/coder-poc/certs"
+    container_path = "/certs"
+    read_only      = true
   }
 
   # Connect to Coder network

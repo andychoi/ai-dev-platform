@@ -122,7 +122,7 @@ start_infrastructure() {
 
     # Export environment variables
     export POSTGRES_PASSWORD
-    export CODER_ACCESS_URL="http://host.docker.internal:${CODER_PORT}"
+    export CODER_ACCESS_URL="https://host.docker.internal:7443"
 
     # Pull images first
     print_info "Pulling Docker images (this may take a few minutes)..."
@@ -379,9 +379,9 @@ print_summary() {
     echo -e "${NC}"
 
     echo ""
-    echo -e "${BLUE}Access URLs (use host.docker.internal for OIDC):${NC}"
+    echo -e "${BLUE}Access URLs:${NC}"
     echo "  ┌─────────────────┬───────────────────────────────────────────┐"
-    echo "  │ Coder WebIDE    │ http://host.docker.internal:${CODER_PORT}            │"
+    echo "  │ Coder WebIDE    │ https://host.docker.internal:7443        │"
     echo "  │ Authentik SSO   │ http://localhost:9000                     │"
     echo "  │ Gitea (Git)     │ http://localhost:3000                     │"
     echo "  │ MinIO Storage   │ http://localhost:9001                     │"
@@ -415,11 +415,11 @@ print_summary() {
 
     echo ""
     echo -e "${BLUE}SSO Login:${NC}"
-    echo "  1. Go to http://host.docker.internal:${CODER_PORT}"
+    echo "  1. Go to https://host.docker.internal:7443 (accept self-signed cert warning)"
     echo "  2. Click 'Login with OIDC'"
     echo "  3. Use any test user above OR Authentik admin (akadmin / admin)"
     echo ""
-    echo -e "${YELLOW}IMPORTANT:${NC} Use host.docker.internal (not localhost) for Coder!"
+    echo -e "${YELLOW}IMPORTANT:${NC} Always use https://host.docker.internal:7443 (HTTPS required for webviews)"
 
     echo ""
     echo -e "${BLUE}Quick Commands:${NC}"
@@ -444,7 +444,7 @@ print_summary() {
 
     echo ""
     echo -e "${BLUE}Next Steps:${NC}"
-    echo "  1. Open http://host.docker.internal:${CODER_PORT} in your browser"
+    echo "  1. Open https://host.docker.internal:7443 in your browser (accept cert warning)"
     echo "  2. Login via OIDC (Authentik)"
     echo "  3. Create a workspace from 'contractor-workspace' template"
     echo "     - Paste the user's LiteLLM key into the 'LiteLLM API Key' field"

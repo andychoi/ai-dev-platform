@@ -66,7 +66,7 @@ To set up Coder users, follow these steps:
 ║  STEP 1: Create Admin User (First Time Only)                      ║
 ╠═══════════════════════════════════════════════════════════════════╣
 ║                                                                    ║
-║  1. Open browser: http://localhost:7080                           ║
+║  1. Open browser: https://host.docker.internal:7443                           ║
 ║  2. Create first admin account:                                   ║
 ║     - Username: admin                                             ║
 ║     - Email: admin@localhost                                      ║
@@ -78,7 +78,7 @@ To set up Coder users, follow these steps:
 ║  STEP 2: Create Additional Users via Admin Panel                  ║
 ╠═══════════════════════════════════════════════════════════════════╣
 ║                                                                    ║
-║  1. Login as admin at http://localhost:7080                       ║
+║  1. Login as admin at https://host.docker.internal:7443                       ║
 ║  2. Go to: Deployment → Users → Create User                       ║
 ║                                                                    ║
 ║  Create these users:                                              ║
@@ -132,7 +132,7 @@ cat << 'EOF'
 If you have CLI access with admin token, you can create users via API:
 
 # Login to Coder CLI
-coder login http://localhost:7080
+coder login https://host.docker.internal:7443
 
 # Create users (requires admin)
 coder users create --email manager@localhost --username app-manager
@@ -143,7 +143,7 @@ coder users create --email contractor2@localhost --username contractor2
 coder users list
 
 # Assign roles via REST API
-curl -X PATCH "http://localhost:7080/api/v2/users/{user_id}/roles" \
+curl -X PATCH "https://host.docker.internal:7443/api/v2/users/{user_id}/roles" \
   -H "Coder-Session-Token: YOUR_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"roles": ["template-admin"]}'
@@ -182,4 +182,4 @@ EOF
 echo ""
 log_success "Setup instructions complete!"
 echo ""
-echo "Next: Open http://localhost:7080 and create users"
+echo "Next: Open https://host.docker.internal:7443 and create users"

@@ -56,12 +56,13 @@
   "security.workspace.trust.enabled": true,
   "telemetry.telemetryLevel": "off",
 
-  // ── Disable ALL built-in AI / Copilot features ─────────────────────
+  // ── Disable ALL built-in AI / Copilot / Chat features ──────────────
   // We use Roo Code + LiteLLM instead. These settings prevent any
   // built-in chat, inline suggestions, or Copilot UI from appearing.
   "chat.agent.enabled": false,
   "chat.commandCenter.enabled": false,
   "chat.editor.fontFamily": "",
+  "chat.disableAIFeatures": true,
   "github.copilot.enable": {
     "*": false
   },
@@ -71,6 +72,9 @@
   "github.copilot.renameSuggestions.triggerAutomatically": false,
   "inlineChat.mode": "off",
   "editor.inlineSuggest.enabled": false,
+
+  // Hide the secondary sidebar (chat panel) by default
+  "workbench.secondarySideBar.defaultVisibility": "hidden",
 
   // Disable Cody extension if still present from old images
   "cody.enabled": false,
