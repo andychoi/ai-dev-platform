@@ -20,7 +20,23 @@ This FAQ document answers common questions for end users (contractors/developers
 
 ### Q: How do I access the platform?
 
-**A:** Open your web browser and navigate to the platform URL (e.g., `https://coder.company.com`). Log in with your credentials provided by the platform administrator.
+**A:** Open your web browser and navigate to the platform URL provided by your admin.
+
+**PoC Access:**
+```
+https://host.docker.internal:7443
+```
+
+On first visit you'll see a browser certificate warning (self-signed cert) — accept it to continue. If you want to eliminate the warning permanently:
+
+```bash
+# macOS — trust the self-signed cert
+sudo security add-trusted-cert -d -r trustRoot \
+  -k /Library/Keychains/System.keychain \
+  "$(pwd)/coder-poc/certs/coder.crt"
+```
+
+Log in with your credentials (SSO or local account).
 
 ---
 
@@ -45,10 +61,12 @@ This FAQ document answers common questions for end users (contractors/developers
 ### Q: Which browser should I use?
 
 **A:** We recommend:
-- ✅ Google Chrome (latest)
+- ✅ Google Chrome (latest) — best compatibility
 - ✅ Microsoft Edge (latest)
 - ✅ Mozilla Firefox (latest)
 - ⚠️ Safari (works, but Chrome/Edge preferred)
+
+> **Important (PoC):** The platform uses HTTPS with a self-signed certificate. You must accept the browser's certificate warning on first visit. If extension panels (like Roo Code) appear blank, see the [Secure Context troubleshooting](#q-extension-panels-are-blank-roo-code-etc) section below.
 
 ---
 
@@ -269,15 +287,17 @@ Roo Code provides equivalent (and more powerful) capabilities through LiteLLM.
 
 ### Q: Which AI model should I choose?
 
-**A:**
+**A:** You select an AI model when creating a workspace. Available options:
 
-| Model | Best For | Speed |
-|-------|----------|-------|
-| **Claude Sonnet 4.5** | Most tasks (default, balanced) | Fast |
-| **Claude Haiku 4.5** | Quick autocomplete | Fastest |
-| **Claude Opus 4.5** | Complex problems (advanced) | Slower |
+| Model | Best For | Speed | Provider |
+|-------|----------|-------|----------|
+| **Claude Sonnet 4.5** | Most tasks (default, balanced) | Fast | Anthropic + Bedrock fallback |
+| **Claude Haiku 4.5** | Quick autocomplete, simple tasks | Fastest | Anthropic + Bedrock fallback |
+| **Claude Opus 4** | Complex architecture, deep reasoning | Slower | Anthropic only |
+| **Bedrock Claude Sonnet (AWS)** | Force AWS Bedrock routing | Fast | AWS Bedrock |
+| **Bedrock Claude Haiku (AWS)** | Force AWS Bedrock routing | Fastest | AWS Bedrock |
 
-You can change this when creating a workspace.
+**Tip:** "Claude Sonnet 4.5" is the best default for most developers. It automatically falls back to AWS Bedrock if the Anthropic API is unavailable (LiteLLM model group routing).
 
 ---
 
@@ -476,6 +496,28 @@ Admins may have visibility into all workspaces for support purposes.
 
 ---
 
+### Q: Extension panels are blank (Roo Code, etc.)!
+
+**A:** This is caused by a **browser secure context issue**. The `crypto.subtle` API (needed by code-server for webview nonces) is only available over HTTPS or `localhost`.
+
+**Diagnose:** Open browser console (F12) on the code-server page:
+```javascript
+console.log(window.isSecureContext);  // false = this is the problem
+console.log(crypto.subtle);           // undefined = confirms it
+```
+
+**Fix (HTTPS — default):** Access Coder via `https://host.docker.internal:7443` (not HTTP port 7080). Accept the self-signed certificate warning.
+
+**Alternative (Chrome flag):** If HTTPS is not available, launch Chrome with:
+```bash
+# macOS
+open -a "Google Chrome" --args --unsafely-treat-insecure-origin-as-secure="http://host.docker.internal:7080"
+```
+
+Or set via `chrome://flags/#unsafely-treat-insecure-origin-as-secure`.
+
+---
+
 ### Q: Terminal commands are slow!
 
 **A:**
@@ -502,16 +544,40 @@ Admins may have visibility into all workspaces for support purposes.
 
 ## 8. App Manager Questions
 
+### Q: What is a workspace template?
+
+**A:** A workspace template is a Terraform configuration (`.tf` files) that defines what a workspace looks like: the Docker image, resource limits, startup scripts, parameters (AI model, Git credentials, etc.), and IDE setup. Templates live in `coder-poc/templates/<name>/`.
+
+Key files in a template:
+- `main.tf` — Terraform config defining the workspace container, agent, apps, and user parameters
+- `build/Dockerfile` — Docker image with pre-installed tools, extensions, and system config
+- `build/settings.json` — VS Code settings baked into the image
+
+There is **no YAML editor or web UI** for editing templates. You edit `.tf` files locally and push via CLI.
+
+---
+
 ### Q: How do I create a new template?
 
 **A:**
-1. Copy the existing template directory
-2. Modify `main.tf` for your requirements
-3. Update `Dockerfile` with needed tools
-4. Test locally with `coder templates push --test`
-5. Push: `coder templates push <template-name>`
+1. Copy the existing template directory:
+   ```bash
+   cp -r coder-poc/templates/contractor-workspace coder-poc/templates/my-template
+   ```
+2. Edit `main.tf` — change parameters, resources, startup scripts
+3. Edit `build/Dockerfile` — add/remove tools, languages, extensions
+4. Build the Docker image:
+   ```bash
+   docker build -t my-template:latest coder-poc/templates/my-template/build
+   ```
+5. Push to Coder (via Docker exec, no host CLI needed):
+   ```bash
+   docker cp coder-poc/templates/my-template coder-server:/tmp/my-template
+   docker exec -e CODER_URL=http://localhost:7080 -e CODER_SESSION_TOKEN=$TOKEN \
+     coder-server coder templates create my-template --directory /tmp/my-template --yes
+   ```
 
-See the INFRA.md documentation for details.
+See ADMIN-HOWTO.md for the full walkthrough and INFRA.md for architecture details.
 
 ---
 
@@ -568,18 +634,23 @@ To assign:
 ### Q: How do I update templates?
 
 **A:**
-```bash
-# Make changes to template files
+1. Edit the template files locally (main.tf, Dockerfile, etc.)
+2. If you changed the Dockerfile, rebuild the image:
+   ```bash
+   docker build -t contractor-workspace:latest coder-poc/templates/contractor-workspace/build
+   ```
+3. Push the updated template to Coder:
+   ```bash
+   docker cp coder-poc/templates/contractor-workspace coder-server:/tmp/template-update
+   docker exec -e CODER_URL=http://localhost:7080 -e CODER_SESSION_TOKEN=$TOKEN \
+     coder-server coder templates push contractor-workspace --directory /tmp/template-update --yes
+   ```
 
-# Push update
-coder templates push <template-name> \
-  --directory ./templates/<template-name> \
-  --yes
-
-# Existing workspaces will use old version
-# New workspaces will use new version
-# Users can update their workspace to get new template
-```
+**Important:**
+- Existing workspaces keep using the old template version
+- New workspaces automatically use the latest version
+- Users can click "Update" on their workspace to adopt template changes
+- Some changes (agent URLs, env vars) require workspace **deletion and recreation** — not just an update
 
 ---
 
@@ -728,3 +799,4 @@ coder templates push <template-name> \
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | 2026-02-04 | Platform Team | Initial version |
+| 1.1 | 2026-02-06 | Platform Team | HTTPS URLs, Bedrock model options, secure context troubleshooting, template management how-to |

@@ -181,13 +181,15 @@ litellm_settings:
 
 Roo Code sends model names; LiteLLM maps them to provider-specific model IDs:
 
-| Roo Code sends | LiteLLM routes to | Provider |
-|----------------|-------------------|----------|
-| `claude-sonnet-4-5` | `anthropic/claude-sonnet-4-5-20250929` | Anthropic API |
-| `claude-haiku-4-5` | `anthropic/claude-haiku-4-5-20251001` | Anthropic API |
-| `claude-opus-4` | `anthropic/claude-opus-4-20250514` | Anthropic API |
-| `bedrock-claude-sonnet` | `bedrock/us.anthropic.claude-sonnet-4-5-*` | AWS Bedrock |
-| `bedrock-claude-haiku` | `bedrock/us.anthropic.claude-haiku-4-5-*` | AWS Bedrock |
+| Roo Code sends | LiteLLM routes to | Provider | Failover |
+|----------------|-------------------|----------|----------|
+| `claude-sonnet-4-5` | `anthropic/claude-sonnet-4-5-20250929` | Anthropic API | Auto-failover to Bedrock |
+| `claude-haiku-4-5` | `anthropic/claude-haiku-4-5-20251001` | Anthropic API | Auto-failover to Bedrock |
+| `claude-opus-4` | `anthropic/claude-opus-4-20250514` | Anthropic API | None (Anthropic only) |
+| `bedrock-claude-sonnet` | `bedrock/us.anthropic.claude-sonnet-4-5-*` | AWS Bedrock | None (Bedrock only) |
+| `bedrock-claude-haiku` | `bedrock/us.anthropic.claude-haiku-4-5-*` | AWS Bedrock | None (Bedrock only) |
+
+> **Model groups:** `claude-sonnet-4-5` and `claude-haiku-4-5` each have two entries in `config.yaml` — one for Anthropic direct and one for Bedrock. LiteLLM automatically fails over to the next provider if the primary returns an error (e.g., 401 from missing `ANTHROPIC_API_KEY`).
 
 ### Verify LiteLLM Health
 
