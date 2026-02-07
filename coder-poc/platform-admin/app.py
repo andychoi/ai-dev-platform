@@ -119,7 +119,7 @@ SERVICES = {
         'name': 'Coder',
         'url': os.environ.get('CODER_URL', 'http://coder-server:7080'),
         'health_endpoint': '/api/v2/buildinfo',
-        'dashboard_url': 'http://localhost:7080',
+        'dashboard_url': 'https://host.docker.internal:7443',
         'icon': 'code'
     },
     'devdb': {
@@ -524,6 +524,30 @@ def get_current_user():
     return session.get('user', {})
 
 
+# Admin usernames that always get full access
+ADMIN_USERNAMES = {'admin', 'akadmin'}
+# Authentik groups that grant admin access
+ADMIN_GROUPS = {'coder-admins', 'platform-admins', 'admins'}
+
+
+def is_admin():
+    """Check if the current user has admin privileges."""
+    user = get_current_user()
+    if not user:
+        return False
+    # Local login is always admin (only admins know the local password)
+    if user.get('auth_type') == 'local':
+        return True
+    # Check username
+    if user.get('username', '') in ADMIN_USERNAMES:
+        return True
+    # Check OIDC groups
+    groups = set(user.get('groups', []))
+    if groups & ADMIN_GROUPS:
+        return True
+    return False
+
+
 # =============================================================================
 # Authentication Routes
 # =============================================================================
@@ -592,6 +616,7 @@ def auth_callback():
             'username': userinfo.get('preferred_username', userinfo.get('sub', 'unknown')),
             'email': userinfo.get('email', ''),
             'name': userinfo.get('name', userinfo.get('preferred_username', '')),
+            'groups': userinfo.get('groups', []),
             'auth_type': 'oidc'
         }
         flash('Logged in via SSO successfully', 'success')
@@ -1516,9 +1541,15 @@ LITELLM_MASTER_KEY = os.environ.get('LITELLM_MASTER_KEY', '')
 @app.route('/ai-keys')
 @require_auth
 def ai_keys():
-    """AI API key management page — lists all LiteLLM virtual keys with spend/budget."""
+    """AI API key management page — lists all LiteLLM virtual keys with spend/budget.
+
+    Non-admin users only see their own keys (matched by username in metadata).
+    """
     keys = []
     error = None
+    admin = is_admin()
+    username = get_current_user().get('username', '')
+
     try:
         conn = get_litellm_db_connection()
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -1554,6 +1585,10 @@ def ai_keys():
             elif k.get('metadata') is None:
                 k['metadata'] = {}
 
+        # Non-admin: filter to only keys belonging to this user
+        if not admin and username:
+            keys = [k for k in keys if _key_belongs_to_user(k, username)]
+
     except Exception as e:
         app.logger.error(f"Failed to fetch AI keys: {e}")
         error = str(e)
@@ -1561,17 +1596,70 @@ def ai_keys():
     return render_template('ai_keys.html',
                            keys=keys,
                            error=error,
+                           is_admin=admin,
                            current_user=session.get('user'))
+
+
+def _key_belongs_to_user(key, username):
+    """Check if a LiteLLM key belongs to a given user."""
+    meta = key.get('metadata', {})
+    # workspace keys: workspace_owner field
+    if meta.get('workspace_owner') == username:
+        return True
+    # user keys: username field
+    if meta.get('username') == username:
+        return True
+    # bootstrap keys from setup script: workspace_user field
+    if meta.get('workspace_user') == username:
+        return True
+    # key_alias pattern: user-{username} or {username}
+    alias = key.get('key_alias', '') or ''
+    if alias == username or alias == f'user-{username}':
+        return True
+    # scope pattern: user:{username}
+    scope = meta.get('scope', '')
+    if scope == f'user:{username}':
+        return True
+    return False
 
 
 @app.route('/api/ai-keys/revoke', methods=['POST'])
 @require_auth
 def revoke_ai_key():
-    """Revoke (delete) an AI key by its token hash."""
+    """Revoke (delete) an AI key by its token hash.
+
+    Non-admin users can only revoke keys that belong to them.
+    """
     data = request.get_json()
     token_hash = data.get('token')
     if not token_hash or not LITELLM_MASTER_KEY:
         return jsonify({'error': 'Missing token or master key not configured'}), 400
+
+    # Non-admins: verify ownership before allowing revoke
+    if not is_admin():
+        username = get_current_user().get('username', '')
+        try:
+            conn = get_litellm_db_connection()
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                'SELECT token, key_alias, metadata FROM "LiteLLM_VerificationToken" WHERE token = %s',
+                (token_hash,))
+            row = cur.fetchone()
+            conn.close()
+            if not row:
+                return jsonify({'error': 'Key not found'}), 404
+            if isinstance(row.get('metadata'), str):
+                try:
+                    row['metadata'] = json.loads(row['metadata'])
+                except Exception:
+                    row['metadata'] = {}
+            elif row.get('metadata') is None:
+                row['metadata'] = {}
+            if not _key_belongs_to_user(row, username):
+                return jsonify({'error': 'You can only revoke your own keys'}), 403
+        except Exception as e:
+            app.logger.error(f"Ownership check failed: {e}")
+            return jsonify({'error': 'Could not verify key ownership'}), 500
 
     try:
         resp = requests.post(
@@ -1581,7 +1669,7 @@ def revoke_ai_key():
             json={"keys": [token_hash]},
             timeout=10,
         )
-        if resp.status_code == 200:
+        if resp.ok:
             return jsonify({'success': True})
         return jsonify({'error': resp.text}), resp.status_code
     except Exception as e:
@@ -1591,29 +1679,34 @@ def revoke_ai_key():
 @app.route('/api/ai-keys/generate', methods=['POST'])
 @require_auth
 def generate_ai_key():
-    """Generate a new AI key via key-provisioner self-service endpoint."""
+    """Generate a new AI key via key-provisioner.
+
+    The key's owner is always the logged-in user so it appears in their key list.
+    The alias is used as a human-readable label.
+    """
     data = request.get_json()
     alias = data.get('alias', '')
     scope = data.get('scope', 'user')
+    current = get_current_user()
+    username = current.get('username', alias)
 
     if not PROVISIONER_SECRET:
         return jsonify({'error': 'PROVISIONER_SECRET not configured'}), 500
 
     try:
-        # Use key-provisioner to create a properly scoped key
         resp = requests.post(
             f"{KEY_PROVISIONER_URL}/api/v1/keys/workspace",
             headers={"Authorization": f"Bearer {PROVISIONER_SECRET}",
                      "Content-Type": "application/json"},
             json={
-                "workspace_id": alias or "admin-generated",
+                "workspace_id": alias or f"{username}-key",
                 "workspace_name": alias,
-                "username": alias,
+                "username": username,
                 "scope": scope,
             },
             timeout=10,
         )
-        if resp.status_code == 200:
+        if resp.ok:
             result = resp.json()
             return jsonify({
                 'success': True,

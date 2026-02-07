@@ -119,7 +119,7 @@
         <!-- Keys Table -->
         <div class="table-section">
             <div class="table-header">
-                <h2>Virtual API Keys</h2>
+                <h2>{% if is_admin %}All Virtual API Keys{% else %}My API Keys{% endif %}</h2>
                 <button class="btn btn-primary" onclick="showGenerateModal()">+ Generate Key</button>
             </div>
             <table>
