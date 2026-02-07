@@ -36,14 +36,15 @@ echo "Content Guardrails Validation Tests"
 echo "========================================"
 echo ""
 
-BASE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+SHARED_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+POC_DIR="${POC_DIR:-$(cd "$SHARED_DIR/../coder-poc" 2>/dev/null && pwd || echo "")}"
 
 # ---------------------------------------------------------------------------
 # 1. Check guardrails hook file
 # ---------------------------------------------------------------------------
 echo "1. Guardrails hook file"
 
-HOOK_FILE="$BASE_DIR/litellm/guardrails_hook.py"
+HOOK_FILE="$SHARED_DIR/litellm-hooks/guardrails_hook.py"
 
 if [ -f "$HOOK_FILE" ]; then
   pass "guardrails_hook.py exists"
@@ -118,7 +119,8 @@ echo ""
 # ---------------------------------------------------------------------------
 echo "3. LiteLLM config"
 
-CONFIG_FILE="$BASE_DIR/litellm/config.yaml"
+CONFIG_FILE="${POC_DIR:+$POC_DIR/litellm/config.yaml}"
+CONFIG_FILE="${CONFIG_FILE:-$SHARED_DIR/../coder-poc/litellm/config.yaml}"
 
 if grep -q "guardrails_hook.guardrails_instance" "$CONFIG_FILE" 2>/dev/null; then
   pass "config.yaml registers guardrails callback"
@@ -141,30 +143,35 @@ echo ""
 # ---------------------------------------------------------------------------
 echo "4. Docker Compose"
 
-COMPOSE_FILE="$BASE_DIR/docker-compose.yml"
+COMPOSE_FILE="${POC_DIR:+$POC_DIR/docker-compose.yml}"
+COMPOSE_FILE="${COMPOSE_FILE:-$SHARED_DIR/../coder-poc/docker-compose.yml}"
 
-if grep -q "guardrails_hook.py:/app/guardrails_hook.py" "$COMPOSE_FILE" 2>/dev/null; then
-  pass "guardrails_hook.py mounted into litellm container"
+if [ ! -f "$COMPOSE_FILE" ]; then
+  skip "docker-compose.yml not found at $COMPOSE_FILE — skipping compose checks"
 else
-  fail "guardrails_hook.py not mounted in docker-compose.yml"
-fi
+  if grep -q "guardrails_hook.py:/app/guardrails_hook.py" "$COMPOSE_FILE" 2>/dev/null; then
+    pass "guardrails_hook.py mounted into litellm container"
+  else
+    fail "guardrails_hook.py not mounted in docker-compose.yml"
+  fi
 
-if grep -q "guardrails:/app/guardrails" "$COMPOSE_FILE" 2>/dev/null; then
-  pass "guardrails directory mounted into litellm container"
-else
-  fail "guardrails directory not mounted in docker-compose.yml"
-fi
+  if grep -q "guardrails:/app/guardrails" "$COMPOSE_FILE" 2>/dev/null; then
+    pass "guardrails directory mounted into litellm container"
+  else
+    fail "guardrails directory not mounted in docker-compose.yml"
+  fi
 
-if grep -q "GUARDRAILS_ENABLED" "$COMPOSE_FILE" 2>/dev/null; then
-  pass "GUARDRAILS_ENABLED env var configured"
-else
-  fail "GUARDRAILS_ENABLED not in docker-compose.yml"
-fi
+  if grep -q "GUARDRAILS_ENABLED" "$COMPOSE_FILE" 2>/dev/null; then
+    pass "GUARDRAILS_ENABLED env var configured"
+  else
+    fail "GUARDRAILS_ENABLED not in docker-compose.yml"
+  fi
 
-if grep -q "DEFAULT_GUARDRAIL_LEVEL" "$COMPOSE_FILE" 2>/dev/null; then
-  pass "DEFAULT_GUARDRAIL_LEVEL env var configured"
-else
-  fail "DEFAULT_GUARDRAIL_LEVEL not in docker-compose.yml"
+  if grep -q "DEFAULT_GUARDRAIL_LEVEL" "$COMPOSE_FILE" 2>/dev/null; then
+    pass "DEFAULT_GUARDRAIL_LEVEL env var configured"
+  else
+    fail "DEFAULT_GUARDRAIL_LEVEL not in docker-compose.yml"
+  fi
 fi
 
 echo ""
@@ -174,7 +181,7 @@ echo ""
 # ---------------------------------------------------------------------------
 echo "5. Custom patterns file"
 
-PATTERNS_FILE="$BASE_DIR/litellm/guardrails/patterns.json"
+PATTERNS_FILE="$SHARED_DIR/litellm-hooks/guardrails/patterns.json"
 
 if [ -f "$PATTERNS_FILE" ]; then
   pass "patterns.json exists"
@@ -197,7 +204,7 @@ echo ""
 # ---------------------------------------------------------------------------
 echo "6. Key provisioner guardrail support"
 
-PROVISIONER_FILE="$BASE_DIR/key-provisioner/app.py"
+PROVISIONER_FILE="$SHARED_DIR/key-provisioner/app.py"
 
 if grep -q "guardrail_level" "$PROVISIONER_FILE" 2>/dev/null; then
   pass "app.py accepts guardrail_level parameter"
@@ -219,7 +226,8 @@ LITELLM_URL="${LITELLM_URL:-http://localhost:4000}"
 MASTER_KEY="${LITELLM_MASTER_KEY:-}"
 
 # Try to read keys from .env if not set
-ENV_FILE="$BASE_DIR/.env"
+ENV_FILE="${POC_DIR:+$POC_DIR/.env}"
+ENV_FILE="${ENV_FILE:-$SHARED_DIR/../coder-poc/.env}"
 if [ -f "$ENV_FILE" ] && [ -z "$MASTER_KEY" ]; then
   MASTER_KEY=$(grep '^LITELLM_MASTER_KEY=' "$ENV_FILE" 2>/dev/null | cut -d= -f2 | tr -d '"' | tr -d "'" || true)
 fi
@@ -623,6 +631,6 @@ if [ "$FAIL" -gt 0 ]; then
   echo "  - After config changes: docker compose up -d litellm (not restart)"
   echo "  - Check hook loaded: curl -H 'Authorization: Bearer \$MASTER_KEY' localhost:4000/get/config/callbacks"
   echo "  - Check logs: docker compose logs litellm | grep guardrail"
-  echo "  - Docs: coder-poc/docs/GUARDRAILS.md"
+  echo "  - Docs: shared/docs/GUARDRAILS.md"
   exit 1
 fi

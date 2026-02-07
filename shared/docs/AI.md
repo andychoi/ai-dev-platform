@@ -399,7 +399,7 @@ curl -X POST http://localhost:4000/key/generate \
 
 Keys are **auto-provisioned** during workspace creation by the **key-provisioner** microservice (port 8100). The provisioner isolates the LiteLLM master key — workspace containers never see it. Keys can also be generated manually via `setup-litellm-keys.sh` or self-service via `generate-ai-key.sh`.
 
-See `docs/KEY-MANAGEMENT.md` for the full key taxonomy (workspace, user, CI, agent scopes) and management workflows.
+See `KEY-MANAGEMENT.md` for the full key taxonomy (workspace, user, CI, agent scopes) and management workflows.
 
 > **Note:** The legacy AI Gateway (port 8090) has been replaced by LiteLLM (port 4000) as the AI proxy.
 
@@ -1044,7 +1044,7 @@ Users select their enforcement level when creating or updating a workspace:
 
 ### 12.5 Prompt Editing
 
-Prompts are loaded from `/app/prompts/*.md` inside the LiteLLM container (bind-mounted from `coder-poc/litellm/prompts/`). They are cached by file modification time — edit the files on the host and changes take effect on the next API call without restarting LiteLLM.
+Prompts are loaded from `/app/prompts/*.md` inside the LiteLLM container (bind-mounted from `shared/litellm-hooks/prompts/`). They are cached by file modification time — edit the files on the host and changes take effect on the next API call without restarting LiteLLM.
 
 ### 12.6 Idempotency Note
 
@@ -1169,7 +1169,7 @@ A `GuardrailsHook` callback in LiteLLM scans the `messages` array in every chat 
 |------|---------|
 | `litellm/guardrails_hook.py` | Hook class + 20+ built-in patterns |
 | `litellm/guardrails/patterns.json` | Custom patterns (hot-reloadable, no restart needed) |
-| `docs/GUARDRAILS.md` | Full documentation |
+| `GUARDRAILS.md` | Full documentation |
 | `scripts/test-guardrails.sh` | Validation test suite |
 
 ### Validation
@@ -1178,7 +1178,7 @@ A `GuardrailsHook` callback in LiteLLM scans the `messages` array in every chat 
 ./scripts/test-guardrails.sh
 ```
 
-See `docs/GUARDRAILS.md` for full pattern reference, custom pattern format, per-key configuration, Presidio (ML-based) future roadmap, and troubleshooting.
+See `GUARDRAILS.md` for full pattern reference, custom pattern format, per-key configuration, Presidio (ML-based) future roadmap, and troubleshooting.
 
 ---
 

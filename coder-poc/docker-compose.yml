@@ -407,10 +407,10 @@ services:
       - "4000:4000"
     volumes:
       - ./litellm/config.yaml:/app/config.yaml:ro
-      - ./litellm/enforcement_hook.py:/app/enforcement_hook.py:ro
-      - ./litellm/guardrails_hook.py:/app/guardrails_hook.py:ro
-      - ./litellm/prompts:/app/prompts:ro
-      - ./litellm/guardrails:/app/guardrails:ro
+      - ../shared/litellm-hooks/enforcement_hook.py:/app/enforcement_hook.py:ro
+      - ../shared/litellm-hooks/guardrails_hook.py:/app/guardrails_hook.py:ro
+      - ../shared/litellm-hooks/prompts:/app/prompts:ro
+      - ../shared/litellm-hooks/guardrails:/app/guardrails:ro
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     networks:
       - coder-network
@@ -428,7 +428,7 @@ services:
   # ==========================================================================
   key-provisioner:
     build:
-      context: ./key-provisioner
+      context: ../shared/key-provisioner
       dockerfile: Dockerfile
     container_name: key-provisioner
     restart: unless-stopped

@@ -266,7 +266,7 @@ psql $DATABASE_URL -c "CREATE TABLE users (id SERIAL PRIMARY KEY, name TEXT);"
 ./scripts/manage-devdb.sh cleanup --dry-run
 ```
 
-See [docs/DATABASE.md](docs/DATABASE.md) for full documentation.
+See [DATABASE.md](../shared/docs/DATABASE.md) for full documentation.
 
 ### Authentik (Identity & RBAC)
 

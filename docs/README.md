@@ -7,7 +7,8 @@ This directory contains comprehensive documentation for the Coder WebIDE Develop
 | Folder | Purpose | Audience |
 |--------|---------|----------|
 | `docs/ai/` | Strategic documentation (requirements, design, planning) | Architects, Project Managers |
-| `coder-poc/docs/` | Operational documentation (how-to guides, troubleshooting) | Developers, Operators |
+| `shared/docs/` | Platform-wide documentation (AI, security, guardrails, keys) | All Teams |
+| `coder-poc/docs/` | PoC-specific operations (runbook, troubleshooting, SSO) | Developers, Operators |
 | `coder-production/` | Production migration planning | Platform Team |
 
 ## Quick Links
@@ -40,17 +41,28 @@ This directory contains comprehensive documentation for the Coder WebIDE Develop
 #### Testing
 - [Access Control Tests](ai/testing/coder-webide-access-control-tests.md) - Test scenarios
 
+### Platform Documentation (`shared/docs/`)
+
+| Document | Description |
+|----------|-------------|
+| [AI.md](../shared/docs/AI.md) | AI integration and enforcement architecture |
+| [DATABASE.md](../shared/docs/DATABASE.md) | Developer database management |
+| [FAQ.md](../shared/docs/FAQ.md) | End-user frequently asked questions |
+| [GUARDRAILS.md](../shared/docs/GUARDRAILS.md) | Content guardrails (PII/financial/secret detection) |
+| [KEY-MANAGEMENT.md](../shared/docs/KEY-MANAGEMENT.md) | Virtual key taxonomy and management |
+| [ROO-CODE-LITELLM.md](../shared/docs/ROO-CODE-LITELLM.md) | Roo Code + LiteLLM integration |
+| [OPENCODE.md](../shared/docs/OPENCODE.md) | OpenCode CLI setup |
+| [SECURITY.md](../shared/docs/SECURITY.md) | Security guidelines |
+| [POC-SECURITY-REVIEW.md](../shared/docs/POC-SECURITY-REVIEW.md) | Security review findings |
+| [MINIO-FAQ.md](../shared/docs/MINIO-FAQ.md) | MinIO/S3 usage patterns |
+| [AI-GATEWAY-BENEFITS.md](../shared/docs/AI-GATEWAY-BENEFITS.md) | AI gateway benefits |
+
 ### Operational Documentation (`coder-poc/docs/`)
 
 | Document | Description |
 |----------|-------------|
-| [AI.md](../coder-poc/docs/AI.md) | AI integration and Continue extension setup |
 | [AUTHENTIK-SSO.md](../coder-poc/docs/AUTHENTIK-SSO.md) | SSO configuration with Authentik |
-| [DATABASE.md](../coder-poc/docs/DATABASE.md) | Developer database management |
-| [FAQ.md](../coder-poc/docs/FAQ.md) | End-user frequently asked questions |
 | [INFRA.md](../coder-poc/docs/INFRA.md) | Infrastructure and service details |
-| [SECURITY.md](../coder-poc/docs/SECURITY.md) | Security guidelines |
-| [POC-SECURITY-REVIEW.md](../coder-poc/docs/POC-SECURITY-REVIEW.md) | Security review findings |
 | [PRODUCTION.md](../coder-poc/docs/PRODUCTION.md) | Production readiness |
 | [testing-validation.md](../coder-poc/docs/testing-validation.md) | Testing procedures |
 

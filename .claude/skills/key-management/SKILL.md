@@ -9,7 +9,7 @@ description: Scoped LiteLLM key management - provisioner service, auto-provision
 
 The **key-provisioner** service (port 8100) isolates the LiteLLM master key from workspace containers. Workspaces and users never see the master key. Instead, they receive scoped virtual keys with budget and rate-limit constraints. The provisioner handles auto-provisioning at workspace startup, self-service key generation, and key info lookups.
 
-> Full documentation: `coder-poc/docs/KEY-MANAGEMENT.md`
+> Full documentation: `shared/docs/KEY-MANAGEMENT.md`
 
 ## Architecture
 
@@ -120,10 +120,10 @@ Each virtual key can carry an `enforcement_level` in its metadata. The LiteLLM e
 
 | File | Purpose |
 |------|---------|
-| `coder-poc/key-provisioner/app.py` | Key provisioner service source |
-| `coder-poc/key-provisioner/Dockerfile` | Provisioner container build |
+| `shared/key-provisioner/app.py` | Key provisioner service source |
+| `shared/key-provisioner/Dockerfile` | Provisioner container build |
 | `coder-poc/scripts/generate-ai-key.sh` | Self-service key script |
 | `coder-poc/scripts/manage-service-keys.sh` | Admin service key management |
 | `coder-poc/scripts/setup-litellm-keys.sh` | Bootstrap/migration key setup |
 | `coder-poc/.env` | Master key, provisioner secret, API keys |
-| `coder-poc/docs/KEY-MANAGEMENT.md` | Full documentation |
+| `shared/docs/KEY-MANAGEMENT.md` | Full documentation |

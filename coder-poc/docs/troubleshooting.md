@@ -119,7 +119,7 @@ Fix:
 - If the hook is not loaded: check `litellm/config.yaml` includes `callbacks: ["enforcement_hook.proxy_handler_instance"]` and restart LiteLLM with `docker compose up -d litellm`.
 - Changing the template parameter alone does NOT update existing keys — key rotation or workspace recreation is required.
 
-See docs/AI.md Section 12 and docs/ROO-CODE-LITELLM.md Section 7.
+See shared/docs/AI.md Section 12 and shared/docs/ROO-CODE-LITELLM.md Section 7.
 
 ---
 

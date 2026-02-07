@@ -108,7 +108,7 @@ Requirements:
 - Workspace keys are auto-provisioned by the key-provisioner service (or manually via `setup-litellm-keys.sh`)
 - After changing `.env`, run `docker compose up -d litellm` (not restart)
 
-See docs/ROO-CODE-LITELLM.md for full setup.
+See shared/docs/ROO-CODE-LITELLM.md for full setup.
 
 ---
 
@@ -123,7 +123,7 @@ Key facts:
 - Service keys (CI/agent) managed via `scripts/manage-service-keys.sh`
 - Every key has structured `metadata.scope` (e.g., `workspace:abc-123`, `user:contractor1`, `ci:frontend-repo`)
 
-See docs/KEY-MANAGEMENT.md and skills/key-management/SKILL.md.
+See shared/docs/KEY-MANAGEMENT.md and skills/key-management/SKILL.md.
 
 ---
 
@@ -135,7 +135,7 @@ Coder runs with TLS on port 7443 (`CODER_TLS_ENABLE=true`). This is required —
 
 Self-signed cert is at `coder-poc/certs/coder.crt`. Users must accept the browser warning or install the cert in their OS trust store.
 
-See docs/ROO-CODE-LITELLM.md → Prerequisites → Browser Secure Context.
+See shared/docs/ROO-CODE-LITELLM.md → Prerequisites → Browser Secure Context.
 
 ---
 
@@ -150,7 +150,7 @@ Key facts:
 - VS Code setting: `roo-cline.autoImportSettingsPath`
 - Model names must match LiteLLM config exactly (e.g., `claude-sonnet-4-5`)
 
-See docs/ROO-CODE-LITELLM.md and skills/ai-gateway/SKILL.md.
+See shared/docs/ROO-CODE-LITELLM.md and skills/ai-gateway/SKILL.md.
 
 ---
 
@@ -165,7 +165,7 @@ Key facts:
 - Client-side config (Roo Code `customInstructions`, OpenCode `enforcement.md`) is advisory reinforcement only
 - The `design-first` level blocks code output in the AI's first response and requires a design proposal
 
-See docs/AI.md Section 12 and docs/ROO-CODE-LITELLM.md Section 7.
+See shared/docs/AI.md Section 12 and shared/docs/ROO-CODE-LITELLM.md Section 7.
 
 ---
 

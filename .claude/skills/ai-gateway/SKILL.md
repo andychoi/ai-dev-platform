@@ -9,7 +9,7 @@ description: Roo Code AI agent + LiteLLM proxy - configuration, troubleshooting,
 
 AI capabilities in Coder workspaces are provided by **Roo Code** (VS Code extension) connected to **LiteLLM** (OpenAI-compatible proxy). LiteLLM handles authentication, routing, budgeting, and audit logging for upstream AI providers (Anthropic, AWS Bedrock).
 
-> Full documentation: `coder-poc/docs/ROO-CODE-LITELLM.md`
+> Full documentation: `shared/docs/ROO-CODE-LITELLM.md`
 
 ## Architecture
 
@@ -205,17 +205,17 @@ Extensions removed in Dockerfile: `github.copilot`, `github.copilot-chat`, `sour
 |------|---------|
 | `coder-poc/.env` | API keys and master key |
 | `coder-poc/litellm/config.yaml` | Model definitions and settings |
-| `coder-poc/litellm/enforcement_hook.py` | Enforcement callback hook (system prompt injection) |
-| `coder-poc/litellm/prompts/*.md` | Enforcement prompt templates (unrestricted, standard, design-first) |
+| `shared/litellm-hooks/enforcement_hook.py` | Enforcement callback hook (system prompt injection) |
+| `shared/litellm-hooks/prompts/*.md` | Enforcement prompt templates (unrestricted, standard, design-first) |
 | `coder-poc/templates/contractor-workspace/main.tf` | Workspace template with AI params |
 | `coder-poc/templates/contractor-workspace/build/settings.json` | VS Code settings |
 | `coder-poc/templates/contractor-workspace/build/Dockerfile` | Extension installation |
-| `coder-poc/key-provisioner/app.py` | Key provisioner microservice |
+| `shared/key-provisioner/app.py` | Key provisioner microservice |
 | `coder-poc/scripts/setup-litellm-keys.sh` | Bootstrap key generation |
 | `coder-poc/scripts/generate-ai-key.sh` | Self-service key generation |
 | `coder-poc/scripts/manage-service-keys.sh` | CI/agent key management |
-| `coder-poc/docs/ROO-CODE-LITELLM.md` | Full setup documentation |
-| `coder-poc/docs/KEY-MANAGEMENT.md` | Key management documentation |
+| `shared/docs/ROO-CODE-LITELLM.md` | Full setup documentation |
+| `shared/docs/KEY-MANAGEMENT.md` | Key management documentation |
 | (in workspace) `/home/coder/.config/roo-code/settings.json` | Generated Roo Code config |
 | (in workspace) `/home/coder/.config/opencode/opencode.json` | Generated OpenCode config |
 

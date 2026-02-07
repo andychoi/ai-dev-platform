@@ -144,7 +144,7 @@ This key is used to:
 
 ### Configuration File
 
-Location: `coder-poc/litellm/config.yaml`
+Location: `coder-poc/litellm/config.yaml` (env-specific, stays in each environment)
 
 ```yaml
 model_list:
@@ -482,7 +482,7 @@ curl -s http://localhost:4000/key/info \
   -d '{"key": "sk-<user-key>"}'
 ```
 
-See `docs/KEY-MANAGEMENT.md` for full key management documentation.
+See `KEY-MANAGEMENT.md` for full key management documentation.
 
 ---
 
@@ -518,7 +518,7 @@ Set per-workspace at creation via the `ai_enforcement_level` template parameter.
 
 ### Prompt Files
 
-Located at `coder-poc/litellm/prompts/`:
+Located at `shared/litellm-hooks/prompts/`:
 
 | File | Level | Content |
 |------|-------|---------|
@@ -546,7 +546,7 @@ print('enforcement_level:', d.get('info',{}).get('metadata',{}).get('enforcement
 "
 ```
 
-See `docs/AI.md` Section 12 for full architectural details.
+See `AI.md` Section 12 for full architectural details.
 
 ---
 
