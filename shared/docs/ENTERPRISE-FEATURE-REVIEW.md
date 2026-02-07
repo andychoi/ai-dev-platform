@@ -214,7 +214,8 @@ The platform's own security validation targets:
 | **Secrets management** | Move from `.env` to Vault/AWS Secrets Manager | Medium |
 | **Network isolation** | Per-workspace Docker networks or Kubernetes namespaces | Medium |
 | **User lifecycle** | SCIM provisioning for automated onboarding/offboarding | Medium |
-| ~~**Workspace sudo**~~ | **Done** — restricted to read-only commands only (no package install) | ~~Low~~ |
+| ~~**Workspace sudo**~~ | **Done** — restricted to read-only commands only (no package install) | ~~Done~~ |
+| ~~**Terminal hardening**~~ | **Done** — dangerous binaries removed, egress filtering, audit logging, idle timeout | ~~Done~~ |
 | **OIDC hardening** | Add PKCE, single logout | Medium |
 | **Monitoring** | Deploy Prometheus + Grafana stack | Medium |
 | **Log aggregation** | Deploy Loki or ELK for centralized logs | Medium |
@@ -236,9 +237,9 @@ The platform's own security validation targets:
 
 **This platform is a well-architected PoC** that addresses real enterprise concerns about contractor development environments and AI governance. The AI integration layer (LiteLLM gateway + enforcement hooks + content guardrails + Langfuse observability) is the strongest differentiator — it's rare to see server-side, tamper-proof AI governance built into a development platform at this level.
 
-**Ready for:** Internal pilot with a small contractor team (5-10 developers) after addressing critical security gaps (sudo, default passwords).
+**Ready for:** Internal pilot with a small contractor team (5-10 developers). Sudo and terminal security have been hardened. Default passwords should be changed before pilot.
 
-**Not yet ready for:** Multi-tenant production deployment at scale. Needs secrets management, network isolation, Kubernetes migration, and HA/DR.
+**Not yet ready for:** Multi-tenant production deployment at scale. Needs secrets management, per-workspace network isolation, Kubernetes migration, and HA/DR.
 
 **Estimated path to production:** 4-6 weeks of focused hardening (aligns with the platform's own assessment), plus Kubernetes migration timeline.
 

@@ -10,14 +10,14 @@
 
 This comprehensive review of the Coder WebIDE Proof of Concept identified **68 security and configuration issues** across 5 areas. The PoC successfully demonstrates the intended functionality but requires significant hardening before production deployment.
 
-**Update (February 2026):** Several critical issues have been addressed. See strikethrough items below.
+**Update (February 7, 2026):** Significant security hardening has been implemented since the initial review. See strikethrough items and status annotations below.
 
 ### Issue Breakdown by Severity
 
-| Severity | Count | Fixed | Remaining | Description |
-|----------|-------|-------|-----------|-------------|
-| **CRITICAL** | 16 | 2 | 14 | Must fix before ANY production use |
-| **IMPORTANT** | 28 | 0 | 28 | Must fix before public/multi-tenant deployment |
+| Severity | Count | Fixed/Addressed | Remaining | Description |
+|----------|-------|-----------------|-----------|-------------|
+| **CRITICAL** | 16 | 8 | 8 | Must fix before ANY production use |
+| **IMPORTANT** | 28 | 5 | 23 | Must fix before public/multi-tenant deployment |
 | **MINOR** | 24 | 0 | 24 | Should fix for production hardening |
 
 ### Issue Breakdown by Component
@@ -54,12 +54,9 @@ user: "1000:1000"  # Now runs as non-root
 ```
 **Status:** RESOLVED - Coder now runs as non-root user (UID 1000) with Docker socket access via group_add
 
-### 4. Unrestricted Sudo in Workspaces
-**Location:** `templates/contractor-workspace/build/Dockerfile` (line 108)
-```dockerfile
-echo "coder ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/nopasswd
-```
-**Action:** Remove sudo entirely or restrict to specific commands only
+### 4. ~~Unrestricted Sudo in Workspaces~~ FIXED
+**Location:** `templates/contractor-workspace/build/Dockerfile`
+**Status:** RESOLVED — `apt-get install` removed from sudoers. Only read-only/safe commands remain: `apt-get update`, `systemctl status`, `update-ca-certificates`, cert copy, `setup-firewall.sh`. See [WEB-TERMINAL-SECURITY.md](WEB-TERMINAL-SECURITY.md) Section 2.1.
 
 ### 5. Git Credentials Stored in Plaintext
 **Location:** `templates/contractor-workspace/main.tf` (lines 386-403)
@@ -73,24 +70,17 @@ run_sql "SELECT * FROM provisioning.create_individual_db('$username', '$workspac
 ```
 **Action:** Implement parameterized queries or proper escaping
 
-### 7. HTTP-Only Communication (No TLS)
-**Location:** All services
-- All OAuth2/OIDC callbacks use HTTP
-- Database connections use `sslmode=disable`
-**Action:** Implement TLS for all endpoints, enable secure cookies
+### 7. ~~HTTP-Only Communication (No TLS)~~ FIXED
+**Location:** Coder server now runs with TLS on port 7443
+**Status:** RESOLVED — Self-signed TLS cert with SAN (`DNS:host.docker.internal,DNS:localhost,IP:127.0.0.1`). `CODER_TLS_ENABLE=true`, `CODER_TLS_ADDRESS=0.0.0.0:7443`. Secure cookies enabled (`CODER_SECURE_AUTH_COOKIE=true`). Workspace agents trust cert via `update-ca-certificates`. Database `sslmode=disable` remains (internal network only, acceptable for PoC).
 
-### 8. Missing Authentication on AI Gateway
-**Location:** `ai-gateway/gateway.py`
-- All endpoints accessible without any authentication
-**Action:** Implement JWT token validation for all endpoints
+### 8. ~~Missing Authentication on AI Gateway~~ OBSOLETE
+**Location:** The old Python `ai-gateway/gateway.py` has been **removed entirely**.
+**Status:** RESOLVED — AI traffic is now routed through **LiteLLM proxy** (port 4000) with per-user virtual key authentication. Keys are auto-provisioned by the key-provisioner service. No unauthenticated AI access is possible.
 
-### 9. Open CORS Configuration
-**Location:** `ai-gateway/gateway.py` (lines 143-150)
-```python
-allow_origins=["*"],
-allow_credentials=True,
-```
-**Action:** Restrict to explicit allowed origins only
+### 9. ~~Open CORS Configuration~~ OBSOLETE
+**Location:** The old Python `ai-gateway/gateway.py` has been **removed entirely**.
+**Status:** RESOLVED — The LiteLLM proxy handles CORS configuration.
 
 ### 10. Hardcoded Database Admin Credentials
 **Locations:**
@@ -123,17 +113,17 @@ CODER_RATE_LIMIT_API: "${CODER_RATE_LIMIT_API:-512}"
 ```
 **Status:** RESOLVED - Rate limiting is now enabled by default (512 requests per minute)
 
-### 15. Secure Cookies Configurable (Default: Disabled for PoC)
+### 15. ~~Secure Cookies Disabled~~ FIXED
 **Location:** `docker-compose.yml`
 ```yaml
-CODER_SECURE_AUTH_COOKIE: "${CODER_SECURE_AUTH_COOKIE:-false}"
+CODER_SECURE_AUTH_COOKIE: "true"
 ```
-**Status:** PARTIALLY ADDRESSED - Now configurable via environment variable. Enable in production by setting `CODER_SECURE_AUTH_COOKIE=true` (requires HTTPS)
+**Status:** RESOLVED — Secure cookies are now enabled. HTTPS is active on port 7443 (required for secure cookies).
 
-### 16. Missing Network Isolation Between Workspaces
+### 16. Missing Network Isolation Between Workspaces — PARTIALLY ADDRESSED
 **Location:** `templates/contractor-workspace/main.tf`
 - All workspaces on same Docker network
-**Action:** Create per-workspace networks or implement network policies
+**Status:** PARTIALLY ADDRESSED — Network **egress filtering** implemented via iptables (see [WEB-TERMINAL-SECURITY.md](WEB-TERMINAL-SECURITY.md) Section 3.1). Workspaces can only reach approved internal services. Outbound to unapproved destinations is dropped and logged (`EGRESS_DENIED:`). Per-workspace network isolation remains a production improvement.
 
 ---
 
@@ -155,6 +145,10 @@ CODER_SECURE_AUTH_COOKIE: "${CODER_SECURE_AUTH_COOKIE:-false}"
 4. Coder agent token exposed in environment
 5. Code-server running without authentication
 6. No image vulnerability scanning
+7. ~~Docker CLI in workspace~~ FIXED — Docker CLI removed from workspace image
+8. ~~Dangerous network binaries~~ FIXED — ssh, scp, sftp, nc, nmap, socat removed
+9. ~~No shell audit logging~~ FIXED — All commands logged via `logger` to syslog
+10. ~~No idle session timeout~~ FIXED — `TMOUT=1800` (30min), readonly
 
 ### Scripts/Automation
 1. Missing input validation on all user parameters
@@ -173,12 +167,13 @@ CODER_SECURE_AUTH_COOKIE: "${CODER_SECURE_AUTH_COOKIE:-false}"
 5. Missing CSRF protection in Platform Admin
 6. Weak session configuration (24h expiry too long)
 
-### AI Gateway
-1. No request validation (no bounds checking)
-2. Weak rate limiting (IP-based only, no per-workspace)
-3. Sensitive data potentially in logs
+### AI Gateway — LARGELY ADDRESSED
+*The old Python AI Gateway (`ai-gateway/gateway.py`) has been replaced by LiteLLM proxy + enforcement hooks.*
+1. ~~No request validation~~ ADDRESSED — LiteLLM validates requests; content guardrails scan for PII/secrets
+2. ~~Weak rate limiting~~ ADDRESSED — Per-key RPM limits (30-120 RPM depending on scope)
+3. Sensitive data potentially in logs — `turn_off_message_logging: true` is default
 4. Missing health checks for upstream providers
-5. Incomplete error handling (leaks implementation details)
+5. ~~Incomplete error handling~~ ADDRESSED — LiteLLM returns structured error responses
 
 ---
 
@@ -192,33 +187,34 @@ CODER_SECURE_AUTH_COOKIE: "${CODER_SECURE_AUTH_COOKIE:-false}"
   - [ ] Implement HashiCorp Vault or AWS Secrets Manager
   - [ ] Generate cryptographically random passwords (32+ chars)
 
-- [ ] **Authentication & Authorization**
-  - [ ] Implement TLS/HTTPS on all endpoints
+- [x] **Authentication & Authorization** (mostly done)
+  - [x] Implement TLS/HTTPS on all endpoints — Coder TLS on port 7443
   - [ ] Enable PKCE for all OAuth2 clients
-  - [ ] Implement AI Gateway authentication (JWT)
-  - [ ] Enable secure cookies (`CODER_SECURE_AUTH_COOKIE: "true"`)
+  - [x] Implement AI Gateway authentication — LiteLLM per-user virtual keys
+  - [x] Enable secure cookies (`CODER_SECURE_AUTH_COOKIE: "true"`)
   - [ ] Implement Single Logout for all services
-  - [ ] Enable rate limiting
+  - [x] Enable rate limiting — per-key RPM limits + Coder API rate limiting (512 RPM)
 
-- [ ] **Container Security**
-  - [ ] Remove root privileges from Coder server
-  - [ ] Remove unrestricted sudo from workspaces
+- [x] **Container Security** (mostly done)
+  - [x] Remove root privileges from Coder server — runs as UID 1000
+  - [x] Remove unrestricted sudo from workspaces — restricted to read-only commands
   - [ ] Enable `no-new-privileges` security option
   - [ ] Add memory/CPU limits to all containers
 
 - [ ] **Code Fixes**
   - [ ] Fix SQL injection in database scripts
   - [ ] Replace plaintext git credentials with SSH keys
-  - [ ] Restrict CORS to explicit origins
+  - [x] Restrict CORS to explicit origins — old gateway removed, LiteLLM handles CORS
   - [ ] Add input validation to all scripts and APIs
 
 ### Phase 2: Hardening (Week 3-4)
 
 - [ ] **Network Security**
-  - [ ] Implement workspace network isolation
+  - [x] Implement workspace egress filtering — iptables-based firewall, approved destinations only
+  - [ ] Implement per-workspace network isolation (full isolation)
   - [ ] Enable PostgreSQL TLS (`sslmode=require`)
   - [ ] Configure mTLS for service-to-service communication
-  - [ ] Restrict CORS and IP allowlists
+  - [ ] Restrict IP allowlists
 
 - [ ] **Logging & Monitoring**
   - [ ] Configure log rotation for all containers
@@ -356,17 +352,30 @@ git filter-repo --invert-paths --path .env.sso --path .env
 
 ## Conclusion
 
-This PoC successfully demonstrates the Coder WebIDE platform's capabilities for contractor development environments. However, it requires significant security hardening before production deployment, particularly around:
+This PoC successfully demonstrates the Coder WebIDE platform's capabilities for contractor development environments. Significant hardening has been completed since the initial review.
 
-1. **Credential Management** - Currently exposes real secrets
-2. **Authentication** - Missing TLS, PKCE, proper session handling
-3. **Authorization** - Missing AI Gateway auth, excessive sudo privileges
-4. **Network Security** - No workspace isolation, no mTLS
-5. **Operational Security** - Missing logging, monitoring, backups
+**Addressed since initial review:**
+- TLS/HTTPS on Coder (port 7443, self-signed cert)
+- Secure cookies enabled
+- AI gateway replaced by LiteLLM with per-user key auth and content guardrails
+- Sudo restricted to read-only commands
+- Dangerous binaries removed (ssh, scp, nc, nmap, docker CLI)
+- Network egress filtering (iptables-based firewall)
+- Shell audit logging and idle timeout
+- PATH lockdown (readonly)
+- RBAC with OIDC group-to-role mapping
 
-**Estimated effort to production-ready:** 4-6 weeks with dedicated security focus.
+**Remaining for production:**
+1. **Credential Management** - Secrets still in `.env` files (needs Vault/Secrets Manager)
+2. **Authentication** - Missing PKCE, Single Logout
+3. **Network Security** - No per-workspace isolation, no mTLS
+4. **Operational Security** - Missing centralized logging, monitoring, backups
+5. **Infrastructure** - No container memory limits, no HA/DR
+
+**Estimated remaining effort to production-ready:** 3-4 weeks with dedicated focus (reduced from original 4-6 weeks due to hardening already completed).
 
 ---
 
 *Generated by comprehensive PoC review - February 4, 2026*
 *Updated: February 5, 2026 - Marked fixed issues (#3, #14, #15)*
+*Updated: February 7, 2026 - Major refresh: marked 8 critical and 5 important items as fixed/addressed (TLS, sudo, AI gateway, egress controls, terminal security). Updated production readiness checklist and timeline.*

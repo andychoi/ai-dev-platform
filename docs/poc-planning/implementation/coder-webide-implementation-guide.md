@@ -501,11 +501,11 @@ Week 7-10: Full Rollout
 
 | Document | Location | Purpose |
 |----------|----------|---------|
-| Requirements | `docs/ai/requirements/coder-webide-integration.md` | Functional/non-functional requirements |
-| Design | `docs/ai/design/coder-webide-integration.md` | Architecture and design decisions |
-| Planning | `docs/ai/planning/coder-webide-integration.md` | Implementation plan and tasks |
-| Limitations | `docs/ai/requirements/coder-webide-limitations-remediation.md` | Tool limitations and remediation |
-| Test Scenarios | `docs/ai/testing/coder-webide-access-control-tests.md` | Access control test cases |
+| Requirements | `docs/poc-planning/requirements/coder-webide-integration.md` | Functional/non-functional requirements |
+| Design | `docs/poc-planning/design/coder-webide-integration.md` | Architecture and design decisions |
+| Planning | `docs/poc-planning/planning/coder-webide-integration.md` | Implementation plan and tasks |
+| Limitations | `docs/poc-planning/requirements/coder-webide-limitations-remediation.md` | Tool limitations and remediation |
+| Test Scenarios | `docs/poc-planning/testing/coder-webide-access-control-tests.md` | Access control test cases |
 | PoC README | `coder-poc/README.md` | Quick start and usage guide |
 
 ---

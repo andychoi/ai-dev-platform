@@ -51,10 +51,10 @@ Log in with your credentials (SSO or local account).
 
 | System | Username | Password |
 |--------|----------|----------|
-| Coder | contractor1@example.com | Password123! |
-| Gitea | contractor1 | password123 |
+| Coder (SSO) | contractor1 | `Contractor123!` (via Authentik) |
+| Gitea | contractor1 | `password123` |
 
-> Note: In production, SSO/OIDC will be used instead of local passwords.
+> Note: In production, SSO/OIDC will be used instead of local passwords. Log in via "Sign in with SSO" on the Coder login page.
 
 ---
 
@@ -208,19 +208,24 @@ You can install additional extensions from the VS Code marketplace.
 
 ### Q: Can I install additional tools?
 
-**A:** Yes, you have `sudo` access. Examples:
+**A:** You can install language-level packages, but system package installation is restricted for security:
+
 ```bash
-# Install system packages
-sudo apt update && sudo apt install <package>
+# Allowed: Language package managers
+npm install -g <package>       # Node.js global packages
+pip install <package>           # Python packages
+go install <package>            # Go packages
 
-# Install Node packages globally
-npm install -g <package>
+# Allowed: Refresh package index (read-only)
+sudo apt-get update
 
-# Install Python packages
-pip install <package>
+# NOT allowed: Installing system packages
+# sudo apt-get install <package>  ← BLOCKED (security restriction)
 ```
 
-Note: Installed packages persist in your workspace.
+If you need a system-level tool that isn't pre-installed, contact your admin to request it be added to the workspace template image.
+
+Note: Language-level packages persist in your workspace (installed under `/home/coder`).
 
 ---
 
@@ -837,3 +842,4 @@ To assign:
 | 1.0 | 2026-02-04 | Platform Team | Initial version |
 | 1.1 | 2026-02-06 | Platform Team | HTTPS URLs, Bedrock model options, secure context troubleshooting, template management how-to |
 | 1.2 | 2026-02-06 | Platform Team | OpenCode CLI references, auto-provisioned keys, updated AI assistant section |
+| 1.3 | 2026-02-07 | Platform Team | Fixed sudo/apt-get section (now restricted), updated credentials to match RBAC doc |

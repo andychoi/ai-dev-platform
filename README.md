@@ -132,27 +132,34 @@ docker compose up -d
 
 | Document | Description |
 |----------|-------------|
-| [Requirements](./docs/ai/requirements/coder-webide-integration.md) | Project requirements and user stories |
-| [Design](./docs/ai/design/coder-webide-integration.md) | Architecture and design decisions |
-| [AI Gateway](./docs/ai/design/coder-webide-ai-gateway.md) | Multi-provider gateway architecture |
-| [Implementation](./docs/ai/implementation/coder-webide-implementation-guide.md) | Setup and configuration guide |
-| [Testing](./docs/ai/testing/coder-webide-access-control-tests.md) | Access control test cases |
+| [Documentation Index](./docs/README.md) | Full documentation index |
+| [PoC Planning](./docs/poc-planning/README.md) | Original requirements, design, and implementation planning |
+| [Platform Docs](./shared/docs/) | AI integration, security, keys, guardrails, FAQ |
+| [Operations](./coder-poc/docs/runbook.md) | Runbook and troubleshooting |
+| [Production Plan](./aws-production/PRODUCTION-PLAN.md) | AWS production migration |
 
 ## Project Structure
 
 ```
 dev-platform/
-├── coder-poc/
-│   ├── ai-gateway/        # Multi-provider AI proxy
-│   │   ├── gateway.py     # Main gateway application
-│   │   ├── config.yaml    # Provider configuration
-│   │   └── Dockerfile
-│   ├── templates/         # Coder workspace templates
-│   ├── scripts/           # Setup and management scripts
+├── coder-poc/              # PoC deployment (Docker Compose)
+│   ├── templates/          # Coder workspace templates
+│   ├── scripts/            # Setup and management scripts
+│   ├── litellm/            # LiteLLM AI proxy config and hooks
+│   ├── egress/             # Network egress exception files
+│   ├── certs/              # TLS certificates
 │   ├── gitea/              # Git server configuration
-│   └── docker-compose.yml # Full stack definition
-├── docs/ai/               # Project documentation
-└── .github/workflows/     # CI pipelines
+│   ├── docs/               # PoC operations (runbook, infra, SSO)
+│   └── docker-compose.yml  # Full stack definition
+├── shared/                 # Shared code and docs
+│   ├── docs/               # Platform-wide documentation
+│   ├── litellm-hooks/      # LiteLLM enforcement + guardrails hooks
+│   ├── key-provisioner/    # AI key auto-provisioning service
+│   └── scripts/            # Shared scripts
+├── aws-production/         # AWS production deployment planning
+├── docs/                   # Documentation index + planning
+│   └── poc-planning/       # Original requirements, design, implementation docs
+└── .claude/skills/         # Claude AI assistant skills
 ```
 
 ## Configuration
@@ -195,7 +202,7 @@ curl -X POST http://localhost:8090/v1/chat/completions \
 
 ## Contributing
 
-Contributions welcome! Please read the documentation in `docs/ai/` before submitting PRs.
+Contributions welcome! Please read the documentation in `docs/` before submitting PRs.
 
 ## License
 

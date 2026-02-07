@@ -6,10 +6,9 @@
 This file defines what Claude must know first when assisting with this repository.
 It intentionally stays high-level and references deeper operational detail in:
 
-- coder-poc/docs/runbook.md – how to operate, configure, and manage the system
-- coder-poc/docs/troubleshooting.md – failure modes, root causes, and fixes
+- coder-poc/docs/runbook.md – how to operate, configure, manage, and troubleshoot the system
 
-Claude should reference those files instead of duplicating procedures.
+Claude should reference that file instead of duplicating procedures.
 
 ---
 
@@ -79,7 +78,7 @@ Users with login_type=password cannot log in via OIDC.
 
 This is the most common SSO failure.
 
-See coder-poc/docs/troubleshooting.md → Login & SSO Issues.
+See coder-poc/docs/runbook.md → Troubleshooting → Login & SSO Issues.
 
 ---
 
@@ -94,7 +93,7 @@ Changes require:
 1. Template push
 2. Workspace deletion & recreation
 
-See coder-poc/docs/troubleshooting.md → Workspace & Agent Issues.
+See coder-poc/docs/runbook.md → Troubleshooting → Workspace & Agent Issues.
 
 ---
 

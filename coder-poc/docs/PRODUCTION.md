@@ -25,7 +25,7 @@ This document provides guidance for deploying the Coder WebIDE Development Platf
 
 | Aspect | PoC (Current) | Production (Required) |
 |--------|---------------|----------------------|
-| **TLS/HTTPS** | HTTP only | TLS 1.2+ required |
+| **TLS/HTTPS** | Self-signed TLS (port 7443) | CA-signed TLS 1.2+ |
 | **Authentication** | Local auth + OIDC (Authentik) | SSO/OIDC + MFA |
 | **Database** | Single instance (PostgreSQL 17) | HA cluster or managed |
 | **Secrets** | .env file | Vault/Secrets Manager |

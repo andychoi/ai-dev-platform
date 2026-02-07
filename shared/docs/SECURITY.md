@@ -119,10 +119,8 @@ This document describes the security architecture, controls, and best practices 
 ```yaml
 # Coder session settings (current PoC configuration)
 CODER_MAX_SESSION_EXPIRY: "8h"       # Maximum session duration (reduced from 24h)
-CODER_SECURE_AUTH_COOKIE: "false"    # Disabled in PoC (HTTP-only), set "true" for production (requires HTTPS)
+CODER_SECURE_AUTH_COOKIE: "true"     # Enabled — requires HTTPS (active on port 7443)
 ```
-
-**Production:** Enable `CODER_SECURE_AUTH_COOKIE: "true"` when TLS is configured.
 
 ### 2.4 Authentik Integration (Optional)
 
@@ -150,7 +148,8 @@ User → Authentik → OIDC → Coder
 
 | Port | Service | Exposed To | Purpose |
 |------|---------|------------|---------|
-| 7080 | Coder | Host | WebIDE platform |
+| 7443 | Coder (HTTPS) | Host | WebIDE platform (TLS) |
+| 7080 | Coder (HTTP) | Host | WebIDE platform (redirect/legacy) |
 | 3000 | Gitea | Host | Git server |
 | 8080 | Drone | Host | CI/CD |
 | 4000 | LiteLLM | Host | AI API proxy |
@@ -173,11 +172,10 @@ iptables -A INPUT -j DROP                         # Default deny
 
 ### 3.4 TLS Configuration
 
-**Development:** HTTP (acceptable for localhost)
+**PoC (Current):** Self-signed TLS cert on Coder (port 7443). SAN: `DNS:host.docker.internal,DNS:localhost,IP:127.0.0.1`. Required for browser secure context (`crypto.subtle` / extension webviews).
 
 **Production Requirements:**
-- TLS 1.2+ on all public endpoints
-- Valid certificates (Let's Encrypt or internal CA)
+- TLS 1.2+ on all public endpoints (proper CA-signed certs)
 - HSTS headers enabled
 - Certificate pinning for mobile clients (if applicable)
 
@@ -616,3 +614,4 @@ docker exec coder-server coder users suspend <username>
 |---------|------|--------|---------|
 | 1.0 | 2026-02-04 | Platform Team | Initial version |
 | 1.1 | 2026-02-05 | Platform Team | Updated to reflect current docker-compose.yml settings (non-root Coder, AI Gateway auth, rate limiting); added cross-references to related documents |
+| 1.2 | 2026-02-07 | Platform Team | Updated TLS status (now active on port 7443), secure cookies enabled, port references updated |
