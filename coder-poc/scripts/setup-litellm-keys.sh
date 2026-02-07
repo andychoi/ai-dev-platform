@@ -59,32 +59,6 @@ for user_config in "${USERS[@]}"; do
 
   echo -n "Creating key for $username (budget: \$$budget, rpm: $rpm)... "
 
-  # Check if key already exists for this user (by alias)
-  EXISTING=$(curl -s -X POST "$LITELLM_URL/key/info" \
-    -H "Authorization: Bearer $MASTER_KEY" \
-    -H "Content-Type: application/json" \
-    -d "{\"key_alias\": \"$username\"}" 2>/dev/null || echo "")
-
-  EXISTING_KEY=$(echo "$EXISTING" | python3 -c "
-import sys, json
-try:
-    d = json.load(sys.stdin)
-    info = d.get('info', d.get('key_info', {}))
-    if isinstance(info, dict) and info.get('token'):
-        print(info['token'])
-    else:
-        print('')
-except:
-    print('')
-" 2>/dev/null || echo "")
-
-  if [ -n "$EXISTING_KEY" ] && [ "$EXISTING_KEY" != "" ]; then
-    echo -e "${YELLOW}exists (reusing)${NC}"
-    echo "$username=$EXISTING_KEY" >> "$KEYS_FILE"
-    KEYS_CREATED=$((KEYS_CREATED + 1))
-    continue
-  fi
-
   RESPONSE=$(curl -s -X POST "$LITELLM_URL/key/generate" \
     -H "Authorization: Bearer $MASTER_KEY" \
     -H "Content-Type: application/json" \
@@ -104,14 +78,17 @@ except:
 
   KEY=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('key', ''))" 2>/dev/null || echo "")
 
-  if [ -z "$KEY" ] || [ "$KEY" = "" ]; then
-    echo -e "${RED}FAILED${NC}"
-    echo "  Response: $RESPONSE"
-    KEYS_FAILED=$((KEYS_FAILED + 1))
-  else
+  if [ -n "$KEY" ] && [ "$KEY" != "" ]; then
     echo -e "${GREEN}${KEY:0:20}...${NC}"
     echo "$username=$KEY" >> "$KEYS_FILE"
     KEYS_CREATED=$((KEYS_CREATED + 1))
+  elif echo "$RESPONSE" | grep -q "already exists"; then
+    echo -e "${YELLOW}exists (skipped)${NC}"
+    KEYS_CREATED=$((KEYS_CREATED + 1))
+  else
+    echo -e "${RED}FAILED${NC}"
+    echo "  Response: $RESPONSE"
+    KEYS_FAILED=$((KEYS_FAILED + 1))
   fi
 done
 

@@ -170,12 +170,12 @@ docker exec \
     cd /tmp/template-to-push
     coder templates push ${TEMPLATE_NAME} --directory . --yes 2>&1 || \
     coder templates create ${TEMPLATE_NAME} --directory . --yes 2>&1
-
-    # Cleanup
-    rm -rf /tmp/template-to-push
 " 2>&1 | while read -r line; do
     echo "  $line"
 done
+
+# Cleanup copied files (docker cp preserves host UID, so rm needs root)
+docker exec -u root coder-server rm -rf /tmp/template-to-push 2>/dev/null || true
 
 PUSH_RESULT=${PIPESTATUS[0]}
 

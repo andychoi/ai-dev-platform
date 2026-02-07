@@ -180,7 +180,10 @@ ENV PATH="/home/coder/.opencode/bin:${PATH}"
 
 # Pre-install OpenAI-compatible provider SDK for OpenCode custom providers (LiteLLM)
 # Without this, opencode can't load the "litellm" provider defined in opencode.json
-RUN cd /home/coder/.config/opencode && npm install @ai-sdk/openai-compatible
+RUN mkdir -p /home/coder/.config/opencode \
+    && cd /home/coder/.config/opencode \
+    && npm init -y \
+    && npm install @ai-sdk/openai-compatible
 
 # Explicitly remove Copilot/Cody if present from base image or sideload
 RUN code-server --uninstall-extension github.copilot 2>/dev/null || true \
