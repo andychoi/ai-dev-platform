@@ -26,8 +26,7 @@ RUN apt-get update && apt-get install -y \
     unzip \
     zip \
     jq \
-    # Networking tools
-    openssh-client \
+    # Networking tools (openssh-client intentionally excluded — scp/sftp are exfiltration vectors)
     ca-certificates \
     gnupg \
     dnsutils \
@@ -59,12 +58,9 @@ RUN apt-get update && apt-get install -y \
 RUN curl -fsSL https://go.dev/dl/go1.22.0.linux-amd64.tar.gz | tar -C /usr/local -xzf - \
     && echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile.d/go.sh
 
-# Install Docker CLI (for Docker-in-Docker scenarios if needed)
-RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu jammy stable" > /etc/apt/sources.list.d/docker.list \
-    && apt-get update \
-    && apt-get install -y docker-ce-cli \
-    && rm -rf /var/lib/apt/lists/*
+# SECURITY: Docker CLI intentionally NOT installed
+# Container escape risk: if Docker socket is reachable, docker CLI allows full host access
+# If Docker-in-Docker is needed in future, use sysbox runtime or rootless Docker instead
 
 # Install code-server (VS Code in browser)
 # Release: https://github.com/coder/code-server/releases
@@ -108,13 +104,56 @@ RUN if id -u 1001 >/dev/null 2>&1; then \
 
 # SECURITY: Restricted sudo - only allow specific safe commands
 # No general sudo access - contractors should not need root privileges
+# IMPORTANT: Do NOT add "apt-get install *" — it allows installing any package
+# including network tools (netcat, nmap, socat) that bypass connection lockdown
 RUN echo "# Restricted sudo for coder user - security hardened" > /etc/sudoers.d/coder \
     && echo "coder ALL=(ALL) NOPASSWD: /usr/bin/apt-get update" >> /etc/sudoers.d/coder \
-    && echo "coder ALL=(ALL) NOPASSWD: /usr/bin/apt-get install *" >> /etc/sudoers.d/coder \
     && echo "coder ALL=(ALL) NOPASSWD: /bin/systemctl status *" >> /etc/sudoers.d/coder \
     && echo "coder ALL=(ALL) NOPASSWD: /usr/sbin/update-ca-certificates" >> /etc/sudoers.d/coder \
-    && echo "coder ALL=(ALL) NOPASSWD: /bin/cp * /usr/local/share/ca-certificates/*" >> /etc/sudoers.d/coder \
+    && echo "coder ALL=(ALL) NOPASSWD: /bin/cp /certs/* /usr/local/share/ca-certificates/" >> /etc/sudoers.d/coder \
+    && echo "coder ALL=(ALL) NOPASSWD: /usr/local/bin/setup-firewall.sh" >> /etc/sudoers.d/coder \
     && chmod 440 /etc/sudoers.d/coder
+
+# SECURITY: Install iptables for network egress filtering
+# The firewall script restricts outbound connections to approved services only
+RUN apt-get update && apt-get install -y iptables \
+    && rm -rf /var/lib/apt/lists/*
+
+# SECURITY: Network egress firewall script
+# Restricts workspace outbound connections to approved internal services only
+# Runs as root via sudo in the container entrypoint before dropping to coder user
+COPY --chmod=755 setup-firewall.sh /usr/local/bin/setup-firewall.sh
+
+# SECURITY: Remove/restrict dangerous binaries that enable data exfiltration
+# ssh/scp/sftp: file transfer even with Coder SSH disabled (can reach external hosts)
+# nc/ncat/netcat: raw socket data transfer
+# telnet/ftp: unencrypted protocols, data exfiltration
+# Note: curl/wget kept (needed for development) — restrict via network egress rules instead
+RUN rm -f /usr/bin/ssh /usr/bin/scp /usr/bin/sftp /usr/bin/ssh-keygen /usr/bin/ssh-keyscan \
+    && rm -f /usr/bin/nc /usr/bin/ncat /usr/bin/netcat \
+    && rm -f /usr/bin/telnet /usr/bin/ftp \
+    && rm -f /usr/bin/socat /usr/bin/nmap
+
+# SECURITY: Shell audit logging — log all terminal commands to syslog
+# Every command typed in the web terminal is recorded with timestamp and user
+RUN echo '# Shell audit logging for security compliance' > /etc/profile.d/shell-audit.sh \
+    && echo 'export PROMPT_COMMAND='\''RETRN_VAL=$?; if [ -f /usr/bin/logger ]; then /usr/bin/logger -p local6.debug -t bash "user=$(whoami) pwd=$(pwd) cmd=$(history 1 | sed "s/^[ ]*[0-9]\+[ ]*//" ) [rc=$RETRN_VAL]"; fi'\''' >> /etc/profile.d/shell-audit.sh \
+    && echo 'export HISTTIMEFORMAT="%F %T "' >> /etc/profile.d/shell-audit.sh \
+    && echo 'export HISTSIZE=10000' >> /etc/profile.d/shell-audit.sh \
+    && echo 'export HISTFILESIZE=20000' >> /etc/profile.d/shell-audit.sh \
+    && echo 'shopt -s histappend' >> /etc/profile.d/shell-audit.sh \
+    && chmod 644 /etc/profile.d/shell-audit.sh
+
+# SECURITY: Idle session timeout (30 minutes)
+RUN echo 'export TMOUT=1800' > /etc/profile.d/idle-timeout.sh \
+    && echo 'readonly TMOUT' >> /etc/profile.d/idle-timeout.sh \
+    && chmod 644 /etc/profile.d/idle-timeout.sh
+
+# SECURITY: PATH lockdown — fixed minimal PATH, prevents running binaries from unexpected locations
+RUN echo '# Locked-down PATH for contractor workspaces' > /etc/profile.d/path-lockdown.sh \
+    && echo 'export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/bin:/home/coder/.local/bin:/home/coder/.opencode/bin:/usr/local/go/bin:/usr/share/dotnet"' >> /etc/profile.d/path-lockdown.sh \
+    && echo 'readonly PATH' >> /etc/profile.d/path-lockdown.sh \
+    && chmod 644 /etc/profile.d/path-lockdown.sh
 
 # Set up home directory
 USER coder

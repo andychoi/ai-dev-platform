@@ -253,10 +253,10 @@ data "coder_parameter" "ai_gateway_url" {
 data "coder_parameter" "ai_enforcement_level" {
   name         = "ai_enforcement_level"
   display_name = "AI Behavior Mode"
-  description  = "Controls how AI agents approach tasks (Standard recommended)"
+  description  = "Controls how AI agents approach tasks. Set by admin at workspace creation — cannot be changed by the user afterward."
   type         = "string"
   default      = "standard"
-  mutable      = true
+  mutable      = false  # SECURITY: Immutable — admin sets this, contractors cannot change it
   icon         = "/icon/widgets.svg"
 
   option {
@@ -271,6 +271,23 @@ data "coder_parameter" "ai_enforcement_level" {
     name  = "Unrestricted - Original tool behavior"
     value = "unrestricted"
   }
+}
+
+# ==========================================================================
+# NETWORK EGRESS EXCEPTIONS (Admin-Controlled)
+# Comma-separated list of extra TCP ports the workspace can reach.
+# Used for approved internal services not in the default allowlist.
+# Only Template Admins can set this — contractors cannot change it.
+# ==========================================================================
+
+data "coder_parameter" "egress_extra_ports" {
+  name         = "egress_extra_ports"
+  display_name = "Network Egress Exceptions"
+  description  = "Extra TCP ports this workspace can reach (comma-separated, admin-only). Example: 8443,8888,3128. Set at workspace creation by admin."
+  type         = "string"
+  default      = ""
+  mutable      = false  # SECURITY: Immutable — only admin sets this at workspace creation
+  icon         = "/icon/lock.svg"
 }
 
 # ==========================================================================
@@ -867,6 +884,8 @@ resource "docker_container" "workspace" {
     # TLS: Trust the self-signed Coder certificate so the agent can connect via HTTPS
     "SSL_CERT_FILE=/certs/coder.crt",
     "NODE_EXTRA_CA_CERTS=/certs/coder.crt",
+    # Network egress exceptions (admin-controlled, read by setup-firewall.sh)
+    "EGRESS_EXTRA_PORTS=${data.coder_parameter.egress_extra_ports.value}",
   ]
 
   # Start the Coder agent
@@ -877,6 +896,8 @@ resource "docker_container" "workspace" {
       sudo cp /certs/coder.crt /usr/local/share/ca-certificates/coder.crt
       sudo update-ca-certificates
     fi
+    # SECURITY: Apply network egress firewall rules
+    sudo /usr/local/bin/setup-firewall.sh || echo "WARNING: Firewall setup failed (iptables may not be available)"
     ${coder_agent.main.init_script}
   EOT
   ]
@@ -894,6 +915,20 @@ resource "docker_container" "workspace" {
     read_only      = true
   }
 
+  # SECURITY: Egress firewall exception files (read-only)
+  # Global: applies to ALL workspaces across ALL templates
+  volumes {
+    host_path      = "/Users/andymini/ai/dev-platform/coder-poc/egress/global.conf"
+    container_path = "/etc/egress-global.conf"
+    read_only      = true
+  }
+  # Template-specific: applies only to this template's workspaces
+  volumes {
+    host_path      = "/Users/andymini/ai/dev-platform/coder-poc/egress/contractor-workspace.conf"
+    container_path = "/etc/egress-template.conf"
+    read_only      = true
+  }
+
   # Connect to Coder network
   networks_advanced {
     name = "coder-network"
@@ -907,6 +942,13 @@ resource "docker_container" "workspace" {
 
   # SECURITY: Prevent privilege escalation in containers
   security_opts = ["no-new-privileges:true"]
+
+  # SECURITY: NET_ADMIN required for iptables egress firewall rules
+  # The firewall script runs once at startup via sudo, then the coder user
+  # cannot modify rules (iptables not in sudoers allowlist)
+  capabilities {
+    add = ["NET_ADMIN"]
+  }
 
   # Lifecycle
   lifecycle {

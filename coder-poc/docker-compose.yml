@@ -67,8 +67,9 @@ services:
       CODER_RATE_LIMIT_DISABLE_ALL: "${CODER_RATE_LIMIT_DISABLE_ALL:-false}"
 
       # Security: Workspace access controls
-      # Prevent admins from accessing other users' workspaces (optional - uncomment for strict)
-      # CODER_DISABLE_OWNER_WORKSPACE_ACCESS: "true"
+      # Prevent admins from accessing other users' workspaces
+      # Owner can still manage workspaces (start/stop/delete) but cannot open terminals or IDE
+      CODER_DISABLE_OWNER_WORKSPACE_ACCESS: "true"
 
       # Disable workspace sharing between users
       CODER_DISABLE_WORKSPACE_SHARING: "true"
@@ -97,6 +98,29 @@ services:
       CODER_OIDC_CLIENT_ID: "${CODER_OIDC_CLIENT_ID:-coder}"
       CODER_OIDC_CLIENT_SECRET: "${CODER_OIDC_CLIENT_SECRET:-}"
       CODER_OIDC_ALLOW_SIGNUPS: "true"
+
+      # OIDC Group-to-Role Mapping (Authentik → Coder RBAC)
+      # Reads the "groups" claim from the OIDC token and maps Authentik groups to Coder roles.
+      # Users in "coder-admins" get Owner, "coder-template-admins" get Template Admin,
+      # "coder-auditors" get Auditor. Everyone else stays Member (default).
+      # IMPORTANT: Groups must exist in Authentik AND be included in the OIDC scope.
+      CODER_OIDC_GROUP_FIELD: "groups"
+      CODER_OIDC_GROUP_MAPPING: |
+        {
+          "coder-admins": "owner",
+          "coder-template-admins": "template-admin",
+          "coder-auditors": "auditor"
+        }
+      # Sync Authentik group changes on every login (not just first login)
+      CODER_OIDC_GROUP_AUTO_CREATE: "true"
+      CODER_OIDC_USER_ROLE_FIELD: "groups"
+      CODER_OIDC_USER_ROLE_MAPPING: |
+        {
+          "coder-admins": ["owner"],
+          "coder-template-admins": ["template-admin"],
+          "coder-auditors": ["auditor"]
+        }
+
       # Disable default GitHub OAuth2 (shows by default in Coder 2.x)
       CODER_OAUTH2_GITHUB_DEFAULT_PROVIDER_ENABLE: "false"
     ports:
