@@ -56,7 +56,19 @@ LiteLLM tracks token usage at every layer — per-request, per-user, and per-wor
 │  virtual key │     │  • Log       │     │  • user_id   │     │    logs      │
 │              │     │  • Callback  │     │  • model     │     │  • /global/  │
 │              │     │              │     │  • timestamp │     │    spend     │
-└──────────────┘     └──────────────┘     └──────────────┘     └──────────────┘
+└──────────────┘     └──────┬───────┘     └──────────────┘     └──────────────┘
+                            │
+                            │ async callback
+                            ▼
+                     ┌──────────────┐
+                     │   Langfuse   │
+                     │  (ECS Task)  │
+                     │              │
+                     │  • Traces    │
+                     │  • Latency   │
+                     │  • Cost      │
+                     │  • Errors    │
+                     └──────────────┘
 ```
 
 ### How to Access Token Metrics
@@ -232,8 +244,54 @@ Platform administrators have access to comprehensive AI usage data through multi
 
 ---
 
+## 6. Langfuse Analytics
+
+### Overview
+
+Langfuse is a self-hosted AI observability platform deployed alongside LiteLLM in the production ECS cluster. It receives traces asynchronously via LiteLLM's callback mechanism — it is never in the request path. If Langfuse is unavailable, AI requests continue working normally.
+
+### What Langfuse Adds Beyond LiteLLM Admin UI
+
+| Capability | LiteLLM Admin UI | Langfuse |
+|------------|-----------------|----------|
+| Key management | Yes | No |
+| Budget tracking | Yes | No |
+| Trace visualization | No | Yes — visual timeline per request |
+| Latency percentiles | No | Yes — P50, P95, P99 per model/user |
+| Cost trend charts | Basic | Yes — daily/weekly/monthly with drill-down |
+| Multi-dimensional filtering | Limited | Yes — by user, model, time range, status, tags |
+| Historical comparison | No | Yes — compare periods, identify regressions |
+
+### Privacy Controls
+
+| Setting | Default | Effect |
+|---------|---------|--------|
+| `turn_off_message_logging: true` | Yes (default) | Langfuse receives metadata only (model, tokens, cost, user, latency) |
+| `turn_off_message_logging: false` | No (opt-in) | Langfuse also receives prompt and completion content |
+
+Content logging is controlled at the LiteLLM config level — it cannot be enabled from workspaces or by individual users.
+
+### Production Access
+
+| Resource | URL | Authentication |
+|----------|-----|----------------|
+| Langfuse Web UI | `https://langfuse.<domain>` | Admin credentials in Secrets Manager |
+| Langfuse Public API | `https://langfuse.<domain>/api/public` | Project API keys (from Secrets Manager) |
+
+### Production Architecture
+
+- **Langfuse Web** — ECS Fargate task (1 vCPU, 2 GB), behind internal ALB
+- **Langfuse Worker** — ECS Fargate task (0.5 vCPU, 1 GB), background processing
+- **ClickHouse** — ECS Fargate task (1 vCPU, 4 GB) with EFS for persistent storage
+- **Storage** — S3 buckets for event and media blob storage (`langfuse-events`, `langfuse-media`)
+- **Database** — Shares RDS PostgreSQL instance (separate `langfuse` database)
+- **Cache** — Shares ElastiCache Redis (DB 1, isolated from Authentik on DB 0)
+
+---
+
 ## Document History
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | 2026-02-06 | Platform Team | Initial version — gateway benefits, analytics, coaching, admin capabilities |
+| 1.1 | 2026-02-07 | Platform Team | Add Langfuse analytics section; update data flow diagram |

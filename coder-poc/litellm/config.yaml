@@ -72,8 +72,15 @@ litellm_settings:
   max_end_user_budget: 10.00
   # Drop params not supported by provider instead of erroring
   drop_params: true
-  # Enable logging
-  success_callback: ["log_to_db"]
-  failure_callback: ["log_to_db"]
+  # Enable logging — log_to_db for LiteLLM UI, langfuse for trace analytics
+  success_callback: ["log_to_db", "langfuse"]
+  failure_callback: ["log_to_db", "langfuse"]
+  # Privacy-first: only log metadata (model, tokens, cost, latency) — no prompt/completion content
+  # Set to false to enable full content logging in Langfuse
+  turn_off_message_logging: true
+  # Tag traces with user identity for correlation in Langfuse
+  langfuse_default_tags:
+    - "user_api_key_alias"
+    - "user_api_key_user_id"
   # Design-first enforcement hook — injects system prompts based on key metadata
   callbacks: ["enforcement_hook.proxy_handler_instance"]

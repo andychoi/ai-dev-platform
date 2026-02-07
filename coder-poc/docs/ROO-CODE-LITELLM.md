@@ -14,6 +14,7 @@ This document covers the complete configuration of Roo Code AI coding agent with
 8. [Suppressing "Create Roo Account" Prompt](#8-suppressing-create-roo-account-prompt)
 9. [Troubleshooting](#9-troubleshooting)
 10. [Verification Checklist](#10-verification-checklist)
+11. [Langfuse Setup & Troubleshooting](#11-langfuse-setup--troubleshooting)
 
 ---
 
@@ -43,6 +44,10 @@ This document covers the complete configuration of Roo Code AI coding agent with
 │  │  │ Audit Log    │ │  Provider    │                        │   │
 │  │  │ (PostgreSQL) │ │  Routing     │                        │   │
 │  │  └──────────────┘ └──────┬───────┘                        │   │
+│  │  ┌──────────────┐                                        │   │
+│  │  │  Langfuse    │                                        │   │
+│  │  │  (async log) │                                        │   │
+│  │  └──────────────┘                                        │   │
 │  └───────────────────────────┼───────────────────────────────┘   │
 │                              │                                    │
 │              ┌───────────────┼───────────────┐                   │
@@ -174,8 +179,12 @@ general_settings:
 litellm_settings:
   max_end_user_budget: 10.00
   drop_params: true
-  success_callback: ["log_to_db"]
-  failure_callback: ["log_to_db"]
+  success_callback: ["log_to_db", "langfuse"]
+  failure_callback: ["log_to_db", "langfuse"]
+  turn_off_message_logging: true  # Privacy-first: metadata only
+  langfuse_default_tags:
+    - "user_api_key_alias"
+    - "user_api_key_user_id"
   # Design-first enforcement hook — injects system prompts based on key metadata
   callbacks: ["enforcement_hook.proxy_handler_instance"]
 ```
@@ -767,3 +776,70 @@ docker exec $CONTAINER grep "AutoImport" $(docker exec $CONTAINER find /home/cod
 4. Click Roo Code icon in sidebar
 5. If cloud prompt appears → skip/dismiss it
 6. Type a message (e.g., "say hello") → should get a response from Claude via LiteLLM
+
+---
+
+## 11. Langfuse Setup & Troubleshooting
+
+### Overview
+
+Langfuse is a self-hosted AI observability layer that receives traces asynchronously from LiteLLM. It provides trace visualization, latency analytics, and cost tracking without being in the request path.
+
+### Accessing the UI
+
+| Environment | URL | Credentials |
+|-------------|-----|-------------|
+| PoC | `http://localhost:3100` | `admin@localhost` / value of `LANGFUSE_ADMIN_PASSWORD` in `.env` (default: `admin`) |
+
+### Verifying Traces
+
+After making an AI request through LiteLLM, traces should appear in Langfuse within ~5 seconds:
+
+```bash
+# Check Langfuse health
+curl -s http://localhost:3100/api/public/health | jq .status
+# Expected: "OK"
+
+# Check for traces (Basic auth with project API keys)
+curl -s http://localhost:3100/api/public/traces \
+  -H "Authorization: Basic $(echo -n 'lf_pk_poc_changeme:lf_sk_poc_changeme' | base64)"
+# Should return traces array
+
+# Verify LiteLLM registered the Langfuse callback
+docker logs litellm 2>&1 | grep -i langfuse
+```
+
+### Enabling Content Logging
+
+By default, Langfuse only receives metadata (model, tokens, cost, latency, user). To enable full prompt/completion content logging:
+
+1. Edit `coder-poc/litellm/config.yaml`:
+   ```yaml
+   litellm_settings:
+     turn_off_message_logging: false  # Enable content logging
+   ```
+2. Restart LiteLLM: `docker compose up -d litellm`
+3. Verify in Langfuse UI — traces should now show "Input" and "Output" content
+
+**Warning:** Enabling content logging means all prompts and AI responses are stored in Langfuse's database (PostgreSQL + ClickHouse). Ensure this aligns with your organization's data retention and privacy policies.
+
+### Common Issues
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| No traces in Langfuse | LiteLLM can't reach Langfuse | Check `docker logs litellm` for Langfuse connection errors; verify `langfuse-web` is healthy |
+| Langfuse UI shows 500 errors | ClickHouse not ready | Check `docker compose ps clickhouse`; wait for healthy status |
+| "Invalid API key" in Langfuse | Key mismatch between LiteLLM and Langfuse | Ensure `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` in `.env` match `LANGFUSE_INIT_PROJECT_PUBLIC_KEY` and `LANGFUSE_INIT_PROJECT_SECRET_KEY` |
+| Traces show metadata but no content | `turn_off_message_logging: true` (default) | This is intentional — see "Enabling Content Logging" above |
+| MinIO bucket errors in Langfuse logs | `mc-init` hasn't created buckets yet | Run `docker compose up mc-init` or check `docker logs mc-init` |
+
+### Dependencies
+
+Langfuse depends on these services (all managed in Docker Compose):
+
+| Service | Purpose | Shared? |
+|---------|---------|---------|
+| PostgreSQL | Metadata, auth, project config | Yes (separate `langfuse` database) |
+| ClickHouse | Trace analytics engine | No (Langfuse-only) |
+| Redis | Caching, pub/sub | Yes (DB 1, Authentik uses DB 0) |
+| MinIO | Blob storage for large payloads | Yes (separate `langfuse-events` and `langfuse-media` buckets) |

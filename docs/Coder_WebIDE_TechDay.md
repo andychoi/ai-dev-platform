@@ -8,13 +8,13 @@
 
 ## 1. Executive Summary
 
-We built a browser-based development platform that gives contractors full IDE access -- VS Code, terminal, AI coding agents -- without issuing VPN credentials, laptops, or API keys. The platform runs 14 integrated services on Docker Compose today and has a production deployment plan for AWS (ECS Fargate + managed services). Every contractor works in an isolated container with OIDC SSO, per-user AI budgets, tamper-proof behavior controls, and a complete audit trail. The result: contractors can write, test, and ship code from any browser, while we retain full control over source code, AI spend, and access lifecycle.
+We built a browser-based development platform that gives contractors full IDE access -- VS Code, terminal, AI coding agents -- without issuing VPN credentials, laptops, or API keys. The platform runs 17 integrated services on Docker Compose today and has a production deployment plan for AWS (ECS Fargate + managed services). Every contractor works in an isolated container with OIDC SSO, per-user AI budgets, tamper-proof behavior controls, and a complete audit trail. The result: contractors can write, test, and ship code from any browser, while we retain full control over source code, AI spend, and access lifecycle.
 
 **Key stats:**
 
 | Metric | Value |
 |--------|-------|
-| Services integrated | 14 (PoC Docker Compose) |
+| Services integrated | 17 (PoC Docker Compose) |
 | Access method | Browser-only (VS Code Desktop, SSH, port forwarding disabled) |
 | Authentication | OIDC SSO via Authentik (Azure AD federation ready) |
 | AI tools | Roo Code (VS Code agent) + OpenCode (terminal agent) |
@@ -70,6 +70,7 @@ Organizations routinely engage contractors for software development. The traditi
  |  Gitea (3000)              |  Self-hosted Git with OIDC integration
  |  LiteLLM (4000)            |  AI proxy: routing, budgets, audit, enforcement
  |  Key Provisioner (8100)    |  Automated virtual key lifecycle
+ |  Langfuse (3100)            |  AI observability: traces, latency, cost trends
  |  Platform Admin (5050)     |  Unified admin dashboard
  |  Drone CI (8080)           |  CI/CD pipelines
  |                            |
@@ -124,6 +125,7 @@ Organizations routinely engage contractors for software development. The traditi
 | **Per-user AI budgets** | LiteLLM virtual keys with hard spend caps ($5-$20/day), rate limits (30-60 RPM), model restrictions | Predictable AI costs; no surprise bills; granular cost attribution |
 | **AI behavior controls** | Server-side enforcement hook (LiteLLM callback) + client-side config reinforcement; 3 levels: unrestricted, standard, design-first | Tamper-proof control over AI agent behavior; new contractors get guardrails; experienced devs get freedom |
 | **Audit trail** | Every AI request logged: user, model, tokens, cost, timestamp; Coder audit logs for workspace lifecycle | Full accountability; compliance-ready metadata logging; privacy-first (no prompt content by default) |
+| **AI observability** | Langfuse self-hosted trace analytics (async from LiteLLM); ClickHouse for fast queries; privacy-first (metadata only by default) | Visual trace timelines, latency percentiles, cost trends — without sending prompt content to external services |
 | **Self-hosted Git** | Gitea with OIDC integration; internal network only | Source code never leaves the platform; no external Git dependency |
 
 > **Key Takeaway:** The platform provides the full modern developer experience -- IDE, terminal, AI agents, Git, CI/CD -- in a browser, while retaining complete organizational control over code, credentials, AI usage, and access lifecycle.
@@ -174,6 +176,26 @@ Distributing API keys to contractors is the AI equivalent of distributing databa
  injects prompt     Advisory reinforcement
  TAMPER-PROOF       (user could modify)
 ```
+
+### AI Observability
+
+```
+ LiteLLM Gateway (port 4000)
+              |
+     +--------+--------+
+     |                  |
+     v                  v
+ LLM Provider      Langfuse (port 3100)
+ (Bedrock /        [async callback]
+  Anthropic)       Trace visualization
+                   Latency analytics
+                   Cost trends
+                   ClickHouse + MinIO
+```
+
+**Langfuse** is a self-hosted AI observability layer that receives traces asynchronously from LiteLLM. It provides visual trace timelines, latency percentiles (P50/P95/P99), and cost trend analysis — all without being in the request path. If Langfuse is down, AI requests continue working.
+
+**Privacy-first:** By default, only metadata (model, tokens, cost, user ID, latency) is sent to Langfuse. Prompt/completion content is not logged unless explicitly enabled by an administrator.
 
 **Server-side enforcement is the authoritative control.** The LiteLLM `CustomLogger` callback reads `enforcement_level` from the virtual key's metadata and prepends the mandatory system prompt to every chat completion request. This happens inside the proxy -- users cannot disable, modify, or bypass it from the workspace.
 
@@ -422,3 +444,4 @@ At the small deployment scale (50 users, 20 concurrent), total infrastructure + 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | 2026-02-06 | Platform Team | Initial tech day presentation document |
+| 1.1 | 2026-02-07 | Platform Team | Add Langfuse AI observability layer; update service count to 17 |

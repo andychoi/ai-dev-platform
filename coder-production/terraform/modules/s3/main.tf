@@ -12,6 +12,8 @@ locals {
     terraform-state = "${var.name_prefix}-terraform-state"
     backups         = "${var.name_prefix}-backups"
     artifacts       = "${var.name_prefix}-artifacts"
+    langfuse-events = "${var.name_prefix}-langfuse-events"
+    langfuse-media  = "${var.name_prefix}-langfuse-media"
   }
 }
 

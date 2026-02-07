@@ -23,6 +23,11 @@ CREATE USER litellm WITH PASSWORD 'litellm';
 CREATE DATABASE litellm OWNER litellm;
 GRANT ALL PRIVILEGES ON DATABASE litellm TO litellm;
 
+-- Create Langfuse database and user (AI observability, trace analytics)
+CREATE USER langfuse WITH PASSWORD 'langfuse';
+CREATE DATABASE langfuse OWNER langfuse;
+GRANT ALL PRIVILEGES ON DATABASE langfuse TO langfuse;
+
 -- Log successful initialization
 DO $$
 BEGIN
@@ -32,5 +37,6 @@ BEGIN
     RAISE NOTICE '  - authentik (user: authentik)';
     RAISE NOTICE '  - platform  (user: platform)';
     RAISE NOTICE '  - litellm   (user: litellm)';
+    RAISE NOTICE '  - langfuse  (user: langfuse)';
     RAISE NOTICE '===========================================';
 END $$;

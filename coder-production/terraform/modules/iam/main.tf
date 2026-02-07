@@ -336,7 +336,63 @@ resource "aws_iam_role_policy" "key_provisioner" {
 }
 
 ###############################################################################
-# 6. Workspace Task Role
+# 6. Langfuse Task Role
+#
+# Permissions:
+#   - Secrets Manager (Langfuse secrets)
+#   - S3 (langfuse-events and langfuse-media buckets)
+###############################################################################
+
+resource "aws_iam_role" "langfuse" {
+  name               = "${var.name_prefix}-langfuse-task-role"
+  assume_role_policy = data.aws_iam_policy_document.ecs_task_trust.json
+  tags               = var.tags
+}
+
+data "aws_iam_policy_document" "langfuse" {
+  # Secrets Manager – read Langfuse-specific secrets
+  statement {
+    sid    = "SecretsManagerRead"
+    effect = "Allow"
+    actions = [
+      "secretsmanager:GetSecretValue",
+      "secretsmanager:DescribeSecret",
+    ]
+    resources = [
+      lookup(var.secrets_arns, "langfuse_api_keys", "arn:${data.aws_partition.current.partition}:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:prod/langfuse/*"),
+      lookup(var.secrets_arns, "langfuse_auth", "arn:${data.aws_partition.current.partition}:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:prod/langfuse/*"),
+      lookup(var.secrets_arns, "langfuse_database", "arn:${data.aws_partition.current.partition}:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:prod/langfuse/*"),
+      lookup(var.secrets_arns, "langfuse_clickhouse", "arn:${data.aws_partition.current.partition}:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:prod/langfuse/*"),
+    ]
+  }
+
+  # S3 – read/write to Langfuse event and media buckets
+  statement {
+    sid    = "S3ReadWrite"
+    effect = "Allow"
+    actions = [
+      "s3:GetObject",
+      "s3:PutObject",
+      "s3:DeleteObject",
+      "s3:ListBucket",
+    ]
+    resources = [
+      lookup(var.s3_bucket_arns, "langfuse-events", ""),
+      "${lookup(var.s3_bucket_arns, "langfuse-events", "")}/*",
+      lookup(var.s3_bucket_arns, "langfuse-media", ""),
+      "${lookup(var.s3_bucket_arns, "langfuse-media", "")}/*",
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "langfuse" {
+  name   = "${var.name_prefix}-langfuse-task-role-policy"
+  role   = aws_iam_role.langfuse.id
+  policy = data.aws_iam_policy_document.langfuse.json
+}
+
+###############################################################################
+# 7. Workspace Task Role
 #
 # Minimal permissions – workspaces access LiteLLM via network,
 # not via IAM. Only CloudWatch Logs for observability.

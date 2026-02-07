@@ -7,6 +7,10 @@
 #   - prod/authentik/secret-key    (random generated)
 #   - prod/litellm/master-key      (random generated)
 #   - prod/litellm/anthropic-api-key (placeholder, optional fallback)
+#   - prod/langfuse/api-keys       (public + secret key pair)
+#   - prod/langfuse/auth           (NextAuth secret, salt, encryption key)
+#   - prod/langfuse/database       (PostgreSQL connection string)
+#   - prod/langfuse/clickhouse     (ClickHouse password)
 ###############################################################################
 
 terraform {
@@ -140,4 +144,101 @@ resource "aws_secretsmanager_secret_version" "litellm_anthropic_api_key" {
   lifecycle {
     ignore_changes = [secret_string]
   }
+}
+
+###############################################################################
+# 8. prod/langfuse/api-keys
+###############################################################################
+
+resource "random_password" "langfuse_public_key" {
+  length  = 32
+  special = false
+}
+
+resource "random_password" "langfuse_secret_key" {
+  length  = 48
+  special = false
+}
+
+resource "aws_secretsmanager_secret" "langfuse_api_keys" {
+  name        = "${var.name_prefix}/langfuse/api-keys"
+  description = "Langfuse project API keys (auto-generated)."
+  tags        = var.tags
+}
+
+resource "aws_secretsmanager_secret_version" "langfuse_api_keys" {
+  secret_id = aws_secretsmanager_secret.langfuse_api_keys.id
+  secret_string = jsonencode({
+    public_key = "lf_pk_${random_password.langfuse_public_key.result}"
+    secret_key = "lf_sk_${random_password.langfuse_secret_key.result}"
+  })
+}
+
+###############################################################################
+# 9. prod/langfuse/auth
+###############################################################################
+
+resource "random_password" "langfuse_nextauth_secret" {
+  length  = 48
+  special = false
+}
+
+resource "random_password" "langfuse_salt" {
+  length  = 48
+  special = false
+}
+
+resource "random_password" "langfuse_encryption_key" {
+  length  = 64
+  special = false
+}
+
+resource "aws_secretsmanager_secret" "langfuse_auth" {
+  name        = "${var.name_prefix}/langfuse/auth"
+  description = "Langfuse authentication secrets (auto-generated)."
+  tags        = var.tags
+}
+
+resource "aws_secretsmanager_secret_version" "langfuse_auth" {
+  secret_id = aws_secretsmanager_secret.langfuse_auth.id
+  secret_string = jsonencode({
+    nextauth_secret = random_password.langfuse_nextauth_secret.result
+    salt            = random_password.langfuse_salt.result
+    encryption_key  = random_password.langfuse_encryption_key.result
+  })
+}
+
+###############################################################################
+# 10. prod/langfuse/database
+###############################################################################
+
+resource "aws_secretsmanager_secret" "langfuse_database" {
+  name        = "${var.name_prefix}/langfuse/database"
+  description = "PostgreSQL connection string for Langfuse."
+  tags        = var.tags
+}
+
+resource "aws_secretsmanager_secret_version" "langfuse_database" {
+  secret_id     = aws_secretsmanager_secret.langfuse_database.id
+  secret_string = "postgresql://langfuse:${var.rds_master_password}@${var.rds_endpoint}:5432/langfuse?sslmode=require"
+}
+
+###############################################################################
+# 11. prod/langfuse/clickhouse
+###############################################################################
+
+resource "random_password" "langfuse_clickhouse" {
+  length  = 32
+  special = false
+}
+
+resource "aws_secretsmanager_secret" "langfuse_clickhouse" {
+  name        = "${var.name_prefix}/langfuse/clickhouse"
+  description = "ClickHouse password for Langfuse (auto-generated)."
+  tags        = var.tags
+}
+
+resource "aws_secretsmanager_secret_version" "langfuse_clickhouse" {
+  secret_id     = aws_secretsmanager_secret.langfuse_clickhouse.id
+  secret_string = random_password.langfuse_clickhouse.result
 }

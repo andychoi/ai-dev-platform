@@ -359,6 +359,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      langfuse-web:
+        condition: service_healthy
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
@@ -367,6 +369,10 @@ services:
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-poc-litellm-master-key-change-in-production}
       - DATABASE_URL=${LITELLM_DATABASE_URL:-postgresql://litellm:litellm@postgres:5432/litellm}
       - DEFAULT_ENFORCEMENT_LEVEL=${DEFAULT_ENFORCEMENT_LEVEL:-standard}
+      # Langfuse observability — async trace callback
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-lf_pk_poc_changeme}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-lf_sk_poc_changeme}
+      - LANGFUSE_HOST=http://langfuse-web:3000
     ports:
       - "4000:4000"
     volumes:
@@ -411,6 +417,170 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+  # ==========================================================================
+  # LANGFUSE - AI Observability & Trace Analytics
+  # Self-hosted LLM trace visualization, latency analytics, cost tracking
+  # Receives traces from LiteLLM via async callback (NOT in request path)
+  # Web UI: http://localhost:3100  API: http://localhost:3100/api/public
+  # ==========================================================================
+
+  # ClickHouse — columnar analytics DB for Langfuse trace queries
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: clickhouse
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: langfuse
+      CLICKHOUSE_USER: langfuse
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-clickhouse}
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - clickhouse_logs:/var/log/clickhouse-server
+    networks:
+      - coder-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # No host ports — internal only (Langfuse accesses via clickhouse:8123/9000)
+
+  # MinIO bucket initializer for Langfuse blob storage
+  mc-init:
+    image: minio/mc:latest
+    container_name: mc-init
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set myminio http://minio:9002 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD} &&
+      mc mb --ignore-existing myminio/langfuse-events &&
+      mc mb --ignore-existing myminio/langfuse-media &&
+      echo 'Langfuse buckets created successfully'
+      "
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    networks:
+      - coder-network
+
+  # Langfuse Web — UI + API server
+  langfuse-web:
+    image: docker.io/langfuse/langfuse:3
+    container_name: langfuse-web
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      authentik-redis:
+        condition: service_healthy
+    environment:
+      # Next.js 15 binds to container hostname by default; force all-interfaces
+      HOSTNAME: "0.0.0.0"
+      # Database
+      DATABASE_URL: postgresql://langfuse:langfuse@postgres:5432/langfuse
+      # ClickHouse
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
+      CLICKHOUSE_USER: langfuse
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-clickhouse}
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      # Redis (shared with Authentik, isolated by DB number)
+      REDIS_CONNECTION_STRING: redis://authentik-redis:6379/1
+      # S3/MinIO blob storage
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse-events
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: us-east-1
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9002
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse-media
+      LANGFUSE_S3_MEDIA_UPLOAD_REGION: us-east-1
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://minio:9002
+      LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+      # Auth
+      NEXTAUTH_URL: http://localhost:3100
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-change-me-nextauth-secret}
+      SALT: ${LANGFUSE_SALT:-change-me-salt}
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
+      # Headless init — auto-creates org, project, admin user, and API keys on first boot
+      LANGFUSE_INIT_ORG_ID: poc-org
+      LANGFUSE_INIT_ORG_NAME: "PoC Organization"
+      LANGFUSE_INIT_PROJECT_ID: poc-project
+      LANGFUSE_INIT_PROJECT_NAME: "AI Gateway Traces"
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-lf_pk_poc_changeme}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-lf_sk_poc_changeme}
+      LANGFUSE_INIT_USER_EMAIL: admin@local.test
+      LANGFUSE_INIT_USER_NAME: admin
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_ADMIN_PASSWORD:-adminadmin}
+      # Telemetry
+      TELEMETRY_ENABLED: "false"
+      NEXT_TELEMETRY_DISABLED: "1"
+    ports:
+      - "3100:3000"
+    networks:
+      - coder-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000/api/public/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # Langfuse Worker — background job processor (trace ingestion, analytics)
+  langfuse-worker:
+    image: docker.io/langfuse/langfuse-worker:3
+    container_name: langfuse-worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      authentik-redis:
+        condition: service_healthy
+    environment:
+      # Database
+      DATABASE_URL: postgresql://langfuse:langfuse@postgres:5432/langfuse
+      # ClickHouse
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
+      CLICKHOUSE_USER: langfuse
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-clickhouse}
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      # Redis
+      REDIS_CONNECTION_STRING: redis://authentik-redis:6379/1
+      # S3/MinIO blob storage
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse-events
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: us-east-1
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9002
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse-media
+      LANGFUSE_S3_MEDIA_UPLOAD_REGION: us-east-1
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://minio:9002
+      LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+      # Auth (worker needs encryption key for data access)
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
+      SALT: ${LANGFUSE_SALT:-change-me-salt}
+      # Telemetry
+      TELEMETRY_ENABLED: "false"
+    networks:
+      - coder-network
 
   # ==========================================================================
   # AUTHENTIK - Identity Provider & RBAC
@@ -592,6 +762,10 @@ volumes:
     name: coder-poc-drone
   # ai_gateway_logs:
   #   name: coder-poc-ai-gateway-logs
+  clickhouse_data:
+    name: coder-poc-clickhouse
+  clickhouse_logs:
+    name: coder-poc-clickhouse-logs
   authentik_redis:
     name: coder-poc-authentik-redis
   authentik_media:

@@ -16,6 +16,7 @@ This document describes how AI capabilities are integrated into the Coder WebIDE
 10. [Troubleshooting](#10-troubleshooting)
 11. [LiteLLM Gateway Benefits](#11-litellm-gateway-benefits)
 12. [Design-First AI Enforcement Layer](#12-design-first-ai-enforcement-layer)
+13. [Langfuse Observability Layer](#13-langfuse-observability-layer)
 
 ---
 
@@ -42,6 +43,11 @@ This document describes how AI capabilities are integrated into the Coder WebIDE
 │                        └────────┬────────┘  └────────┬────────┘              │
 │                                 │                    │                        │
 │                                 └────────────────────┘                        │
+│                                │         │                                   │
+│                                │    ┌────┴──────────┐                        │
+│                                │    │   Langfuse    │  (async callback)      │
+│                                │    │  (Port 3100)  │  trace analytics       │
+│                                │    └───────────────┘                        │
 │                                │                                             │
 │  ┌─────────────────────────────┼─────────────────────────────────────────┐  │
 │  │                    AI PROVIDER LAYER                                   │  │
@@ -66,6 +72,7 @@ This document describes how AI capabilities are integrated into the Coder WebIDE
 | Test Generation | Roo Code | Bedrock/Anthropic (via LiteLLM) | Generate unit tests |
 | CLI AI Agent | OpenCode CLI | Bedrock/Anthropic (via LiteLLM) | Terminal-based agentic coding |
 | CLI Assistant | Terminal Tools | LiteLLM | Shell commands, debugging |
+| Trace Analytics | Langfuse Web UI | LiteLLM → Langfuse | Trace visualization, latency analytics, cost trends |
 
 ---
 
@@ -600,6 +607,7 @@ Roo Code's agentic capabilities allow it to read multiple files, understand proj
 │      │  2. No persistent storage of prompts              │      │
 │      │  3. Response received                             │      │
 │      │  4. Audit log: metadata only (no content)         │      │
+│      │  5. Langfuse: async traces (metadata by default)  │      │
 │      │                                                    │      │
 │      └──────────────────────────────────────────────────>│      │
 │                                                                  │
@@ -805,6 +813,9 @@ LiteLLM tracks token usage at every layer — per-request, per-user, and per-wor
 ┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
 │  Roo Code /  │────>│   LiteLLM    │────>│  PostgreSQL  │────>│  Dashboard / │
 │  OpenCode    │     │   Proxy      │     │  (spend_logs)│     │  Admin API   │
+│              │     │              │     │              │     │              │
+│              │     │              │     │              │     │  Langfuse UI │
+│              │     │              │     │              │     │  (Port 3100) │
 │              │     │              │     │              │     │              │
 │  Request     │     │  • Auth      │     │  • token_ct  │     │  • /ui       │
 │  with        │     │  • Route     │     │  • cost      │     │  • /spend/   │
@@ -1056,6 +1067,85 @@ curl -s http://localhost:4000/v1/chat/completions \
 
 ---
 
+## 13. Langfuse Observability Layer
+
+### 13.1 Overview
+
+[Langfuse](https://langfuse.com) is a self-hosted AI observability platform that provides trace visualization, latency analytics, and cost tracking for all AI requests flowing through LiteLLM. It runs as a **side-channel observer** — if Langfuse is down, AI requests continue working; traces are simply not recorded.
+
+### 13.2 What Langfuse Provides
+
+| Capability | Description |
+|------------|-------------|
+| **Trace visualization** | Visual timeline of each AI request: prompt → model → response |
+| **Latency percentiles** | P50, P95, P99 response times per model, per user |
+| **Cost trends** | Daily/weekly/monthly cost breakdowns with drill-down by user, model, workspace |
+| **Error analysis** | Failed requests with error type, provider, and user context |
+| **Token analytics** | Input/output token distributions, efficiency trends |
+| **User-level metrics** | Per-user trace count, cost, latency, and error rate |
+
+### 13.3 Integration Architecture
+
+```
+Roo Code / OpenCode / CLI Tools
+          |
+          v
+   LiteLLM Gateway (port 4000)
+   - Routing, key enforcement, budgets
+   - Design-first enforcement hook
+          |
+          +-------> Langfuse (port 3100) [async callback, NOT in request path]
+          |              |-- ClickHouse (trace analytics engine)
+          |              |-- PostgreSQL (metadata, auth)
+          |              |-- MinIO (blob storage for large payloads)
+          |
+          v
+   LLM Providers (Bedrock / Anthropic)
+```
+
+Langfuse receives traces via LiteLLM's `success_callback` and `failure_callback` arrays. The callback is **asynchronous** — it never blocks or slows the actual LLM response.
+
+### 13.4 Privacy Defaults
+
+By default, `turn_off_message_logging: true` is set in LiteLLM config. This means Langfuse receives **metadata only**:
+
+- Model name, provider, request timestamp
+- Input/output token counts, calculated cost
+- User ID (from virtual key), workspace ID (from key metadata)
+- Latency, success/failure status, error type
+
+**Prompt and completion content is NOT sent to Langfuse** unless an administrator explicitly sets `turn_off_message_logging: false` in `litellm/config.yaml`.
+
+### 13.5 Accessing Langfuse
+
+| Environment | URL | Credentials |
+|-------------|-----|-------------|
+| PoC (Docker Compose) | `http://localhost:3100` | `admin@localhost` / `LANGFUSE_ADMIN_PASSWORD` from `.env` |
+| Production (AWS) | `https://langfuse.<domain>` | Admin credentials in Secrets Manager |
+
+### 13.6 PoC Components
+
+| Service | Image | Purpose |
+|---------|-------|---------|
+| `clickhouse` | `clickhouse/clickhouse-server:latest` | Columnar analytics DB for fast trace queries |
+| `langfuse-web` | `langfuse/langfuse:3` | Web UI + API server (port 3100 → container 3000) |
+| `langfuse-worker` | `langfuse/langfuse-worker:3` | Background job processor (trace ingestion, analytics aggregation) |
+| `mc-init` | `minio/mc:latest` | One-shot MinIO bucket creator for Langfuse blob storage |
+
+### 13.7 Relationship to LiteLLM Admin UI
+
+LiteLLM's built-in admin UI (`/ui` on port 4000) provides key management, budget tracking, and basic spend logs. Langfuse **complements** this with:
+
+- Visual trace timelines (not available in LiteLLM UI)
+- Latency percentile charts
+- Multi-dimensional filtering (by user, model, time range, status)
+- Historical trend analysis
+- Exportable analytics
+
+Both tools can be used together — LiteLLM UI for key/budget management, Langfuse for trace analytics.
+
+---
+
 ## Document History
 
 | Version | Date | Author | Changes |
@@ -1066,3 +1156,4 @@ curl -s http://localhost:4000/v1/chat/completions \
 | 1.3 | 2026-02-06 | Platform Team | Add OpenCode CLI, key-provisioner service, auto-provisioning |
 | 1.4 | 2026-02-06 | Platform Team | Add Section 11: LiteLLM Gateway Benefits (analytics, coaching, admin capabilities) |
 | 1.5 | 2026-02-06 | Platform Team | Add Section 12: Design-First AI Enforcement Layer |
+| 1.6 | 2026-02-07 | Platform Team | Add Section 13: Langfuse Observability Layer |

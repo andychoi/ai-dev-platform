@@ -136,10 +136,10 @@ module "iam" {
 # Security Groups
 # -----------------------------------------------------------------------------
 
-# Platform services: Coder, Authentik, LiteLLM
+# Platform services: Coder, Authentik, LiteLLM, Langfuse, ClickHouse
 resource "aws_security_group" "ecs_services" {
   name        = "${local.name_prefix}-ecs-services"
-  description = "Security group for ECS platform services (Coder, Authentik, LiteLLM)"
+  description = "Security group for ECS platform services (Coder, Authentik, LiteLLM, Langfuse)"
   vpc_id      = module.vpc.vpc_id
 
   tags = merge(var.tags, {
@@ -173,6 +173,15 @@ resource "aws_vpc_security_group_ingress_rule" "services_from_alb_litellm" {
   to_port                      = 4000
   ip_protocol                  = "tcp"
   description                  = "ALB to LiteLLM"
+}
+
+resource "aws_vpc_security_group_ingress_rule" "services_from_alb_langfuse" {
+  security_group_id            = aws_security_group.ecs_services.id
+  referenced_security_group_id = module.alb.alb_security_group_id
+  from_port                    = 3000
+  to_port                      = 3000
+  ip_protocol                  = "tcp"
+  description                  = "ALB to Langfuse"
 }
 
 # Inbound: services can communicate with each other
