@@ -109,9 +109,9 @@ This document describes the infrastructure architecture, components, and deploym
 
 | Service | Container | Port(s) | Purpose | Dependencies |
 |---------|-----------|---------|---------|--------------|
-| authentik-server | authentik-server | 9000, 9443 | Identity provider | postgres, redis |
-| authentik-worker | authentik-worker | - | Background jobs | postgres, redis |
-| authentik-redis | authentik-redis | 6379 (internal) | Session cache | - |
+| authentik-server | authentik-server | 9000, 9443 | Identity provider | postgres |
+| authentik-worker | authentik-worker | - | Background jobs | postgres |
+| redis | redis | 6379 (internal) | Langfuse cache/jobs | - |
 | minio | minio | 9001, 9002 | Object storage | - |
 | mailpit | mailpit | 8025, 1025 | Email testing | - |
 | testdb | testdb | 5432 (internal) | Test database | - |
@@ -141,7 +141,7 @@ images:
   gitea: gitea/gitea:latest
   drone: drone/drone:2
   drone-runner: drone/drone-runner-docker:1
-  authentik: ghcr.io/goauthentik/server:2024.2
+  authentik: ghcr.io/goauthentik/server:2025.12
   redis: redis:7-alpine
   minio: minio/minio:latest
   mailpit: axllent/mailpit:latest
@@ -190,7 +190,7 @@ images:
 | Service | Internal DNS | Port |
 |---------|--------------|------|
 | PostgreSQL | postgres | 5432 |
-| Redis | authentik-redis | 6379 |
+| Redis | redis | 6379 |
 | Gitea | gitea | 3000 |
 | LiteLLM | litellm | 4000 |
 | MinIO | minio | 9002 |

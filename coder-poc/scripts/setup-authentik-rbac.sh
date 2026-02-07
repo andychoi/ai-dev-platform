@@ -40,7 +40,7 @@ echo ""
 echo -e "${BLUE}[1/5] Checking Authentik...${NC}"
 if ! curl -s "${AUTHENTIK_URL}/-/health/ready/" > /dev/null 2>&1; then
     echo -e "${RED}Error: Authentik is not running at ${AUTHENTIK_URL}${NC}"
-    echo "Start it with: docker compose up -d authentik-server authentik-worker authentik-redis"
+    echo "Start it with: docker compose up -d authentik-server authentik-worker"
     exit 1
 fi
 echo -e "${GREEN}✓ Authentik is running${NC}"

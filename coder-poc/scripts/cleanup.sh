@@ -123,7 +123,7 @@ VOLUMES_TO_REMOVE=(
     "coder-poc-gitea"
     "coder-poc-drone"
     # "coder-poc-ai-gateway-logs"  # Deprecated: replaced by LiteLLM
-    "coder-poc-authentik-redis"
+    "coder-poc-redis"
     "coder-poc-authentik-media"
     "coder-poc-authentik-templates"
 )

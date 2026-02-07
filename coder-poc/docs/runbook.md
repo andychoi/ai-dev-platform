@@ -62,7 +62,7 @@ sudo security add-trusted-cert -d -r trustRoot \
 
 ### Startup order
 
-1. `postgres`, `authentik-redis`
+1. `postgres`, `redis`
 2. `authentik-server` / `authentik-worker`
 3. `coder`, `gitea`, `minio`, `litellm`
 4. `key-provisioner`, `langfuse`, `mailpit`

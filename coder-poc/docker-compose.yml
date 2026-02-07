@@ -552,7 +552,7 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
-      authentik-redis:
+      redis:
         condition: service_healthy
     environment:
       # Next.js 15 binds to container hostname by default; force all-interfaces
@@ -565,8 +565,8 @@ services:
       CLICKHOUSE_USER: langfuse
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-clickhouse}
       CLICKHOUSE_CLUSTER_ENABLED: "false"
-      # Redis (shared with Authentik, isolated by DB number)
-      REDIS_CONNECTION_STRING: redis://authentik-redis:6379/1
+      # Redis
+      REDIS_CONNECTION_STRING: redis://redis:6379/1
       # S3/MinIO blob storage
       LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse-events
       LANGFUSE_S3_EVENT_UPLOAD_REGION: us-east-1
@@ -621,7 +621,7 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
-      authentik-redis:
+      redis:
         condition: service_healthy
     environment:
       # Database
@@ -633,7 +633,7 @@ services:
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-clickhouse}
       CLICKHOUSE_CLUSTER_ENABLED: "false"
       # Redis
-      REDIS_CONNECTION_STRING: redis://authentik-redis:6379/1
+      REDIS_CONNECTION_STRING: redis://redis:6379/1
       # S3/MinIO blob storage
       LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse-events
       LANGFUSE_S3_EVENT_UPLOAD_REGION: us-east-1
@@ -661,13 +661,13 @@ services:
   # Optional Azure AD federation supported
   # Uses shared PostgreSQL with separate 'authentik' database
   # ==========================================================================
-  authentik-redis:
+  redis:
     image: redis:7-alpine
-    container_name: authentik-redis
+    container_name: redis
     restart: unless-stopped
     command: --save 60 1 --loglevel warning
     volumes:
-      - authentik_redis:/data
+      - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -677,18 +677,15 @@ services:
       - coder-network
 
   authentik-server:
-    image: ghcr.io/goauthentik/server:2024.2
+    image: ghcr.io/goauthentik/server:2025.12
     container_name: authentik-server
     restart: unless-stopped
     command: server
     depends_on:
       postgres:
         condition: service_healthy
-      authentik-redis:
-        condition: service_healthy
     environment:
       AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:-change-me-to-a-long-random-string}
-      AUTHENTIK_REDIS__HOST: authentik-redis
       AUTHENTIK_POSTGRESQL__HOST: postgres
       AUTHENTIK_POSTGRESQL__USER: authentik
       AUTHENTIK_POSTGRESQL__PASSWORD: authentik
@@ -715,18 +712,15 @@ services:
       start_period: 60s
 
   authentik-worker:
-    image: ghcr.io/goauthentik/server:2024.2
+    image: ghcr.io/goauthentik/server:2025.12
     container_name: authentik-worker
     restart: unless-stopped
     command: worker
     depends_on:
       postgres:
         condition: service_healthy
-      authentik-redis:
-        condition: service_healthy
     environment:
       AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:-change-me-to-a-long-random-string}
-      AUTHENTIK_REDIS__HOST: authentik-redis
       AUTHENTIK_POSTGRESQL__HOST: postgres
       AUTHENTIK_POSTGRESQL__USER: authentik
       AUTHENTIK_POSTGRESQL__PASSWORD: authentik
@@ -847,8 +841,8 @@ volumes:
     name: coder-poc-clickhouse
   clickhouse_logs:
     name: coder-poc-clickhouse-logs
-  authentik_redis:
-    name: coder-poc-authentik-redis
+  redis_data:
+    name: coder-poc-redis
   authentik_media:
     name: coder-poc-authentik-media
   authentik_templates:
