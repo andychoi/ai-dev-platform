@@ -170,7 +170,13 @@ def _generate_key(alias, user_id, budget, rpm, metadata, models=None,
 
 @app.route("/health", methods=["GET"])
 def health():
-    """Health check — also verifies LiteLLM connectivity."""
+    """Liveness check — confirms the Flask app is running."""
+    return jsonify({"status": "ok"}), 200
+
+
+@app.route("/health/ready", methods=["GET"])
+def health_ready():
+    """Readiness check — also verifies LiteLLM connectivity."""
     try:
         resp = requests.get(f"{LITELLM_URL}/health/readiness", timeout=5)
         litellm_ok = resp.status_code == 200

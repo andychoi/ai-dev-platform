@@ -458,7 +458,7 @@ services:
     restart: unless-stopped
     depends_on:
       litellm:
-        condition: service_healthy
+        condition: service_started
     environment:
       - LITELLM_URL=http://litellm:4000
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-poc-litellm-master-key-change-in-production}
@@ -486,9 +486,10 @@ services:
       - coder-network
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/health')"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      interval: 5s
+      timeout: 3s
+      start_period: 3s
+      retries: 2
 
   # ==========================================================================
   # LANGFUSE - AI Observability & Trace Analytics

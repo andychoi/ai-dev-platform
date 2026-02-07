@@ -1,7 +1,7 @@
 #!/bin/bash
 # =============================================================================
 # Coder Workspace Setup Script
-# Automates: User creation, template push (via container), sample workspace
+# Automates: Image builds, template push (via container) for all templates
 # NO HOST CLI REQUIRED - uses Docker to push templates
 # =============================================================================
 
@@ -22,8 +22,14 @@ CODER_INTERNAL_URL="http://localhost:7080"  # HTTP for Coder CLI inside containe
 ADMIN_EMAIL="${CODER_ADMIN_EMAIL:-admin@example.com}"
 ADMIN_USERNAME="${CODER_ADMIN_USERNAME:-admin}"
 ADMIN_PASSWORD="${CODER_ADMIN_PASSWORD:-CoderAdmin123!}"
-TEMPLATE_DIR="${POC_DIR}/templates/contractor-workspace"
-TEMPLATE_NAME="contractor-workspace"
+
+# Base image (must be built first — all language templates extend it)
+BASE_IMAGE_DIR="${POC_DIR}/templates/workspace-base/build"
+
+# Templates to set up: "name:directory:image" triplets
+# PoC deploys python-workspace only; production adds nodejs, java, dotnet
+TEMPLATES=()
+[ -d "${POC_DIR}/templates/python-workspace" ] && TEMPLATES+=("python-workspace:python-workspace:python-workspace")
 
 # =============================================================================
 # Helper Functions
@@ -61,6 +67,61 @@ wait_for_coder() {
     return 1
 }
 
+# Build a Docker image if it doesn't already exist
+build_image() {
+    local image_name="$1"
+    local build_dir="$2"
+
+    if [ ! -f "$build_dir/Dockerfile" ]; then
+        log_warn "Dockerfile not found at $build_dir/Dockerfile — skipping"
+        return 1
+    fi
+
+    if docker image inspect "${image_name}:latest" &>/dev/null && [ "${REBUILD_IMAGE:-}" != "true" ]; then
+        log_success "${image_name} image already exists — skipping build"
+        return 0
+    fi
+
+    log_info "Building ${image_name}:latest..."
+    docker build -t "${image_name}:latest" "$build_dir" 2>&1 | tail -5
+    log_success "${image_name} image built"
+}
+
+# Push a template to Coder (copies into coder-server container and runs coder CLI)
+push_template() {
+    local template_name="$1"
+    local template_dir="$2"
+
+    if [ ! -d "$template_dir" ]; then
+        log_warn "Template directory not found: ${template_dir} — skipping"
+        return 1
+    fi
+
+    log_info "Pushing template '${template_name}'..."
+
+    docker cp "$template_dir" coder-server:/tmp/template-to-push
+
+    docker exec \
+        -e CODER_URL="${CODER_INTERNAL_URL}" \
+        -e CODER_SESSION_TOKEN="${SESSION_TOKEN}" \
+        coder-server sh -c "
+        coder whoami 2>&1 || { echo 'Auth failed'; exit 1; }
+        cd /tmp/template-to-push
+        coder templates push ${template_name} --directory . --yes 2>&1 || \
+        coder templates create ${template_name} --directory . --yes 2>&1
+    " 2>&1 | while read -r line; do
+        echo "  $line"
+    done
+
+    docker exec -u root coder-server rm -rf /tmp/template-to-push 2>/dev/null || true
+
+    if [ ${PIPESTATUS[0]} -eq 0 ]; then
+        log_success "Template '${template_name}' pushed"
+    else
+        log_warn "Template '${template_name}' push may have had issues"
+    fi
+}
+
 # =============================================================================
 # Main Script
 # =============================================================================
@@ -82,7 +143,6 @@ wait_for_coder
 
 print_header "Authentication"
 
-# Try to create first user or login
 log_info "Authenticating with Coder..."
 
 FIRST_USER_RESPONSE=$(curl -sf -X POST "${CODER_URL}/api/v2/users/first" \
@@ -97,7 +157,6 @@ if [ -n "$FIRST_USER_RESPONSE" ] && echo "$FIRST_USER_RESPONSE" | grep -q "sessi
     SESSION_TOKEN=$(echo "$FIRST_USER_RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('session_token',''))" 2>/dev/null)
     log_success "First user created: ${ADMIN_USERNAME}"
 else
-    # Login to get session token
     LOGIN_RESPONSE=$(curl -sf -X POST "${CODER_URL}/api/v2/users/login" \
         -H "Content-Type: application/json" \
         -d "{
@@ -120,86 +179,53 @@ if [ -z "$SESSION_TOKEN" ]; then
 fi
 
 # =============================================================================
-# Build Workspace Image
+# Build Base Image (all language templates extend this)
 # =============================================================================
 
-print_header "Building Workspace Image"
+print_header "Base Image: workspace-base"
 
-if [ -f "$TEMPLATE_DIR/build/Dockerfile" ]; then
-    log_info "Building contractor-workspace:latest..."
-    docker build -t contractor-workspace:latest "$TEMPLATE_DIR/build" 2>&1 | tail -5
-    log_success "Workspace image built"
+if [ -d "$BASE_IMAGE_DIR" ]; then
+    build_image "workspace-base" "$BASE_IMAGE_DIR"
 else
-    log_warn "Dockerfile not found at $TEMPLATE_DIR/build/Dockerfile"
+    log_warn "Base image directory not found: $BASE_IMAGE_DIR"
 fi
 
 # =============================================================================
-# Push Template via Docker
+# Build Language Images & Push Templates
 # =============================================================================
 
-print_header "Pushing Template to Coder"
+for entry in "${TEMPLATES[@]}"; do
+    IFS=':' read -r tpl_name tpl_dir image_name <<< "$entry"
+    tpl_path="${POC_DIR}/templates/${tpl_dir}"
 
-if [ ! -d "$TEMPLATE_DIR" ]; then
-    log_error "Template directory not found: ${TEMPLATE_DIR}"
-    exit 1
-fi
+    print_header "Template: ${tpl_name}"
 
-log_info "Template directory: ${TEMPLATE_DIR}"
-log_info "Template name: ${TEMPLATE_NAME}"
-
-# Copy template into the coder-server container and push from there
-log_info "Copying template to coder-server container..."
-
-# Copy template directory to container
-docker cp "$TEMPLATE_DIR" coder-server:/tmp/template-to-push
-
-# Configure CLI and push template from inside the container
-log_info "Pushing template from inside coder-server..."
-
-# Use environment variables for CLI authentication (no file writes needed)
-docker exec \
-    -e CODER_URL="${CODER_INTERNAL_URL}" \
-    -e CODER_SESSION_TOKEN="${SESSION_TOKEN}" \
-    coder-server sh -c "
-    # Verify authentication
-    echo 'Verifying authentication...'
-    coder whoami 2>&1 || { echo 'Auth failed'; exit 1; }
+    # Build image
+    if [ -d "${tpl_path}/build" ]; then
+        build_image "$image_name" "${tpl_path}/build"
+    fi
 
     # Push template
-    echo 'Pushing template...'
-    cd /tmp/template-to-push
-    coder templates push ${TEMPLATE_NAME} --directory . --yes 2>&1 || \
-    coder templates create ${TEMPLATE_NAME} --directory . --yes 2>&1
-" 2>&1 | while read -r line; do
-    echo "  $line"
+    push_template "$tpl_name" "$tpl_path"
 done
 
-# Cleanup copied files (docker cp preserves host UID, so rm needs root)
-docker exec -u root coder-server rm -rf /tmp/template-to-push 2>/dev/null || true
-
-PUSH_RESULT=${PIPESTATUS[0]}
-
-if [ $PUSH_RESULT -eq 0 ]; then
-    log_success "Template '${TEMPLATE_NAME}' pushed successfully"
-else
-    log_warn "Template push may have had issues - check output above"
-fi
-
 # =============================================================================
-# Verify Template
+# Verify Templates
 # =============================================================================
 
-print_header "Verifying Template"
+print_header "Verifying Templates"
 
-# Check if template exists via API
-TEMPLATES=$(curl -sf "${CODER_URL}/api/v2/templates" \
+TEMPLATES_JSON=$(curl -sf "${CODER_URL}/api/v2/templates" \
     -H "Coder-Session-Token: ${SESSION_TOKEN}" 2>/dev/null || echo "[]")
 
-if echo "$TEMPLATES" | grep -q "$TEMPLATE_NAME"; then
-    log_success "Template '${TEMPLATE_NAME}' is available in Coder"
-else
-    log_warn "Template may not be visible yet - try refreshing Coder UI"
-fi
+for entry in "${TEMPLATES[@]}"; do
+    IFS=':' read -r tpl_name _ _ <<< "$entry"
+    if echo "$TEMPLATES_JSON" | grep -q "$tpl_name"; then
+        log_success "Template '${tpl_name}' is available in Coder"
+    else
+        log_warn "Template '${tpl_name}' may not be visible yet"
+    fi
+done
 
 # =============================================================================
 # Summary
@@ -207,13 +233,36 @@ fi
 
 print_header "Setup Complete"
 
-echo -e "${GREEN}Workspace template is ready!${NC}"
+echo -e "${GREEN}Workspace templates are ready!${NC}"
 echo ""
 echo "Next steps:"
 echo "  1. Go to https://host.docker.internal:7443 (accept self-signed cert warning)"
 echo "  2. Login via OIDC or local account"
 echo "  3. Click 'Create Workspace'"
-echo "  4. Select '${TEMPLATE_NAME}' template"
-echo "  5. Configure workspace options and create"
+echo "  4. Select a template and configure workspace options"
 echo ""
+
+# Guide for additional templates (not deployed in PoC)
+EXTRA_TEMPLATES=()
+[ -d "${POC_DIR}/templates/nodejs-workspace" ] && EXTRA_TEMPLATES+=("nodejs-workspace")
+[ -d "${POC_DIR}/templates/java-workspace" ] && EXTRA_TEMPLATES+=("java-workspace")
+[ -d "${POC_DIR}/templates/dotnet-workspace" ] && EXTRA_TEMPLATES+=("dotnet-workspace")
+
+if [ ${#EXTRA_TEMPLATES[@]} -gt 0 ]; then
+    echo -e "${YELLOW}Additional templates available (not deployed in PoC):${NC}"
+    echo ""
+    echo "  To build and push manually:"
+    echo ""
+    for tpl in "${EXTRA_TEMPLATES[@]}"; do
+        echo "    # ${tpl}"
+        echo "    docker build -t ${tpl}:latest ${POC_DIR}/templates/${tpl}/build"
+        echo "    ${POC_DIR}/scripts/setup-workspace.sh  # or push via Coder CLI"
+        echo ""
+    done
+    echo "  Or push a single template with the Coder CLI (inside coder-server container):"
+    echo "    docker exec -e CODER_URL=http://localhost:7080 -e CODER_SESSION_TOKEN=<token> \\"
+    echo "      coder-server coder templates push <name> --directory /tmp/template --yes"
+    echo ""
+fi
+
 log_success "Setup completed successfully!"

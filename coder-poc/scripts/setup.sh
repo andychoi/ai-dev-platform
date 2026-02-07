@@ -307,7 +307,7 @@ push_template() {
         CODER_ADMIN_EMAIL="${ADMIN_EMAIL}" \
         CODER_ADMIN_USERNAME="${ADMIN_USER}" \
         CODER_ADMIN_PASSWORD="${ADMIN_PASSWORD}" \
-        "$SCRIPT_DIR/setup-workspace.sh" 2>&1 | grep -E "(SUCCESS|✓|success|pushed|Created|template|built)" || true
+        "$SCRIPT_DIR/setup-workspace.sh" 2>&1 | grep -E "(SUCCESS|✓|success|pushed|Created|template|built|skipping|INFO|ERROR|WARN|Pushing|Building|Verifying|Copying)" || true
         print_status "Template setup complete"
     else
         print_warning "setup-workspace.sh not found - template not pushed"

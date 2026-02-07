@@ -1,5 +1,5 @@
-# Contractor Workspace Template for Coder
-# This template creates a Docker-based development workspace
+# Java Workspace Template for Coder
+# Docker-based Java development workspace
 
 terraform {
   required_providers {
@@ -141,29 +141,13 @@ data "coder_parameter" "language_stack" {
   display_name = "Primary Language"
   description  = "Your primary development language (optimizes extensions)"
   type         = "string"
-  default      = "javascript"
+  default      = "java"
   mutable      = true
   icon         = "/icon/code.svg"
 
   option {
-    name  = "JavaScript/TypeScript"
-    value = "javascript"
-  }
-  option {
-    name  = "Python"
-    value = "python"
-  }
-  option {
     name  = "Java/Kotlin"
     value = "java"
-  }
-  option {
-    name  = "C#/.NET"
-    value = "dotnet"
-  }
-  option {
-    name  = "Go"
-    value = "go"
   }
 }
 
@@ -838,7 +822,7 @@ resource "coder_app" "code-server" {
 # Reference pre-built workspace image directly (no pull/build)
 # Build once with: docker build -t contractor-workspace:latest ./build
 locals {
-  workspace_image = "contractor-workspace:latest"
+  workspace_image = "full-workspace:latest"
 }
 
 # Persistent volume for workspace data

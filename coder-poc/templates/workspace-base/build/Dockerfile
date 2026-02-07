@@ -1,11 +1,12 @@
-# Contractor Workspace Image
-# Secure development environment with VS Code, common tools, and language runtimes
+# Workspace Base Image
+# Core tools, code-server, AI agents, security hardening — NO language runtimes
+# Production language templates (python, nodejs, java, dotnet) extend this image
 
 FROM ubuntu:22.04
 
 LABEL maintainer="Platform Team"
-LABEL description="Secure contractor development workspace"
-LABEL version="1.0.0"
+LABEL description="Base workspace image — core tools and AI agents"
+LABEL version="2.0.0"
 
 # Avoid interactive prompts during build
 ENV DEBIAN_FRONTEND=noninteractive
@@ -31,63 +32,32 @@ RUN apt-get update && apt-get install -y \
     gnupg \
     dnsutils \
     iputils-ping \
-    # Build essentials
-    build-essential \
-    pkg-config \
     # Locale support
     locales \
     && rm -rf /var/lib/apt/lists/* \
     && locale-gen en_US.UTF-8
 
-# Install Node.js 20 LTS
+# Minimal Node.js (for AI agent tooling — OpenCode SDK needs npm)
+# This is NOT the development Node.js — the nodejs-workspace adds full toolchain
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
-    && npm install -g npm@latest \
-    && npm install -g yarn pnpm typescript ts-node
-
-# Install Python 3.11
-RUN apt-get update && apt-get install -y \
-    python3.11 \
-    python3.11-venv \
-    python3-pip \
-    && rm -rf /var/lib/apt/lists/* \
-    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 \
-    && update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
-
-# Install Go 1.22
-RUN curl -fsSL https://go.dev/dl/go1.22.0.linux-amd64.tar.gz | tar -C /usr/local -xzf - \
-    && echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile.d/go.sh
+    && rm -rf /var/lib/apt/lists/*
 
 # SECURITY: Docker CLI intentionally NOT installed
 # Container escape risk: if Docker socket is reachable, docker CLI allows full host access
-# If Docker-in-Docker is needed in future, use sysbox runtime or rootless Docker instead
 
 # Install code-server (VS Code in browser)
 # Release: https://github.com/coder/code-server/releases
 RUN curl -fsSL https://code-server.dev/install.sh | sh -s -- --version 4.108.2
 
-# Install Coder CLI (optional - agent is injected at runtime)
-RUN curl -fsSL https://coder.com/install.sh | sh || echo "Coder CLI install skipped"
+# NOTE: Coder CLI intentionally NOT installed (484 MB) — agent is injected at runtime
 
 # Install database tools
 RUN apt-get update && apt-get install -y \
     postgresql-client \
-    mysql-client \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install .NET SDK 8.0 (for C# developers)
-RUN wget https://dot.net/v1/dotnet-install.sh -O /tmp/dotnet-install.sh \
-    && chmod +x /tmp/dotnet-install.sh \
-    && /tmp/dotnet-install.sh --channel 8.0 --install-dir /usr/share/dotnet \
-    && ln -s /usr/share/dotnet/dotnet /usr/bin/dotnet \
-    && rm /tmp/dotnet-install.sh
-
-# Install Java 21 (for Java/IntelliJ developers)
-RUN apt-get update && apt-get install -y openjdk-21-jdk maven gradle \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user 'coder' with UID 1001 to avoid conflicts
-# Handle case where user/UID might already exist
 RUN if id -u 1001 >/dev/null 2>&1; then \
         existing_user=$(getent passwd 1001 | cut -d: -f1); \
         if [ "$existing_user" != "coder" ]; then \
@@ -103,9 +73,6 @@ RUN if id -u 1001 >/dev/null 2>&1; then \
     && usermod -s /bin/bash coder
 
 # SECURITY: Restricted sudo - only allow specific safe commands
-# No general sudo access - contractors should not need root privileges
-# IMPORTANT: Do NOT add "apt-get install *" — it allows installing any package
-# including network tools (netcat, nmap, socat) that bypass connection lockdown
 RUN echo "# Restricted sudo for coder user - security hardened" > /etc/sudoers.d/coder \
     && echo "coder ALL=(ALL) NOPASSWD: /usr/bin/apt-get update" >> /etc/sudoers.d/coder \
     && echo "coder ALL=(ALL) NOPASSWD: /bin/systemctl status *" >> /etc/sudoers.d/coder \
@@ -115,27 +82,19 @@ RUN echo "# Restricted sudo for coder user - security hardened" > /etc/sudoers.d
     && chmod 440 /etc/sudoers.d/coder
 
 # SECURITY: Install iptables for network egress filtering
-# The firewall script restricts outbound connections to approved services only
 RUN apt-get update && apt-get install -y iptables \
     && rm -rf /var/lib/apt/lists/*
 
 # SECURITY: Network egress firewall script
-# Restricts workspace outbound connections to approved internal services only
-# Runs as root via sudo in the container entrypoint before dropping to coder user
 COPY --chmod=755 setup-firewall.sh /usr/local/bin/setup-firewall.sh
 
 # SECURITY: Remove/restrict dangerous binaries that enable data exfiltration
-# ssh/scp/sftp: file transfer even with Coder SSH disabled (can reach external hosts)
-# nc/ncat/netcat: raw socket data transfer
-# telnet/ftp: unencrypted protocols, data exfiltration
-# Note: curl/wget kept (needed for development) — restrict via network egress rules instead
 RUN rm -f /usr/bin/ssh /usr/bin/scp /usr/bin/sftp /usr/bin/ssh-keygen /usr/bin/ssh-keyscan \
     && rm -f /usr/bin/nc /usr/bin/ncat /usr/bin/netcat \
     && rm -f /usr/bin/telnet /usr/bin/ftp \
     && rm -f /usr/bin/socat /usr/bin/nmap
 
-# SECURITY: Shell audit logging — log all terminal commands to syslog
-# Every command typed in the web terminal is recorded with timestamp and user
+# SECURITY: Shell audit logging
 RUN echo '# Shell audit logging for security compliance' > /etc/profile.d/shell-audit.sh \
     && echo 'export PROMPT_COMMAND='\''RETRN_VAL=$?; if [ -f /usr/bin/logger ]; then /usr/bin/logger -p local6.debug -t bash "user=$(whoami) pwd=$(pwd) cmd=$(history 1 | sed "s/^[ ]*[0-9]\+[ ]*//" ) [rc=$RETRN_VAL]"; fi'\''' >> /etc/profile.d/shell-audit.sh \
     && echo 'export HISTTIMEFORMAT="%F %T "' >> /etc/profile.d/shell-audit.sh \
@@ -149,9 +108,9 @@ RUN echo 'export TMOUT=1800' > /etc/profile.d/idle-timeout.sh \
     && echo 'readonly TMOUT' >> /etc/profile.d/idle-timeout.sh \
     && chmod 644 /etc/profile.d/idle-timeout.sh
 
-# SECURITY: PATH lockdown — fixed minimal PATH, prevents running binaries from unexpected locations
+# SECURITY: PATH lockdown
 RUN echo '# Locked-down PATH for contractor workspaces' > /etc/profile.d/path-lockdown.sh \
-    && echo 'export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/bin:/home/coder/.local/bin:/home/coder/.opencode/bin:/usr/local/go/bin:/usr/share/dotnet"' >> /etc/profile.d/path-lockdown.sh \
+    && echo 'export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/bin:/home/coder/.local/bin:/home/coder/.opencode/bin"' >> /etc/profile.d/path-lockdown.sh \
     && echo 'readonly PATH' >> /etc/profile.d/path-lockdown.sh \
     && chmod 644 /etc/profile.d/path-lockdown.sh
 
@@ -159,7 +118,7 @@ RUN echo '# Locked-down PATH for contractor workspaces' > /etc/profile.d/path-lo
 USER coder
 WORKDIR /home/coder
 ENV HOME=/home/coder
-ENV PATH="${HOME}/.local/bin:/usr/local/go/bin:${PATH}"
+ENV PATH="${HOME}/.local/bin:${PATH}"
 
 # Create workspace directory
 RUN mkdir -p /home/coder/workspace
@@ -175,62 +134,29 @@ RUN mkdir -p /home/coder/.local/share/code-server/User
 # Copy VS Code settings
 COPY --chown=coder:coder settings.json /home/coder/.local/share/code-server/User/settings.json
 
-# Install common Python packages
-RUN pip3 install --user --no-cache-dir \
-    pytest \
-    black \
-    flake8 \
-    mypy \
-    requests \
-    pyyaml
+# VS Code extensions: core
+RUN code-server --install-extension eamodio.gitlens
 
-# Pre-install useful VS Code extensions
-RUN code-server --install-extension ms-python.python \
-    && code-server --install-extension dbaeumer.vscode-eslint \
-    && code-server --install-extension esbenp.prettier-vscode \
-    && code-server --install-extension eamodio.gitlens \
-    && code-server --install-extension golang.go
-
-# Database extensions (Toad SQL alternatives)
+# VS Code extensions: database tools
 RUN code-server --install-extension mtxr.sqltools \
-    && code-server --install-extension mtxr.sqltools-driver-pg \
-    && code-server --install-extension mtxr.sqltools-driver-mysql \
-    && code-server --install-extension cweijan.vscode-database-client2
+    && code-server --install-extension mtxr.sqltools-driver-pg
 
-# Java/IntelliJ alternatives
-RUN code-server --install-extension redhat.java \
-    && code-server --install-extension vscjava.vscode-java-debug \
-    && code-server --install-extension vscjava.vscode-java-dependency \
-    && code-server --install-extension vscjava.vscode-maven \
-    && code-server --install-extension vmware.vscode-spring-boot
-
-# .NET/C# alternatives (Open VSX compatible)
-RUN code-server --install-extension muhammad-sammy.csharp || true
-
-# AI coding agent - Roo Code (agentic AI assistant)
-# Pre-installed so every developer has it ready without manual setup
+# AI coding agent - Roo Code
 RUN code-server --install-extension rooveterinaryinc.roo-cline
 
 # OpenCode CLI - terminal-based AI coding agent
-# Installed alongside Roo Code so developers can use either GUI or CLI
-# The installer places the binary at ~/.opencode/bin/opencode (runs as coder user)
 RUN curl -fsSL https://opencode.ai/install | bash
 ENV PATH="/home/coder/.opencode/bin:${PATH}"
 
-# Pre-install OpenAI-compatible provider SDK for OpenCode custom providers (LiteLLM)
-# Without this, opencode can't load the "litellm" provider defined in opencode.json
+# Pre-install OpenAI-compatible provider SDK for OpenCode (LiteLLM)
 RUN mkdir -p /home/coder/.config/opencode \
     && cd /home/coder/.config/opencode \
     && npm init -y \
     && npm install @ai-sdk/openai-compatible
 
-# Explicitly remove Copilot/Cody if present from base image or sideload
+# Explicitly remove Copilot/Cody if present
 RUN code-server --uninstall-extension github.copilot 2>/dev/null || true \
     && code-server --uninstall-extension github.copilot-chat 2>/dev/null || true \
     && code-server --uninstall-extension sourcegraph.cody-ai 2>/dev/null || true
 
-# IntelliJ keymap for developers migrating from JetBrains
-RUN code-server --install-extension k--kato.intellij-idea-keybindings
-
-# Default command - will be overridden by Coder agent
 CMD ["sleep", "infinity"]
