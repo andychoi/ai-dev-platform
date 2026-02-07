@@ -110,7 +110,7 @@ At minimum, ONE of these must be configured in `coder-poc/.env`:
 | `AWS_SECRET_ACCESS_KEY` | AWS Bedrock secret | Optional (required with access key) |
 | `AWS_REGION` | Bedrock region | Default: `us-east-1` |
 
-**CRITICAL: Without `ANTHROPIC_API_KEY`, all direct Anthropic model calls will fail with `401 authentication_error`. LiteLLM is a proxy, NOT a model provider — it needs upstream API keys to forward requests.**
+**IMPORTANT: LiteLLM is a proxy, NOT a model provider — it needs at least one upstream API key.** If `ANTHROPIC_API_KEY` is empty but AWS Bedrock credentials are configured, LiteLLM automatically falls back to Bedrock for `claude-sonnet-4-5` and `claude-haiku-4-5` (configured as fallback deployments in `litellm/config.yaml`). `claude-opus-4` requires `ANTHROPIC_API_KEY` (no Bedrock equivalent).
 
 ### Required Services
 
@@ -249,7 +249,53 @@ The key-provisioner isolates the LiteLLM master key — workspace containers nev
 - File reading, editing, and command execution
 - Same LiteLLM backend as Roo Code
 
-Configuration at `/home/coder/.config/opencode/config.json` uses `@ai-sdk/openai-compatible` provider pointing to LiteLLM.
+**Three things required for OpenCode + LiteLLM:**
+
+1. **npm package**: `@ai-sdk/openai-compatible` installed in `~/.config/opencode/` (pre-installed in Dockerfile)
+2. **`models` section** in config — without it, opencode ignores the custom provider and falls back to built-in defaults
+3. **Config file** at `~/.config/opencode/opencode.json` (global) or `./opencode.json` (project root)
+
+Configuration at `/home/coder/.config/opencode/opencode.json`:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "litellm": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "LiteLLM",
+      "options": {
+        "baseURL": "http://litellm:4000/v1",
+        "apiKey": "<per-user-virtual-key>"
+      },
+      "models": {
+        "claude-sonnet-4-5": { "name": "Claude Sonnet 4.5" },
+        "claude-haiku-4-5": { "name": "Claude Haiku 4.5" },
+        "claude-opus-4": { "name": "Claude Opus 4" }
+      }
+    }
+  },
+  "model": "litellm/claude-sonnet-4-5",
+  "small_model": "litellm/claude-haiku-4-5"
+}
+```
+
+**Troubleshooting OpenCode:**
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| Shows "GPT-5.2 OpenAI" instead of Claude | `models` section missing or `@ai-sdk/openai-compatible` not installed | Add `models` map; run `cd ~/.config/opencode && npm install @ai-sdk/openai-compatible` |
+| "Provider not found: litellm" | npm package not installed | `cd ~/.config/opencode && npm install @ai-sdk/openai-compatible` |
+| "incorrect api key" | Config file missing (opencode.json never generated) | Check startup log at `/tmp/coder-startup-script.log` for "OpenCode CLI not found" |
+| Config not generated at startup | Startup script `command -v opencode` failed | Binary at `~/.opencode/bin/` not in PATH; template should use `[ -x path ]` check |
+
+**Debug commands** (run inside workspace):
+```bash
+opencode debug config     # show resolved config
+opencode debug paths      # show data/config/cache dirs
+opencode models litellm   # verify provider models are visible
+opencode run "say hi"     # non-interactive test
+```
 
 To use: run `opencode` in the workspace terminal.
 

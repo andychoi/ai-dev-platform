@@ -67,11 +67,14 @@ RUN code-server --install-extension ms-python.python \
 # AI coding agents
 RUN code-server --install-extension rooveterinaryinc.roo-cline
 
-# OpenCode CLI
-RUN curl -fsSL https://opencode.ai/install | bash \
-    && mv /root/.local/bin/opencode /usr/local/bin/opencode 2>/dev/null \
-    || mv /home/coder/.local/bin/opencode /usr/local/bin/opencode 2>/dev/null \
-    || echo "OpenCode install: binary already in PATH or install skipped"
+# OpenCode CLI - terminal-based AI coding agent
+# The installer places the binary at ~/.opencode/bin/opencode (runs as coder user)
+RUN curl -fsSL https://opencode.ai/install | bash
+ENV PATH="/home/coder/.opencode/bin:${PATH}"
+
+# Pre-install OpenAI-compatible provider SDK for OpenCode custom providers (LiteLLM)
+# Without this, opencode can't load the "litellm" provider defined in opencode.json
+RUN cd /home/coder/.config/opencode && npm install @ai-sdk/openai-compatible
 
 # Remove competing AI extensions
 RUN code-server --uninstall-extension github.copilot 2>/dev/null || true \

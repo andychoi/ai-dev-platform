@@ -52,16 +52,22 @@ Key Provisioning:
 
 ## Critical Requirements
 
-### ANTHROPIC_API_KEY Must Be Set
+### Upstream API Keys
 
-LiteLLM is a **proxy**, not a model provider. Without `ANTHROPIC_API_KEY` in `.env`, all Anthropic model calls fail with `401: x-api-key header is required`.
+LiteLLM is a **proxy**, not a model provider. It needs at least ONE upstream credential:
+
+| Provider | Env Var | Fallback |
+|----------|---------|----------|
+| Anthropic Direct | `ANTHROPIC_API_KEY` | Primary for `claude-sonnet-4-5`, `claude-haiku-4-5`, `claude-opus-4` |
+| AWS Bedrock | `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` | Auto-fallback for `claude-sonnet-4-5` and `claude-haiku-4-5` |
+
+LiteLLM config lists Bedrock as a fallback deployment for `claude-sonnet-4-5` and `claude-haiku-4-5`. If `ANTHROPIC_API_KEY` is empty but AWS creds are set, LiteLLM automatically routes to Bedrock.
 
 ```bash
-# Check if set (should NOT be empty)
-grep "^ANTHROPIC_API_KEY=" coder-poc/.env
+# Check which upstream keys are configured
+grep "^ANTHROPIC_API_KEY=\|^AWS_ACCESS_KEY_ID=" coder-poc/.env
 
-# Set it
-# Edit coder-poc/.env and add your key, then:
+# After changing keys:
 cd coder-poc && docker compose up -d litellm
 ```
 
@@ -114,6 +120,36 @@ See `skills/key-management/SKILL.md` for full key taxonomy and management.
 }
 ```
 
+### OpenCode Config Format (opencode.json)
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "litellm": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "LiteLLM",
+      "options": {
+        "baseURL": "http://litellm:4000/v1",
+        "apiKey": "<virtual-key>"
+      },
+      "models": {
+        "claude-sonnet-4-5": { "name": "Claude Sonnet 4.5" },
+        "claude-haiku-4-5": { "name": "Claude Haiku 4.5" },
+        "claude-opus-4": { "name": "Claude Opus 4" }
+      }
+    }
+  },
+  "model": "litellm/claude-sonnet-4-5",
+  "small_model": "litellm/claude-haiku-4-5"
+}
+```
+
+**Three things required for OpenCode + LiteLLM:**
+1. npm package `@ai-sdk/openai-compatible` installed in `~/.config/opencode/`
+2. `models` map declaring available models (without it, opencode ignores the provider)
+3. Config at `~/.config/opencode/opencode.json` (global) or `./opencode.json` (project)
+
 ### "Create Roo Account" Prompt
 
 Roo Code v3.x shows a cloud auth prompt by default. There is no VS Code setting to disable it. Users should:
@@ -141,13 +177,17 @@ Extensions removed in Dockerfile: `github.copilot`, `github.copilot-chat`, `sour
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| 401 auth error | `ANTHROPIC_API_KEY` empty | Set key in `.env`, `docker compose up -d litellm` |
+| 401 auth error | No upstream API key (Anthropic or Bedrock) | Set `ANTHROPIC_API_KEY` or AWS creds in `.env`, `docker compose up -d litellm` |
 | LiteLLM unhealthy | PostgreSQL not ready or config error | Check `docker compose logs litellm` |
-| Roo Code blank panel | Insecure context (`crypto.subtle` undefined) | Enable HTTPS on Coder, or launch Chrome with `--unsafely-treat-insecure-origin-as-secure="http://host.docker.internal:7080"` |
+| Roo Code blank panel | Insecure context (`crypto.subtle` undefined) | Enable HTTPS on Coder |
 | Auto-import failed | Config file missing or wrong path | Check file exists and `autoImportSettingsPath` is set |
 | Model not found | Model name mismatch | Match `openAiModelId` with LiteLLM `model_name` |
 | Budget exceeded (402) | User spent their budget | Increase via `/budget/update` API |
-| No response from Roo Code | LiteLLM unreachable from workspace | Check network: `curl http://litellm:4000/health/readiness` |
+| No response from AI | LiteLLM unreachable from workspace | Check network: `curl http://litellm:4000/health/readiness` |
+| OpenCode shows wrong model (GPT-5.2) | `models` section missing in config | Add `models` map to opencode.json provider |
+| OpenCode "Provider not found" | `@ai-sdk/openai-compatible` not installed | Run `cd ~/.config/opencode && npm install @ai-sdk/openai-compatible` |
+| OpenCode config not generated | Startup script `command -v` failed | Check `[ -x ~/.opencode/bin/opencode ]`; verify PATH includes `~/.opencode/bin` |
+| OpenCode "incorrect api key" | Config missing (no opencode.json) | Check `/home/coder/.config/opencode/opencode.json` exists with correct key |
 
 ## Key File Locations
 
@@ -165,6 +205,7 @@ Extensions removed in Dockerfile: `github.copilot`, `github.copilot-chat`, `sour
 | `coder-poc/docs/ROO-CODE-LITELLM.md` | Full setup documentation |
 | `coder-poc/docs/KEY-MANAGEMENT.md` | Key management documentation |
 | (in workspace) `/home/coder/.config/roo-code/settings.json` | Generated Roo Code config |
+| (in workspace) `/home/coder/.config/opencode/opencode.json` | Generated OpenCode config |
 
 ## Verification Commands
 
@@ -186,4 +227,10 @@ docker exec <workspace> curl -s http://litellm:4000/health/readiness
 
 # Check Roo Code logs
 docker exec <workspace> find /home/coder/.local/share/code-server/logs -name '*Roo-Code.log' -exec cat {} \;
+
+# OpenCode diagnostics
+docker exec <workspace> /home/coder/.opencode/bin/opencode debug config   # resolved config
+docker exec <workspace> /home/coder/.opencode/bin/opencode debug paths    # data/config/cache dirs
+docker exec <workspace> /home/coder/.opencode/bin/opencode models litellm # list provider models
+docker exec <workspace> /home/coder/.opencode/bin/opencode run "say hi"   # non-interactive test
 ```

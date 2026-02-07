@@ -271,25 +271,37 @@ resource "coder_agent" "main" {
 
         # --- OpenCode CLI configuration ---
         if [ "$AI_ASSISTANT" = "opencode" ] || [ "$AI_ASSISTANT" = "both" ]; then
-          if command -v opencode >/dev/null 2>&1; then
+          # Always write config if the binary exists (don't rely on PATH/command -v)
+          if [ -x /home/coder/.opencode/bin/opencode ]; then
             mkdir -p "$HOME/.config/opencode"
-            cat > "$HOME/.config/opencode/config.json" <<OCEOF
-    {
-      "provider": {
-        "litellm": {
-          "npm": "@ai-sdk/openai-compatible",
-          "options": {
-            "baseURL": "$LITELLM_URL/v1",
-            "apiKey": "$LITELLM_KEY"
-          }
-        }
+            cat > "$HOME/.config/opencode/opencode.json" <<OCEOF
+{
+  "\$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "litellm": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "LiteLLM",
+      "options": {
+        "baseURL": "$LITELLM_URL/v1",
+        "apiKey": "$LITELLM_KEY"
       },
-      "model": {
-        "big": "litellm/$LITELLM_MODEL",
-        "small": "litellm/claude-haiku-4-5"
+      "models": {
+        "claude-sonnet-4-5": {
+          "name": "Claude Sonnet 4.5"
+        },
+        "claude-haiku-4-5": {
+          "name": "Claude Haiku 4.5"
+        },
+        "claude-opus-4": {
+          "name": "Claude Opus 4"
+        }
       }
     }
-    OCEOF
+  },
+  "model": "litellm/$LITELLM_MODEL",
+  "small_model": "litellm/claude-haiku-4-5"
+}
+OCEOF
           fi
         fi
 
