@@ -196,7 +196,7 @@ data "coder_parameter" "ai_model" {
   display_name = "AI Model"
   description  = "Select the AI model for chat and code assistance"
   type         = "string"
-  default      = "claude-sonnet"
+  default      = "bedrock-claude-haiku"
   mutable      = true
   icon         = "/icon/widgets.svg"
 

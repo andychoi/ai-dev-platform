@@ -145,7 +145,7 @@ data "coder_parameter" "ai_model" {
   display_name = "AI Model"
   description  = "Claude model for AI assistance"
   type         = "string"
-  default      = "claude-sonnet"
+  default      = "bedrock-claude-haiku"
   mutable      = true
 
   option { name = "Claude Sonnet 4.5 (Recommended)"; value = "claude-sonnet" }
