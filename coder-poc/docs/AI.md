@@ -17,6 +17,7 @@ This document describes how AI capabilities are integrated into the Coder WebIDE
 11. [LiteLLM Gateway Benefits](#11-litellm-gateway-benefits)
 12. [Design-First AI Enforcement Layer](#12-design-first-ai-enforcement-layer)
 13. [Langfuse Observability Layer](#13-langfuse-observability-layer)
+14. [Content Guardrails (PII/Financial/Secret Protection)](#14-content-guardrails)
 
 ---
 
@@ -1146,6 +1147,41 @@ Both tools can be used together — LiteLLM UI for key/budget management, Langfu
 
 ---
 
+## 14. Content Guardrails
+
+The platform enforces content guardrails that scan all AI requests for PII, financial data, credentials, and other sensitive information **before** they reach the model provider.
+
+### Quick Reference
+
+| Guardrail Level | High Severity (SSN, cards, keys) | Medium Severity (email, phone) |
+|----------------|----------------------------------|-------------------------------|
+| `off` | Pass through | Pass through |
+| `standard` | **Block** | Warn (log only) |
+| `strict` | **Block** | **Block** |
+
+### How It Works
+
+A `GuardrailsHook` callback in LiteLLM scans the `messages` array in every chat completion request using regex patterns. The guardrail level is read from key metadata (`guardrail_level`), following the same per-key pattern as enforcement levels.
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `litellm/guardrails_hook.py` | Hook class + 20+ built-in patterns |
+| `litellm/guardrails/patterns.json` | Custom patterns (hot-reloadable, no restart needed) |
+| `docs/GUARDRAILS.md` | Full documentation |
+| `scripts/test-guardrails.sh` | Validation test suite |
+
+### Validation
+
+```bash
+./scripts/test-guardrails.sh
+```
+
+See `docs/GUARDRAILS.md` for full pattern reference, custom pattern format, per-key configuration, Presidio (ML-based) future roadmap, and troubleshooting.
+
+---
+
 ## Document History
 
 | Version | Date | Author | Changes |
@@ -1157,3 +1193,4 @@ Both tools can be used together — LiteLLM UI for key/budget management, Langfu
 | 1.4 | 2026-02-06 | Platform Team | Add Section 11: LiteLLM Gateway Benefits (analytics, coaching, admin capabilities) |
 | 1.5 | 2026-02-06 | Platform Team | Add Section 12: Design-First AI Enforcement Layer |
 | 1.6 | 2026-02-07 | Platform Team | Add Section 13: Langfuse Observability Layer |
+| 1.7 | 2026-02-07 | Platform Team | Add Section 14: Content Guardrails (PII/financial/secret detection) |

@@ -82,5 +82,7 @@ litellm_settings:
   langfuse_default_tags:
     - "user_api_key_alias"
     - "user_api_key_user_id"
-  # Design-first enforcement hook — injects system prompts based on key metadata
-  callbacks: ["enforcement_hook.proxy_handler_instance"]
+  # Callbacks:
+  # 1. enforcement_hook — injects system prompts based on key metadata (design-first)
+  # 2. guardrails_hook — blocks PII, financial data, secrets before reaching model
+  callbacks: ["enforcement_hook.proxy_handler_instance", "guardrails_hook.guardrails_instance"]

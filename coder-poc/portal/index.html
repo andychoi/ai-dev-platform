@@ -83,6 +83,7 @@
   .icon-drone    { background: #e3f2fd; color: #1976d2; }
   .icon-minio    { background: #fce4ec; color: #c62828; }
   .icon-litellm  { background: #e0f7fa; color: #00838f; }
+  .icon-langfuse { background: #ede9fe; color: #6d28d9; }
   .icon-mailpit  { background: #f3e5f5; color: #7b1fa2; }
 
   /* Credentials */
@@ -150,7 +151,7 @@
 
 <div class="hero">
   <h1>Dev Platform</h1>
-  <p>Browser-based development environments for contractors</p>
+  <p>Browser-based AI enabled development environment</p>
 </div>
 
 <div class="container">
@@ -162,7 +163,7 @@
       <div class="card-icon icon-coder">&#9675;</div>
       <div class="card-body">
         <h3>Coder WebIDE</h3>
-        <p>Browser-based development environments</p>
+        <p>Browser-based AI enabled development environment</p>
         <span class="url">host.docker.internal:7443</span>
       </div>
     </a>
@@ -212,12 +213,21 @@
       </div>
     </a>
 
-    <a class="card" href="http://localhost:4000" target="_blank">
+    <a class="card" href="http://localhost:4000/ui" target="_blank">
       <div class="card-icon icon-litellm">&#9672;</div>
       <div class="card-body">
         <h3>LiteLLM AI Gateway</h3>
         <p>AI proxy &mdash; models, keys, spend tracking</p>
-        <span class="url">localhost:4000</span>
+        <span class="url">localhost:4000/ui</span>
+      </div>
+    </a>
+
+    <a class="card" href="http://localhost:3100" target="_blank">
+      <div class="card-icon icon-langfuse">&#9673;</div>
+      <div class="card-body">
+        <h3>Langfuse</h3>
+        <p>AI observability &mdash; traces, cost analytics, latency</p>
+        <span class="url">localhost:3100</span>
       </div>
     </a>
 

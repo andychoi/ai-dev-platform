@@ -103,6 +103,10 @@
             color: #e67e22;
         }
 
+        .card.spend .card-value {
+            color: #e74c3c;
+        }
+
         /* Section Headers */
         .section-header {
             display: flex;
@@ -271,6 +275,105 @@
             color: #e67e22;
         }
 
+        .cost {
+            font-family: monospace;
+            color: #e74c3c;
+        }
+
+        /* Reset button */
+        .reset-btn {
+            background: #e74c3c;
+            color: white;
+            border: none;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .reset-btn:hover {
+            background: #c0392b;
+        }
+
+        .reset-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        /* Budget progress bar */
+        .budget-bar {
+            width: 100%;
+            height: 8px;
+            background: #e9ecef;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 4px;
+        }
+
+        .budget-bar-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.3s;
+        }
+
+        .budget-bar-fill.ok { background: #27ae60; }
+        .budget-bar-fill.warning { background: #f39c12; }
+        .budget-bar-fill.critical { background: #e74c3c; }
+
+        .budget-text {
+            font-size: 0.8em;
+            color: #666;
+        }
+
+        /* Rate limit info banner */
+        .info-banner {
+            background: #eef2ff;
+            border: 1px solid #c7d2fe;
+            border-radius: 8px;
+            padding: 12px 20px;
+            margin-bottom: 20px;
+            color: #3730a3;
+            font-size: 0.85em;
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .info-banner strong {
+            color: #1e1b4b;
+        }
+
+        .info-banner .limit-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            background: white;
+            padding: 3px 8px;
+            border-radius: 4px;
+            border: 1px solid #c7d2fe;
+        }
+
+        /* Toast notification */
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #27ae60;
+            color: white;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 0.9em;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            z-index: 9999;
+            transition: opacity 0.3s;
+        }
+
+        .toast.error {
+            background: #e74c3c;
+        }
+
         /* Empty state */
         .empty-state {
             text-align: center;
@@ -283,6 +386,17 @@
             height: 64px;
             margin-bottom: 15px;
             opacity: 0.3;
+        }
+
+        /* Error banner */
+        .error-banner {
+            background: #fdf2f2;
+            border: 1px solid #fca5a5;
+            border-radius: 8px;
+            padding: 12px 20px;
+            margin-bottom: 20px;
+            color: #991b1b;
+            font-size: 0.9em;
         }
 
         /* Footer */
@@ -352,6 +466,20 @@
     </header>
 
     <div class="container">
+        {% if db_error is defined and db_error %}
+        <div class="error-banner">
+            <strong>LiteLLM Database Error:</strong> {{ db_error }}
+        </div>
+        {% endif %}
+
+        <!-- Rate Limit Defaults Banner -->
+        <div class="info-banner">
+            <strong>Default Limits:</strong>
+            <span class="limit-item">Workspace: 60 RPM / 100K TPM / $10/day</span>
+            <span class="limit-item">User: 100 RPM / 200K TPM / $20/day</span>
+            <span class="limit-item">CI: 30 RPM / 50K TPM / $5/day</span>
+        </div>
+
         <!-- Summary Cards -->
         <div class="summary-cards">
             <div class="card">
@@ -360,19 +488,19 @@
             </div>
             <div class="card tokens">
                 <div class="card-value">{{ "{:,}".format(week_totals.total_tokens_in) }}</div>
-                <div class="card-label">Tokens In</div>
+                <div class="card-label">Tokens In (Prompt)</div>
             </div>
             <div class="card tokens">
                 <div class="card-value">{{ "{:,}".format(week_totals.total_tokens_out) }}</div>
-                <div class="card-label">Tokens Out</div>
+                <div class="card-label">Tokens Out (Completion)</div>
             </div>
             <div class="card users">
                 <div class="card-value">{{ week_totals.unique_users }}</div>
                 <div class="card-label">Unique Users</div>
             </div>
-            <div class="card">
-                <div class="card-value">{{ week_totals.unique_workspaces }}</div>
-                <div class="card-label">Active Workspaces</div>
+            <div class="card spend">
+                <div class="card-value">${{ "%.4f"|format(week_totals.total_spend) }}</div>
+                <div class="card-label">Total Spend (USD)</div>
             </div>
         </div>
 
@@ -399,15 +527,15 @@
                 </div>
             </div>
 
-            <!-- By Template -->
+            <!-- By Model -->
             <div class="chart-card">
-                <h3>Usage by Template</h3>
+                <h3>Usage by Model</h3>
                 <div class="bar-chart">
-                    {% for row in by_template %}
-                    {% set max_tokens = by_template[0].tokens_out if by_template else 1 %}
+                    {% for row in by_model %}
+                    {% set max_tokens = by_model[0].tokens_out if by_model else 1 %}
                     {% set pct = (row.tokens_out / max_tokens * 100) if max_tokens > 0 else 0 %}
                     <div class="bar-item">
-                        <div class="bar-label" title="{{ row.template_name }}">{{ row.template_name }}</div>
+                        <div class="bar-label" title="{{ row.model_name }}">{{ row.model_name }}</div>
                         <div class="bar-container">
                             <div class="bar" style="width: {{ pct }}%">
                                 {{ row.unique_users }} users
@@ -434,46 +562,70 @@
                         <th>Tokens In</th>
                         <th>Tokens Out</th>
                         <th>Total Tokens</th>
+                        <th>Cost</th>
+                        <th>Budget Status</th>
+                        <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for row in by_user %}
+                    {% set budget_info = user_budgets.get(row.user_id, {}) if user_budgets is defined else {} %}
+                    {% set user_spend = budget_info.get('spend', 0) or 0 %}
+                    {% set max_budget = budget_info.get('max_budget') %}
+                    {% set pct = ((user_spend / max_budget) * 100) if max_budget and max_budget > 0 else 0 %}
                     <tr>
                         <td><strong>{{ row.user_id }}</strong></td>
                         <td>{{ "{:,}".format(row.requests) }}</td>
                         <td class="tokens">{{ "{:,}".format(row.tokens_in) }}</td>
                         <td class="tokens tokens-out">{{ "{:,}".format(row.tokens_out) }}</td>
                         <td><strong>{{ "{:,}".format(row.tokens_in + row.tokens_out) }}</strong></td>
+                        <td class="cost">${{ "%.4f"|format(row.spend) }}</td>
+                        <td>
+                            {% if max_budget %}
+                            <div class="budget-text">${{ "%.2f"|format(user_spend) }} / ${{ "%.2f"|format(max_budget) }}{% if budget_info.get('budget_duration') %} ({{ budget_info.budget_duration }}){% endif %}</div>
+                            <div class="budget-bar">
+                                <div class="budget-bar-fill {% if pct >= 90 %}critical{% elif pct >= 70 %}warning{% else %}ok{% endif %}" style="width: {{ [pct, 100]|min }}%"></div>
+                            </div>
+                            {% else %}
+                            <span class="budget-text">No budget set</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <button class="reset-btn" onclick="resetUser('{{ row.user_id }}')"
+                                    title="Reset spend for this user">Reset</button>
+                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
 
-        <!-- Active Workspaces Table -->
+        <!-- Usage by API Key Table -->
         <div class="table-container">
             <div class="table-header">
-                <h3>Active Workspaces</h3>
-                <span style="color: #666; font-size: 0.9em;">{{ by_workspace|length }} workspaces</span>
+                <h3>Usage by API Key</h3>
+                <span style="color: #666; font-size: 0.9em;">{{ by_api_key|length }} keys</span>
             </div>
             <table>
                 <thead>
                     <tr>
-                        <th>Workspace</th>
+                        <th>API Key</th>
                         <th>User</th>
                         <th>Requests</th>
                         <th>Tokens In</th>
                         <th>Tokens Out</th>
+                        <th>Cost</th>
                     </tr>
                 </thead>
                 <tbody>
-                    {% for row in by_workspace %}
+                    {% for row in by_api_key %}
                     <tr>
-                        <td><code style="font-size: 0.85em;">{{ row.workspace_id[:16] }}{% if row.workspace_id|length > 16 %}...{% endif %}</code></td>
+                        <td><code style="font-size: 0.85em;">{{ row.api_key[:20] }}{% if row.api_key|length > 20 %}...{% endif %}</code></td>
                         <td>{{ row.user_id }}</td>
                         <td>{{ "{:,}".format(row.requests) }}</td>
                         <td class="tokens">{{ "{:,}".format(row.tokens_in) }}</td>
                         <td class="tokens tokens-out">{{ "{:,}".format(row.tokens_out) }}</td>
+                        <td class="cost">${{ "%.4f"|format(row.spend) }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -494,6 +646,7 @@
                         <th>Provider</th>
                         <th>Model</th>
                         <th>Tokens</th>
+                        <th>Cost</th>
                         <th>Latency</th>
                     </tr>
                 </thead>
@@ -510,7 +663,8 @@
                             <span class="tokens">{{ row.tokens_in }}</span> /
                             <span class="tokens tokens-out">{{ row.tokens_out }}</span>
                         </td>
-                        <td>{{ row.latency_ms }}ms</td>
+                        <td class="cost">${{ "%.4f"|format(row.spend) }}</td>
+                        <td>{% if row.latency_ms %}{{ "%.0f"|format(row.latency_ms) }}ms{% else %}N/A{% endif %}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -527,8 +681,8 @@
                 <h3>No AI Usage Data Yet</h3>
                 <p>AI usage will appear here when workspaces start making API calls through LiteLLM.</p>
                 <p style="margin-top: 10px; font-size: 0.9em;">
-                    Workspaces should send requests to <code>http://litellm:4000</code> with headers:<br>
-                    <code>X-Workspace-ID</code>, <code>X-User-ID</code>, <code>X-Template-Name</code>
+                    Data is sourced from LiteLLM's <code>LiteLLM_SpendLogs</code> table.<br>
+                    Workspace AI tools (Roo Code, OpenCode) send requests to LiteLLM on port 4000.
                 </p>
             </div>
         </div>
@@ -536,9 +690,48 @@
 
         <!-- Footer -->
         <div class="footer">
-            <p>Platform Admin - Coder WebIDE Platform</p>
-            <p><a href="/api/ai-usage">Usage API</a> · <a href="/api/ai-usage?period=month">Monthly Data</a></p>
+            <p>Platform Admin - Coder WebIDE Platform &mdash; Data source: LiteLLM Database</p>
+            <p><a href="/api/ai-usage">Usage API</a> &middot; <a href="/api/ai-usage?period=month">Monthly Data</a></p>
         </div>
     </div>
+
+    <script>
+    async function resetUser(userId) {
+        if (!confirm('Reset AI spend for "' + userId + '"? This sets their cumulative spend back to $0.')) return;
+
+        const btn = event.target;
+        btn.disabled = true;
+        btn.textContent = '...';
+
+        try {
+            const resp = await fetch('/api/ai-usage/reset-user', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({user_id: userId})
+            });
+            if (resp.ok) {
+                showToast('Spend reset for ' + userId);
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                const data = await resp.json().catch(() => ({}));
+                showToast(data.error || 'Reset failed', true);
+                btn.disabled = false;
+                btn.textContent = 'Reset';
+            }
+        } catch (e) {
+            showToast('Network error', true);
+            btn.disabled = false;
+            btn.textContent = 'Reset';
+        }
+    }
+
+    function showToast(msg, isError) {
+        const toast = document.createElement('div');
+        toast.className = 'toast' + (isError ? ' error' : '');
+        toast.textContent = msg;
+        document.body.appendChild(toast);
+        setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 3000);
+    }
+    </script>
 </body>
 </html>

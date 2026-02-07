@@ -170,6 +170,10 @@ ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', 'admin')
 ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'admin123')
 LOCAL_AUTH_ENABLED = os.environ.get('LOCAL_AUTH_ENABLED', 'true').lower() == 'true'
 
+# Key Provisioner (for admin reset actions)
+KEY_PROVISIONER_URL = os.environ.get('KEY_PROVISIONER_URL', 'http://key-provisioner:8100')
+PROVISIONER_SECRET = os.environ.get('PROVISIONER_SECRET', '')
+
 # MinIO configuration
 MINIO_ENDPOINT = os.environ.get('MINIO_ENDPOINT', 'minio:9002')
 MINIO_ACCESS_KEY = os.environ.get('MINIO_ROOT_USER', 'minioadmin')
@@ -185,6 +189,25 @@ def get_db_connection():
         user=DEVDB_USER,
         password=DEVDB_PASSWORD,
         database=DEVDB_NAME
+    )
+
+
+# LiteLLM Database Configuration (AI usage data)
+LITELLM_DB_HOST = os.environ.get('LITELLM_DB_HOST', 'postgres')
+LITELLM_DB_PORT = os.environ.get('LITELLM_DB_PORT', '5432')
+LITELLM_DB_USER = os.environ.get('LITELLM_DB_USER', 'litellm')
+LITELLM_DB_PASSWORD = os.environ.get('LITELLM_DB_PASSWORD', 'litellm')
+LITELLM_DB_NAME = os.environ.get('LITELLM_DB_NAME', 'litellm')
+
+
+def get_litellm_db_connection():
+    """Get connection to LiteLLM database for AI usage data"""
+    return psycopg2.connect(
+        host=LITELLM_DB_HOST,
+        port=LITELLM_DB_PORT,
+        user=LITELLM_DB_USER,
+        password=LITELLM_DB_PASSWORD,
+        database=LITELLM_DB_NAME
     )
 
 
@@ -983,33 +1006,48 @@ def api_services():
 @app.route('/ai-usage')
 @require_auth
 def ai_usage():
-    """AI usage tracking dashboard"""
-    conn = get_db_connection()
+    """AI usage tracking dashboard - reads from LiteLLM's database"""
+    try:
+        conn = get_litellm_db_connection()
+    except Exception as e:
+        app.logger.error(f"Failed to connect to LiteLLM database: {e}")
+        # Render with empty data and error
+        empty_totals = {
+            'total_tokens_in': 0, 'total_tokens_out': 0,
+            'total_requests': 0, 'unique_users': 0, 'total_spend': 0.0
+        }
+        return render_template('ai_usage.html',
+            week_totals=empty_totals, daily_data=[], by_provider=[],
+            by_user=[], by_model=[], by_api_key=[], recent_requests=[],
+            db_error=str(e)
+        )
+
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-    # Get current week's totals
+    # Get current week's totals from LiteLLM_SpendLogs
     cur.execute("""
         SELECT
-            COALESCE(SUM(tokens_in), 0) as total_tokens_in,
-            COALESCE(SUM(tokens_out), 0) as total_tokens_out,
+            COALESCE(SUM(prompt_tokens), 0) as total_tokens_in,
+            COALESCE(SUM(completion_tokens), 0) as total_tokens_out,
             COUNT(*) as total_requests,
-            COUNT(DISTINCT user_id) as unique_users,
-            COUNT(DISTINCT workspace_id) as unique_workspaces
-        FROM provisioning.ai_usage
-        WHERE timestamp >= DATE_TRUNC('week', CURRENT_TIMESTAMP)
+            COUNT(DISTINCT "user") as unique_users,
+            COALESCE(SUM(spend), 0) as total_spend
+        FROM "LiteLLM_SpendLogs"
+        WHERE "startTime" >= DATE_TRUNC('week', CURRENT_TIMESTAMP)
     """)
     week_totals = cur.fetchone()
 
     # Get daily breakdown for the last 7 days
     cur.execute("""
         SELECT
-            DATE(timestamp) as date,
+            DATE("startTime") as date,
             COUNT(*) as requests,
-            COALESCE(SUM(tokens_in), 0) as tokens_in,
-            COALESCE(SUM(tokens_out), 0) as tokens_out
-        FROM provisioning.ai_usage
-        WHERE timestamp >= CURRENT_DATE - INTERVAL '7 days'
-        GROUP BY DATE(timestamp)
+            COALESCE(SUM(prompt_tokens), 0) as tokens_in,
+            COALESCE(SUM(completion_tokens), 0) as tokens_out,
+            COALESCE(SUM(spend), 0) as spend
+        FROM "LiteLLM_SpendLogs"
+        WHERE "startTime" >= CURRENT_DATE - INTERVAL '7 days'
+        GROUP BY DATE("startTime")
         ORDER BY date
     """)
     daily_data = cur.fetchall()
@@ -1017,14 +1055,15 @@ def ai_usage():
     # Get usage by provider
     cur.execute("""
         SELECT
-            provider,
+            COALESCE(custom_llm_provider, 'unknown') as provider,
             COUNT(*) as requests,
-            COALESCE(SUM(tokens_in), 0) as tokens_in,
-            COALESCE(SUM(tokens_out), 0) as tokens_out,
-            COUNT(DISTINCT user_id) as unique_users
-        FROM provisioning.ai_usage
-        WHERE timestamp >= DATE_TRUNC('week', CURRENT_TIMESTAMP)
-        GROUP BY provider
+            COALESCE(SUM(prompt_tokens), 0) as tokens_in,
+            COALESCE(SUM(completion_tokens), 0) as tokens_out,
+            COALESCE(SUM(spend), 0) as spend,
+            COUNT(DISTINCT "user") as unique_users
+        FROM "LiteLLM_SpendLogs"
+        WHERE "startTime" >= DATE_TRUNC('week', CURRENT_TIMESTAMP)
+        GROUP BY custom_llm_provider
         ORDER BY tokens_out DESC
     """)
     by_provider = cur.fetchall()
@@ -1032,64 +1071,92 @@ def ai_usage():
     # Get usage by user
     cur.execute("""
         SELECT
-            COALESCE(user_id, 'anonymous') as user_id,
+            COALESCE("user", 'anonymous') as user_id,
             COUNT(*) as requests,
-            COALESCE(SUM(tokens_in), 0) as tokens_in,
-            COALESCE(SUM(tokens_out), 0) as tokens_out
-        FROM provisioning.ai_usage
-        WHERE timestamp >= DATE_TRUNC('week', CURRENT_TIMESTAMP)
-        GROUP BY user_id
+            COALESCE(SUM(prompt_tokens), 0) as tokens_in,
+            COALESCE(SUM(completion_tokens), 0) as tokens_out,
+            COALESCE(SUM(spend), 0) as spend
+        FROM "LiteLLM_SpendLogs"
+        WHERE "startTime" >= DATE_TRUNC('week', CURRENT_TIMESTAMP)
+        GROUP BY "user"
         ORDER BY tokens_out DESC
         LIMIT 20
     """)
     by_user = cur.fetchall()
 
-    # Get usage by template
+    # Get usage by model (replaces "by template")
     cur.execute("""
         SELECT
-            COALESCE(template_name, 'unknown') as template_name,
+            COALESCE(model_group, model, 'unknown') as model_name,
             COUNT(*) as requests,
-            COALESCE(SUM(tokens_in), 0) as tokens_in,
-            COALESCE(SUM(tokens_out), 0) as tokens_out,
-            COUNT(DISTINCT user_id) as unique_users
-        FROM provisioning.ai_usage
-        WHERE timestamp >= DATE_TRUNC('week', CURRENT_TIMESTAMP)
-        GROUP BY template_name
+            COALESCE(SUM(prompt_tokens), 0) as tokens_in,
+            COALESCE(SUM(completion_tokens), 0) as tokens_out,
+            COALESCE(SUM(spend), 0) as spend,
+            COUNT(DISTINCT "user") as unique_users
+        FROM "LiteLLM_SpendLogs"
+        WHERE "startTime" >= DATE_TRUNC('week', CURRENT_TIMESTAMP)
+        GROUP BY model_group, model
         ORDER BY tokens_out DESC
     """)
-    by_template = cur.fetchall()
+    by_model = cur.fetchall()
 
-    # Get usage by workspace
+    # Get usage by API key (replaces "by workspace")
     cur.execute("""
         SELECT
-            COALESCE(workspace_id, 'anonymous') as workspace_id,
-            COALESCE(user_id, 'unknown') as user_id,
+            COALESCE(api_key, 'unknown') as api_key,
+            COALESCE("user", 'unknown') as user_id,
             COUNT(*) as requests,
-            COALESCE(SUM(tokens_in), 0) as tokens_in,
-            COALESCE(SUM(tokens_out), 0) as tokens_out
-        FROM provisioning.ai_usage
-        WHERE timestamp >= DATE_TRUNC('week', CURRENT_TIMESTAMP)
-        GROUP BY workspace_id, user_id
+            COALESCE(SUM(prompt_tokens), 0) as tokens_in,
+            COALESCE(SUM(completion_tokens), 0) as tokens_out,
+            COALESCE(SUM(spend), 0) as spend
+        FROM "LiteLLM_SpendLogs"
+        WHERE "startTime" >= DATE_TRUNC('week', CURRENT_TIMESTAMP)
+        GROUP BY api_key, "user"
         ORDER BY tokens_out DESC
         LIMIT 20
     """)
-    by_workspace = cur.fetchall()
+    by_api_key = cur.fetchall()
 
     # Get recent requests
     cur.execute("""
         SELECT
-            timestamp,
-            COALESCE(user_id, 'anonymous') as user_id,
-            provider,
-            model,
-            tokens_in,
-            tokens_out,
-            latency_ms
-        FROM provisioning.ai_usage
-        ORDER BY timestamp DESC
+            "startTime" as timestamp,
+            "endTime" as end_time,
+            COALESCE("user", 'anonymous') as user_id,
+            COALESCE(custom_llm_provider, 'unknown') as provider,
+            COALESCE(model, 'unknown') as model,
+            COALESCE(prompt_tokens, 0) as tokens_in,
+            COALESCE(completion_tokens, 0) as tokens_out,
+            COALESCE(spend, 0) as spend,
+            CASE
+                WHEN "endTime" IS NOT NULL AND "startTime" IS NOT NULL
+                THEN EXTRACT(EPOCH FROM ("endTime" - "startTime")) * 1000
+                ELSE NULL
+            END as latency_ms
+        FROM "LiteLLM_SpendLogs"
+        ORDER BY "startTime" DESC
         LIMIT 50
     """)
     recent_requests = cur.fetchall()
+
+    # Get per-user budget/spend status from LiteLLM_UserTable
+    user_budgets = {}
+    try:
+        cur.execute("""
+            SELECT
+                user_id,
+                COALESCE(spend, 0) as spend,
+                max_budget,
+                rpm_limit,
+                tpm_limit,
+                max_parallel_requests,
+                budget_duration
+            FROM "LiteLLM_UserTable"
+        """)
+        for row in cur.fetchall():
+            user_budgets[row['user_id']] = row
+    except Exception as e:
+        app.logger.warning(f"Could not fetch user budgets (table may not exist): {e}")
 
     conn.close()
 
@@ -1098,52 +1165,82 @@ def ai_usage():
         daily_data=daily_data,
         by_provider=by_provider,
         by_user=by_user,
-        by_template=by_template,
-        by_workspace=by_workspace,
-        recent_requests=recent_requests
+        by_model=by_model,
+        by_api_key=by_api_key,
+        recent_requests=recent_requests,
+        user_budgets=user_budgets,
     )
 
 
 @app.route('/api/ai-usage')
 @require_auth
 def api_ai_usage():
-    """API endpoint for AI usage data"""
-    conn = get_db_connection()
+    """API endpoint for AI usage data - reads from LiteLLM's database"""
+    try:
+        conn = get_litellm_db_connection()
+    except Exception as e:
+        return jsonify({'error': f'Failed to connect to LiteLLM database: {e}'}), 503
+
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
     period = request.args.get('period', 'week')
-
-    if period == 'day':
-        interval = "INTERVAL '1 day'"
-    elif period == 'month':
-        interval = "INTERVAL '30 days'"
-    elif period == 'year':
-        interval = "INTERVAL '365 days'"
-    else:
-        interval = "INTERVAL '7 days'"
+    intervals = {
+        'day': "INTERVAL '1 day'",
+        'month': "INTERVAL '30 days'",
+        'year': "INTERVAL '365 days'",
+    }
+    interval = intervals.get(period, "INTERVAL '7 days'")
 
     cur.execute(f"""
         SELECT
-            DATE(timestamp) as date,
-            provider,
-            COALESCE(user_id, 'anonymous') as user_id,
-            COALESCE(template_name, 'unknown') as template_name,
+            DATE("startTime") as date,
+            COALESCE(custom_llm_provider, 'unknown') as provider,
+            COALESCE("user", 'anonymous') as user_id,
+            COALESCE(model_group, model, 'unknown') as model,
             COUNT(*) as requests,
-            SUM(tokens_in) as tokens_in,
-            SUM(tokens_out) as tokens_out
-        FROM provisioning.ai_usage
-        WHERE timestamp >= CURRENT_TIMESTAMP - {interval}
-        GROUP BY DATE(timestamp), provider, user_id, template_name
+            COALESCE(SUM(prompt_tokens), 0) as tokens_in,
+            COALESCE(SUM(completion_tokens), 0) as tokens_out,
+            COALESCE(SUM(spend), 0) as spend
+        FROM "LiteLLM_SpendLogs"
+        WHERE "startTime" >= CURRENT_TIMESTAMP - {interval}
+        GROUP BY DATE("startTime"), custom_llm_provider, "user", model_group, model
         ORDER BY date DESC
     """)
     data = cur.fetchall()
     conn.close()
 
-    # Convert dates to strings
     for row in data:
         row['date'] = row['date'].isoformat() if row['date'] else None
+        row['spend'] = float(row['spend']) if row['spend'] else 0.0
 
     return jsonify(data)
+
+
+@app.route('/api/ai-usage/reset-user', methods=['POST'])
+@require_auth
+def api_reset_user_spend():
+    """Reset a user's AI spend (admin action via key-provisioner)."""
+    body = request.get_json(silent=True) or {}
+    user_id = body.get('user_id', '').strip()
+    if not user_id:
+        return jsonify({'error': 'user_id required'}), 400
+
+    try:
+        resp = requests.post(
+            f"{KEY_PROVISIONER_URL}/api/v1/keys/reset-user",
+            headers={
+                "Authorization": f"Bearer {PROVISIONER_SECRET}",
+                "Content-Type": "application/json",
+            },
+            json={"user_id": user_id},
+            timeout=10,
+        )
+        if resp.ok:
+            return jsonify(resp.json())
+        return jsonify({'error': f'Reset failed: {resp.text}'}), resp.status_code
+    except Exception as e:
+        app.logger.error(f"Failed to reset user spend: {e}")
+        return jsonify({'error': 'Key provisioner unavailable'}), 502
 
 
 # =============================================================================
@@ -1160,22 +1257,25 @@ def users():
     coder_users = get_coder_users()
     workspaces = get_coder_workspaces_detailed()
 
-    # Get AI usage by user from database
-    conn = get_db_connection()
-    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("""
-        SELECT
-            COALESCE(user_id, 'anonymous') as user_id,
-            COUNT(*) as requests,
-            COALESCE(SUM(tokens_in + tokens_out), 0) as tokens
-        FROM provisioning.ai_usage
-        WHERE timestamp >= DATE_TRUNC('week', CURRENT_TIMESTAMP)
-        GROUP BY user_id
-    """)
-    ai_usage_rows = cur.fetchall()
-    conn.close()
-
-    ai_usage_by_user = {row['user_id']: row for row in ai_usage_rows}
+    # Get AI usage by user from LiteLLM database
+    ai_usage_by_user = {}
+    try:
+        conn = get_litellm_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("""
+            SELECT
+                COALESCE("user", 'anonymous') as user_id,
+                COUNT(*) as requests,
+                COALESCE(SUM(prompt_tokens + completion_tokens), 0) as tokens
+            FROM "LiteLLM_SpendLogs"
+            WHERE "startTime" >= DATE_TRUNC('week', CURRENT_TIMESTAMP)
+            GROUP BY "user"
+        """)
+        ai_usage_rows = cur.fetchall()
+        conn.close()
+        ai_usage_by_user = {row['user_id']: row for row in ai_usage_rows}
+    except Exception as e:
+        app.logger.warning(f"Could not fetch AI usage from LiteLLM DB: {e}")
 
     # Enrich users
     enriched_users = enrich_users_with_activity(coder_users, workspaces, ai_usage_by_user)
@@ -1234,16 +1334,20 @@ def api_users():
     coder_users = get_coder_users()
     workspaces = get_coder_workspaces_detailed()
 
-    conn = get_db_connection()
-    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("""
-        SELECT user_id, COUNT(*) as requests, SUM(tokens_in + tokens_out) as tokens
-        FROM provisioning.ai_usage
-        WHERE timestamp >= DATE_TRUNC('week', CURRENT_TIMESTAMP)
-        GROUP BY user_id
-    """)
-    ai_usage = {row['user_id']: row for row in cur.fetchall()}
-    conn.close()
+    ai_usage = {}
+    try:
+        conn = get_litellm_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("""
+            SELECT "user" as user_id, COUNT(*) as requests, SUM(prompt_tokens + completion_tokens) as tokens
+            FROM "LiteLLM_SpendLogs"
+            WHERE "startTime" >= DATE_TRUNC('week', CURRENT_TIMESTAMP)
+            GROUP BY "user"
+        """)
+        ai_usage = {row['user_id']: row for row in cur.fetchall()}
+        conn.close()
+    except Exception as e:
+        app.logger.warning(f"Could not fetch AI usage from LiteLLM DB: {e}")
 
     enriched = enrich_users_with_activity(coder_users, workspaces, ai_usage)
 
@@ -1270,22 +1374,8 @@ def workspaces():
     # Get workspaces from Coder
     coder_workspaces = get_coder_workspaces_detailed()
 
-    # Get AI usage by workspace from database
-    conn = get_db_connection()
-    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("""
-        SELECT
-            COALESCE(workspace_id, 'anonymous') as workspace_id,
-            COUNT(*) as requests,
-            COALESCE(SUM(tokens_in + tokens_out), 0) as tokens
-        FROM provisioning.ai_usage
-        WHERE timestamp >= DATE_TRUNC('week', CURRENT_TIMESTAMP)
-        GROUP BY workspace_id
-    """)
-    ai_usage_rows = cur.fetchall()
-    conn.close()
-
-    ai_usage_by_workspace = {row['workspace_id']: row for row in ai_usage_rows}
+    # AI usage by workspace not directly available from LiteLLM (no workspace_id field)
+    ai_usage_by_workspace = {}
 
     # Enrich workspaces
     enriched_workspaces = enrich_workspaces_with_metrics(coder_workspaces, ai_usage_by_workspace)
@@ -1355,16 +1445,8 @@ def api_workspaces():
     """API endpoint for workspaces list"""
     coder_workspaces = get_coder_workspaces_detailed()
 
-    conn = get_db_connection()
-    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("""
-        SELECT workspace_id, COUNT(*) as requests, SUM(tokens_in + tokens_out) as tokens
-        FROM provisioning.ai_usage
-        WHERE timestamp >= DATE_TRUNC('week', CURRENT_TIMESTAMP)
-        GROUP BY workspace_id
-    """)
-    ai_usage = {row['workspace_id']: row for row in cur.fetchall()}
-    conn.close()
+    # AI usage by workspace not directly available from LiteLLM
+    ai_usage = {}
 
     enriched = enrich_workspaces_with_metrics(coder_workspaces, ai_usage)
     return jsonify(enriched)

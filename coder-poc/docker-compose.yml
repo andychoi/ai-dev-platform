@@ -1,5 +1,3 @@
-version: "3.9"
-
 # Coder WebIDE PoC - Docker Compose Configuration
 # This setup provides a complete local Coder environment for testing
 
@@ -190,13 +188,23 @@ services:
     depends_on:
       devdb:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
+      key-provisioner:
+        condition: service_healthy
     environment:
-      # Database connection
+      # Database connection (DevDB - provisioning data)
       DEVDB_HOST: devdb
       DEVDB_PORT: "5432"
       DEVDB_USER: devdb_admin
       DEVDB_PASSWORD: ${DEVDB_ADMIN_PASSWORD:-devdbadmin123}
       DEVDB_NAME: devdb
+      # LiteLLM database (AI usage data)
+      LITELLM_DB_HOST: postgres
+      LITELLM_DB_PORT: "5432"
+      LITELLM_DB_USER: litellm
+      LITELLM_DB_PASSWORD: litellm
+      LITELLM_DB_NAME: litellm
       # Coder API
       CODER_URL: http://coder-server:7080
       CODER_ADMIN_EMAIL: admin@example.com
@@ -207,6 +215,9 @@ services:
       MINIO_URL: http://minio:9002
       AI_GATEWAY_URL: http://litellm:4000
       AUTHENTIK_URL: http://authentik-server:9000
+      # Key Provisioner (for admin reset actions)
+      KEY_PROVISIONER_URL: http://key-provisioner:8100
+      PROVISIONER_SECRET: ${PROVISIONER_SECRET:-}
       # Admin credentials (local fallback when OIDC is unavailable)
       ADMIN_USERNAME: ${PLATFORM_ADMIN_USER:-admin}
       ADMIN_PASSWORD: ${PLATFORM_ADMIN_PASSWORD:-admin123}
@@ -377,6 +388,9 @@ services:
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-poc-litellm-master-key-change-in-production}
       - DATABASE_URL=${LITELLM_DATABASE_URL:-postgresql://litellm:litellm@postgres:5432/litellm}
       - DEFAULT_ENFORCEMENT_LEVEL=${DEFAULT_ENFORCEMENT_LEVEL:-standard}
+      # Content guardrails — PII/financial/secret detection
+      - GUARDRAILS_ENABLED=${GUARDRAILS_ENABLED:-true}
+      - DEFAULT_GUARDRAIL_LEVEL=${DEFAULT_GUARDRAIL_LEVEL:-standard}
       # Langfuse observability — async trace callback
       - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-lf_pk_poc_changeme}
       - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-lf_sk_poc_changeme}
@@ -394,7 +408,9 @@ services:
     volumes:
       - ./litellm/config.yaml:/app/config.yaml:ro
       - ./litellm/enforcement_hook.py:/app/enforcement_hook.py:ro
+      - ./litellm/guardrails_hook.py:/app/guardrails_hook.py:ro
       - ./litellm/prompts:/app/prompts:ro
+      - ./litellm/guardrails:/app/guardrails:ro
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     networks:
       - coder-network
@@ -424,6 +440,22 @@ services:
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-poc-litellm-master-key-change-in-production}
       - PROVISIONER_SECRET=${PROVISIONER_SECRET:-}
       - CODER_URL=http://coder-server:7080
+      # Per-scope rate limits (overridable via .env)
+      - WORKSPACE_RPM=${WORKSPACE_RPM:-60}
+      - WORKSPACE_TPM=${WORKSPACE_TPM:-100000}
+      - WORKSPACE_BUDGET=${WORKSPACE_BUDGET:-10.00}
+      - WORKSPACE_BUDGET_DURATION=${WORKSPACE_BUDGET_DURATION:-1d}
+      - WORKSPACE_MAX_PARALLEL=${WORKSPACE_MAX_PARALLEL:-5}
+      - USER_RPM=${USER_RPM:-100}
+      - USER_TPM=${USER_TPM:-200000}
+      - USER_BUDGET=${USER_BUDGET:-20.00}
+      - USER_BUDGET_DURATION=${USER_BUDGET_DURATION:-1d}
+      - USER_MAX_PARALLEL=${USER_MAX_PARALLEL:-10}
+      - CI_RPM=${CI_RPM:-30}
+      - CI_TPM=${CI_TPM:-50000}
+      - CI_BUDGET=${CI_BUDGET:-5.00}
+      - CI_BUDGET_DURATION=${CI_BUDGET_DURATION:-1d}
+      - CI_MAX_PARALLEL=${CI_MAX_PARALLEL:-3}
     ports:
       - "8100:8100"
     networks:

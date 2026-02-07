@@ -9,6 +9,8 @@ Endpoints:
   POST /api/v1/keys/workspace     - Auto-provision workspace key (idempotent)
   POST /api/v1/keys/self-service  - Generate personal key (Coder token auth)
   GET  /api/v1/keys/info          - Get key usage/budget info
+  POST /api/v1/keys/reset-user    - Reset user spend (admin, provisioner-secret auth)
+  GET  /api/v1/keys/list          - List all keys with limits (admin, provisioner-secret auth)
   GET  /health                    - Health check
 """
 
@@ -34,13 +36,42 @@ LITELLM_MASTER_KEY = os.environ.get("LITELLM_MASTER_KEY", "")
 PROVISIONER_SECRET = os.environ.get("PROVISIONER_SECRET", "")
 CODER_URL = os.environ.get("CODER_URL", "http://coder-server:7080")
 
-# Scope defaults (budget USD, RPM, duration days)
+# Scope defaults — configurable via environment variables
 SCOPE_DEFAULTS = {
-    "workspace": {"budget": 10.0, "rpm": 60, "duration_days": 30},
-    "user":      {"budget": 20.0, "rpm": 100, "duration_days": 90},
-    "ci":        {"budget": 5.0,  "rpm": 30, "duration_days": 365},
-    "agent:review": {"budget": 15.0, "rpm": 40, "duration_days": 365},
-    "agent:write":  {"budget": 30.0, "rpm": 60, "duration_days": 365},
+    "workspace": {
+        "budget": float(os.environ.get("WORKSPACE_BUDGET", "10.0")),
+        "rpm": int(os.environ.get("WORKSPACE_RPM", "60")),
+        "tpm": int(os.environ.get("WORKSPACE_TPM", "100000")),
+        "budget_duration": os.environ.get("WORKSPACE_BUDGET_DURATION", "1d"),
+        "max_parallel_requests": int(os.environ.get("WORKSPACE_MAX_PARALLEL", "5")),
+        "duration_days": 30,
+    },
+    "user": {
+        "budget": float(os.environ.get("USER_BUDGET", "20.0")),
+        "rpm": int(os.environ.get("USER_RPM", "100")),
+        "tpm": int(os.environ.get("USER_TPM", "200000")),
+        "budget_duration": os.environ.get("USER_BUDGET_DURATION", "1d"),
+        "max_parallel_requests": int(os.environ.get("USER_MAX_PARALLEL", "10")),
+        "duration_days": 90,
+    },
+    "ci": {
+        "budget": float(os.environ.get("CI_BUDGET", "5.0")),
+        "rpm": int(os.environ.get("CI_RPM", "30")),
+        "tpm": int(os.environ.get("CI_TPM", "50000")),
+        "budget_duration": os.environ.get("CI_BUDGET_DURATION", "1d"),
+        "max_parallel_requests": int(os.environ.get("CI_MAX_PARALLEL", "3")),
+        "duration_days": 365,
+    },
+    "agent:review": {
+        "budget": 15.0, "rpm": 40, "tpm": 100000,
+        "budget_duration": "1d", "max_parallel_requests": 5,
+        "duration_days": 365,
+    },
+    "agent:write": {
+        "budget": 30.0, "rpm": 60, "tpm": 200000,
+        "budget_duration": "1d", "max_parallel_requests": 10,
+        "duration_days": 365,
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -103,14 +134,17 @@ def _find_existing_key(alias):
     return None
 
 
-def _generate_key(alias, user_id, budget, rpm, metadata, models=None):
+def _generate_key(alias, user_id, budget, rpm, metadata, models=None,
+                  tpm=None, budget_duration=None, max_parallel_requests=None):
     """Generate a new LiteLLM virtual key."""
     payload = {
         "key_alias": alias,
         "user_id": user_id,
         "max_budget": budget,
-        "tpm_limit": None,
+        "tpm_limit": tpm,
         "rpm_limit": rpm,
+        "max_parallel_requests": max_parallel_requests,
+        "budget_duration": budget_duration,
         "metadata": metadata,
     }
     if models:
@@ -197,6 +231,9 @@ def create_workspace_key():
         budget=defaults["budget"],
         rpm=defaults["rpm"],
         metadata=metadata,
+        tpm=defaults.get("tpm"),
+        budget_duration=defaults.get("budget_duration"),
+        max_parallel_requests=defaults.get("max_parallel_requests"),
     )
     if not key:
         return jsonify({"error": f"Failed to generate key: {err}"}), 502
@@ -265,6 +302,9 @@ def create_self_service_key():
         budget=defaults["budget"],
         rpm=defaults["rpm"],
         metadata=metadata,
+        tpm=defaults.get("tpm"),
+        budget_duration=defaults.get("budget_duration"),
+        max_parallel_requests=defaults.get("max_parallel_requests"),
     )
     if not key:
         return jsonify({"error": f"Failed to generate key: {err}"}), 502
@@ -291,6 +331,50 @@ def get_key_info():
     except Exception as e:
         log.error("Failed to get key info: %s", e)
         return jsonify({"error": "failed to contact LiteLLM"}), 502
+
+
+# ---------------------------------------------------------------------------
+# Admin endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.route("/api/v1/keys/reset-user", methods=["POST"])
+@require_provisioner_secret
+def reset_user_spend():
+    """Reset a user's spend counter (admin-only, called from Platform Admin)."""
+    body = request.get_json(silent=True) or {}
+    user_id = body.get("user_id", "").strip()
+    if not user_id:
+        return jsonify({"error": "user_id required"}), 400
+
+    # Call LiteLLM /user/update to reset spend to 0
+    resp = requests.post(
+        f"{LITELLM_URL}/user/update",
+        headers=_litellm_headers(),
+        json={"user_id": user_id, "spend": 0},
+        timeout=10,
+    )
+    if resp.status_code not in (200, 201):
+        log.error("Failed to reset spend for user=%s: %s %s", user_id, resp.status_code, resp.text)
+        return jsonify({"error": f"LiteLLM error: {resp.text}"}), resp.status_code
+
+    log.info("Reset spend for user=%s", user_id)
+    return jsonify({"status": "ok", "user_id": user_id, "spend_reset": True})
+
+
+@app.route("/api/v1/keys/list", methods=["GET"])
+@require_provisioner_secret
+def list_keys():
+    """List all virtual keys with budget/rate-limit status."""
+    resp = requests.get(
+        f"{LITELLM_URL}/key/list",
+        headers=_litellm_headers(),
+        timeout=15,
+    )
+    if resp.status_code != 200:
+        log.error("Failed to list keys: %s %s", resp.status_code, resp.text)
+        return jsonify({"error": "failed to list keys"}), resp.status_code
+    return jsonify(resp.json())
 
 
 # ---------------------------------------------------------------------------

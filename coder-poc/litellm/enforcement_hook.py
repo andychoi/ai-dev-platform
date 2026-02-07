@@ -43,7 +43,7 @@ class EnforcementHook(CustomLogger):
     """LiteLLM callback that injects enforcement system prompts."""
 
     async def async_pre_call_hook(self, user_api_key_dict, cache, data, call_type):
-        if call_type != "completion":
+        if call_type not in ("completion", "acompletion"):
             return data
 
         # Read enforcement_level from key metadata
