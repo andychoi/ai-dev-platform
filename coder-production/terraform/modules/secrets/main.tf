@@ -104,7 +104,27 @@ resource "aws_secretsmanager_secret_version" "litellm_master_key" {
 }
 
 ###############################################################################
-# 6. prod/litellm/anthropic-api-key
+# 6. prod/key-provisioner/secret
+###############################################################################
+
+resource "random_password" "provisioner_secret" {
+  length  = 48
+  special = false
+}
+
+resource "aws_secretsmanager_secret" "provisioner_secret" {
+  name        = "${var.name_prefix}/key-provisioner/secret"
+  description = "Shared secret for workspace-to-key-provisioner authentication (auto-generated)."
+  tags        = var.tags
+}
+
+resource "aws_secretsmanager_secret_version" "provisioner_secret" {
+  secret_id     = aws_secretsmanager_secret.provisioner_secret.id
+  secret_string = random_password.provisioner_secret.result
+}
+
+###############################################################################
+# 7. prod/litellm/anthropic-api-key
 ###############################################################################
 
 resource "aws_secretsmanager_secret" "litellm_anthropic_api_key" {

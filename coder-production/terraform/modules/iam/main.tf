@@ -301,7 +301,42 @@ resource "aws_iam_role_policy" "authentik" {
 }
 
 ###############################################################################
-# 5. Workspace Task Role
+# 5. Key Provisioner Task Role
+#
+# Permissions:
+#   - Secrets Manager (provisioner secret + LiteLLM master key)
+###############################################################################
+
+resource "aws_iam_role" "key_provisioner" {
+  name               = "${var.name_prefix}-key-provisioner-task-role"
+  assume_role_policy = data.aws_iam_policy_document.ecs_task_trust.json
+  tags               = var.tags
+}
+
+data "aws_iam_policy_document" "key_provisioner" {
+  # Secrets Manager – read provisioner and LiteLLM secrets
+  statement {
+    sid    = "SecretsManagerRead"
+    effect = "Allow"
+    actions = [
+      "secretsmanager:GetSecretValue",
+      "secretsmanager:DescribeSecret",
+    ]
+    resources = [
+      lookup(var.secrets_arns, "provisioner_secret", "arn:${data.aws_partition.current.partition}:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:prod/key-provisioner/*"),
+      lookup(var.secrets_arns, "litellm_master_key", "arn:${data.aws_partition.current.partition}:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:prod/litellm/*"),
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "key_provisioner" {
+  name   = "${var.name_prefix}-key-provisioner-task-role-policy"
+  role   = aws_iam_role.key_provisioner.id
+  policy = data.aws_iam_policy_document.key_provisioner.json
+}
+
+###############################################################################
+# 6. Workspace Task Role
 #
 # Minimal permissions – workspaces access LiteLLM via network,
 # not via IAM. Only CloudWatch Logs for observability.

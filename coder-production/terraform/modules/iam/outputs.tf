@@ -22,6 +22,11 @@ output "authentik_task_role_arn" {
   value       = aws_iam_role.authentik.arn
 }
 
+output "key_provisioner_task_role_arn" {
+  description = "ARN of the Key Provisioner ECS task role."
+  value       = aws_iam_role.key_provisioner.arn
+}
+
 output "workspace_task_role_arn" {
   description = "ARN of the Workspace ECS task role."
   value       = aws_iam_role.workspace.arn

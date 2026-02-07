@@ -27,7 +27,8 @@ Core components:
 - Gitea
 - MinIO
 - PostgreSQL / Redis
-- LiteLLM (AI proxy) + Roo Code (AI agent)
+- LiteLLM (AI proxy) + Key Provisioner (key management)
+- Roo Code (AI agent, VS Code) + OpenCode (AI agent, CLI)
 
 ---
 
@@ -104,10 +105,25 @@ Without `ANTHROPIC_API_KEY` set in `.env`, all Anthropic model calls fail with 4
 
 Requirements:
 - `ANTHROPIC_API_KEY` must be set in `coder-poc/.env` (not empty)
-- Each workspace user needs a LiteLLM virtual key (generated via `setup-litellm-keys.sh`)
+- Workspace keys are auto-provisioned by the key-provisioner service (or manually via `setup-litellm-keys.sh`)
 - After changing `.env`, run `docker compose up -d litellm` (not restart)
 
 See docs/ROO-CODE-LITELLM.md for full setup.
+
+---
+
+### Key Provisioner Rule (AI Key Management)
+
+The **key-provisioner** microservice (port 8100) isolates the LiteLLM master key from workspace containers. Workspaces never see the master key — they authenticate with `PROVISIONER_SECRET` and receive scoped virtual keys.
+
+Key facts:
+- Workspace keys are auto-provisioned on startup (no manual paste needed)
+- Keys are idempotent — workspace restart reuses the same key (alias: `workspace-{workspace_id}`)
+- Self-service keys available via `scripts/generate-ai-key.sh`
+- Service keys (CI/agent) managed via `scripts/manage-service-keys.sh`
+- Every key has structured `metadata.scope` (e.g., `workspace:abc-123`, `user:contractor1`, `ci:frontend-repo`)
+
+See docs/KEY-MANAGEMENT.md and skills/key-management/SKILL.md.
 
 ---
 
@@ -155,8 +171,9 @@ See docs/ROO-CODE-LITELLM.md and skills/ai-gateway/SKILL.md.
 - Mixing admin and contractor permission models
 - Treating identity systems independently
 - Assuming LiteLLM provides models (it's a proxy — needs upstream API keys)
-- Exposing master API keys to workspaces (use LiteLLM virtual keys)
+- Exposing master API keys to workspaces (use LiteLLM virtual keys via key-provisioner)
 - Using Roo Cloud auth when LiteLLM is the provider
+- Bypassing key-provisioner to call LiteLLM admin endpoints from workspaces
 
 ---
 

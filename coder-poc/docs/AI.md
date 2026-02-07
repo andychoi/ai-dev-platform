@@ -28,8 +28,8 @@ This document describes how AI capabilities are integrated into the Coder WebIDE
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
 │  │                         USER INTERFACES                              │   │
 │  │  ┌───────────────┐  ┌───────────────┐  ┌───────────────┐           │   │
-│  │  │ Coder Chat   │  │   Roo Code   │  │  CLI Tools    │           │   │
-│  │  │ (DISABLED)   │  │  (VS Code)    │  │  (Terminal)   │           │   │
+│  │  │ Coder Chat   │  │   Roo Code   │  │  OpenCode +   │           │   │
+│  │  │ (DISABLED)   │  │  (VS Code)    │  │  CLI Tools    │           │   │
 │  │  └──────────────┘  └───────┬───────┘  └───────┬───────┘           │   │
 │  └─────────────────────────────┼──────────────────┼─────────────────────┘   │
 │                                │                  │                          │
@@ -62,6 +62,7 @@ This document describes how AI capabilities are integrated into the Coder WebIDE
 | Refactoring | Roo Code | Bedrock/Anthropic (via LiteLLM) | Code improvement suggestions |
 | Documentation | Roo Code | Bedrock/Anthropic (via LiteLLM) | Generate docs/comments |
 | Test Generation | Roo Code | Bedrock/Anthropic (via LiteLLM) | Generate unit tests |
+| CLI AI Agent | OpenCode CLI | Bedrock/Anthropic (via LiteLLM) | Terminal-based agentic coding |
 | CLI Assistant | Terminal Tools | LiteLLM | Shell commands, debugging |
 
 ---
@@ -386,9 +387,11 @@ curl -X POST http://localhost:4000/key/generate \
 # { "key": "sk-...", "user_id": "contractor1" }
 ```
 
-Keys are automatically provisioned during workspace creation via the `setup-litellm-keys.sh` script.
+Keys are **auto-provisioned** during workspace creation by the **key-provisioner** microservice (port 8100). The provisioner isolates the LiteLLM master key — workspace containers never see it. Keys can also be generated manually via `setup-litellm-keys.sh` or self-service via `generate-ai-key.sh`.
 
-> **Note:** The legacy AI Gateway (port 8090) is still present in docker-compose.yml but LiteLLM (port 4000) is the preferred AI proxy going forward.
+See `docs/KEY-MANAGEMENT.md` for the full key taxonomy (workspace, user, CI, agent scopes) and management workflows.
+
+> **Note:** The legacy AI Gateway (port 8090) has been replaced by LiteLLM (port 4000) as the AI proxy.
 
 ---
 
@@ -765,3 +768,4 @@ Model selection is configured per-workspace via the template parameter.
 | 1.0 | 2026-02-04 | Platform Team | Initial version |
 | 1.1 | 2026-02-05 | Platform Team | Replace Continue/Cody with Roo Code; replace AI Gateway with LiteLLM |
 | 1.2 | 2026-02-05 | Platform Team | Disable Copilot/Cody/AI Bridge; document three-layer lockdown |
+| 1.3 | 2026-02-06 | Platform Team | Add OpenCode CLI, key-provisioner service, auto-provisioning |

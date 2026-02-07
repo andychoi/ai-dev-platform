@@ -191,6 +191,7 @@ Note: Some settings require recreating the workspace.
 - Go, Java, C# support
 - SQLTools (database)
 - Roo Code (AI coding agent)
+- OpenCode CLI (terminal AI agent — run `opencode`)
 
 You can install additional extensions from the VS Code marketplace.
 
@@ -249,13 +250,19 @@ Note: Installed packages persist in your workspace.
 
 ### Q: How do I use the AI assistant?
 
-**A:** Use **Roo Code** — the AI coding agent pre-installed in your workspace:
+**A:** Your workspace includes two AI coding tools, both pre-configured and ready to use:
 
-- Click the **Roo Code icon** in the VS Code Activity Bar (sidebar) to open the AI panel
+**Roo Code** (VS Code sidebar):
+- Click the **Roo Code icon** in the VS Code Activity Bar to open the AI panel
 - Roo Code is an agentic AI assistant that can edit files, run terminal commands, and review code
 - Describe what you need in natural language and Roo Code will execute multi-step tasks
 
-> **Note:** The built-in Coder Chat, GitHub Copilot, and Cody are all disabled. Roo Code is the only AI interface, and it routes all requests through the platform's centralized LiteLLM proxy for auditing and cost control.
+**OpenCode** (terminal TUI):
+- Run `opencode` in your terminal to launch the AI coding agent
+- OpenCode is a terminal-based UI — great for SSH-style workflows and quick tasks
+- Same AI models and budget as Roo Code (both share your LiteLLM virtual key)
+
+> **Note:** The built-in Coder Chat, GitHub Copilot, and Cody are all disabled. Roo Code and OpenCode are the only AI interfaces, and both route requests through the platform's centralized LiteLLM proxy for auditing and cost control.
 
 ---
 
@@ -771,11 +778,11 @@ To assign:
 ║  Cmd/Ctrl + P         Quick file open                                     ║
 ║  Cmd/Ctrl + Shift + P Command palette                                     ║
 ║                                                                            ║
-║  ROO CODE (AI AGENT)                                                      ║
-║  ────────────────────                                                     ║
-║  • Click the Roo Code icon in the Activity Bar                            ║
-║  • Describe tasks in natural language                                     ║
-║  • Can edit files, run commands, review code                              ║
+║  AI CODING TOOLS                                                          ║
+║  ────────────────                                                         ║
+║  • Roo Code: Click icon in Activity Bar (VS Code sidebar)                 ║
+║  • OpenCode: Run `opencode` in terminal (TUI agent)                       ║
+║  • Both share your auto-provisioned LiteLLM key                           ║
 ║                                                                            ║
 ║  GIT WORKFLOW                                                             ║
 ║  ────────────                                                             ║
@@ -785,7 +792,7 @@ To assign:
 ║                                                                            ║
 ║  GETTING HELP                                                             ║
 ║  ────────────                                                             ║
-║  • AI Agent: Roo Code icon in sidebar                                     ║
+║  • AI Agent: Roo Code (sidebar) or `opencode` (terminal)                  ║
 ║  • Bug report: Create Issue in template-requests repo                     ║
 ║  • Platform admin: [Contact info]                                         ║
 ║                                                                            ║
@@ -800,3 +807,4 @@ To assign:
 |---------|------|--------|---------|
 | 1.0 | 2026-02-04 | Platform Team | Initial version |
 | 1.1 | 2026-02-06 | Platform Team | HTTPS URLs, Bedrock model options, secure context troubleshooting, template management how-to |
+| 1.2 | 2026-02-06 | Platform Team | OpenCode CLI references, auto-provisioned keys, updated AI assistant section |

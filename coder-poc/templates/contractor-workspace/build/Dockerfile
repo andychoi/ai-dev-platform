@@ -172,6 +172,13 @@ RUN code-server --install-extension muhammad-sammy.csharp || true
 # Pre-installed so every developer has it ready without manual setup
 RUN code-server --install-extension rooveterinaryinc.roo-cline
 
+# OpenCode CLI - terminal-based AI coding agent
+# Installed alongside Roo Code so developers can use either GUI or CLI
+RUN curl -fsSL https://opencode.ai/install | bash \
+    && mv /root/.local/bin/opencode /usr/local/bin/opencode 2>/dev/null \
+    || mv /home/coder/.local/bin/opencode /usr/local/bin/opencode 2>/dev/null \
+    || echo "OpenCode install: binary already in PATH or install skipped"
+
 # Explicitly remove Copilot/Cody if present from base image or sideload
 RUN code-server --uninstall-extension github.copilot 2>/dev/null || true \
     && code-server --uninstall-extension github.copilot-chat 2>/dev/null || true \

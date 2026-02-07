@@ -213,21 +213,45 @@ curl http://localhost:4000/v1/chat/completions \
 
 ---
 
-## 4. Roo Code Extension Configuration
+## 4. Roo Code & OpenCode Configuration
 
 ### How Configuration Flows
 
 ```
-1. Workspace creation → User enters litellm_api_key parameter
+1. Workspace creation → User optionally enters litellm_api_key (or leaves empty)
                               ↓
-2. Startup script → Generates /home/coder/.config/roo-code/settings.json
+2. Startup script → If key empty, calls key-provisioner to auto-provision
                               ↓
-3. VS Code setting → roo-cline.autoImportSettingsPath points to that file
+3. With virtual key → Generates Roo Code config + OpenCode config
                               ↓
-4. Roo Code extension activates → Reads and imports providerProfiles
+4. Roo Code: /home/coder/.config/roo-code/settings.json (auto-import)
+   OpenCode: /home/coder/.config/opencode/config.json
                               ↓
-5. Extension ready → Uses LiteLLM as API backend
+5. Both tools ready → Use LiteLLM as API backend
 ```
+
+### Auto-Provisioning (New)
+
+If the `litellm_api_key` parameter is left empty (recommended), the startup script automatically provisions a key:
+
+1. Calls `POST http://key-provisioner:8100/api/v1/keys/workspace` with workspace ID and username
+2. Key-provisioner checks if key already exists (by alias `workspace-{workspace_id}`)
+3. If exists → returns existing key (idempotent on restart)
+4. If new → generates via LiteLLM with $10 budget, 60 RPM, scope `workspace:{workspace_id}`
+5. Startup script uses the returned key for both Roo Code and OpenCode configuration
+
+The key-provisioner isolates the LiteLLM master key — workspace containers never see it.
+
+### OpenCode CLI
+
+[OpenCode](https://opencode.ai) is a terminal-based AI coding agent installed alongside Roo Code. It provides:
+- TUI (text user interface) for AI-assisted coding
+- File reading, editing, and command execution
+- Same LiteLLM backend as Roo Code
+
+Configuration at `/home/coder/.config/opencode/config.json` uses `@ai-sdk/openai-compatible` provider pointing to LiteLLM.
+
+To use: run `opencode` in the workspace terminal.
 
 ### Auto-Import Settings File
 
@@ -328,57 +352,78 @@ AI_MODEL="claude-sonnet-4-5"
 
 ## 6. User Key Management
 
-### Generate Virtual Keys
+### Auto-Provisioned Keys (Recommended)
 
-Use the setup script:
+Leave the "AI API Key" field empty when creating a workspace. The key-provisioner service will automatically generate a scoped key with:
+- Budget: $10
+- Rate limit: 60 RPM
+- Scope: `workspace:{workspace_id}`
+
+The key is reused on workspace restart (idempotent by alias).
+
+### Self-Service Keys
+
+For personal use outside workspaces (e.g., local development):
+
+```bash
+cd coder-poc
+./scripts/generate-ai-key.sh
+```
+
+Requires a Coder session token. Creates a key with scope `user:{username}`, $20 budget, 100 RPM.
+
+### Service Keys (Admin)
+
+For CI/CD pipelines and background agents:
+
+```bash
+# CI key (haiku only, $5 budget)
+./scripts/manage-service-keys.sh create ci frontend-repo
+
+# Agent keys
+./scripts/manage-service-keys.sh create agent review   # $15, sonnet+haiku
+./scripts/manage-service-keys.sh create agent write     # $30, all models
+
+# List and manage
+./scripts/manage-service-keys.sh list
+./scripts/manage-service-keys.sh revoke ci-frontend-repo
+./scripts/manage-service-keys.sh rotate agent-review
+```
+
+### Bootstrap Keys (Legacy)
+
+For initial setup or migration from manual key management:
 
 ```bash
 cd coder-poc
 ./scripts/setup-litellm-keys.sh
 ```
 
-Or manually via LiteLLM API:
+### Key Scope Taxonomy
 
-```bash
-LITELLM_MASTER_KEY="sk-poc-litellm-master-key-change-in-production"
-
-# Generate key for a user
-curl -s http://localhost:4000/key/generate \
-  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "contractor1",
-    "max_budget": 10.00,
-    "rpm_limit": 60,
-    "key_alias": "contractor1-workspace"
-  }'
-```
-
-### Default Budget & Rate Limits
-
-| User Type | Budget | RPM |
-|-----------|--------|-----|
-| Admin | $50.00 | 200 |
-| App Manager | $20.00 | 100 |
-| Contractor | $10.00 | 60 |
-| Read-only | $5.00 | 30 |
+| Scope | Budget | RPM | Models | Use Case |
+|-------|--------|-----|--------|----------|
+| `workspace:{id}` | $10 | 60 | All | Roo Code + OpenCode in workspace |
+| `user:{username}` | $20 | 100 | All | Personal experimentation |
+| `ci:{repo}` | $5 | 30 | Haiku only | CI pipeline reviews |
+| `agent:review` | $15 | 40 | Sonnet + Haiku | Read-only review agent |
+| `agent:write` | $30 | 60 | All | Code generation agent |
 
 ### Check Key Info
 
 ```bash
-# Check a virtual key's info and remaining budget
+# Via key-provisioner (with any LiteLLM key)
+curl -s http://localhost:8100/api/v1/keys/info \
+  -H "Authorization: Bearer <your-key>"
+
+# Via LiteLLM admin API (master key)
 curl -s http://localhost:4000/key/info \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{"key": "sk-<user-key>"}'
 ```
 
-### Providing Key to Users
-
-When creating a workspace, the user enters their virtual key in the "AI API Key" parameter field. This key is:
-- Stored in the workspace container environment
-- Written into the Roo Code auto-import config
-- Used for all API requests through LiteLLM
+See `docs/KEY-MANAGEMENT.md` for full key management documentation.
 
 ---
 

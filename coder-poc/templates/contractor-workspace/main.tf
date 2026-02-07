@@ -173,13 +173,21 @@ data "coder_parameter" "ai_assistant" {
   display_name = "AI Coding Agent"
   description  = "AI coding agent for development assistance"
   type         = "string"
-  default      = "roo-code"
+  default      = "both"
   mutable      = true
   icon         = "/icon/widgets.svg"
 
   option {
-    name  = "Roo Code (Recommended)"
+    name  = "Roo Code + OpenCode (Recommended)"
+    value = "both"
+  }
+  option {
+    name  = "Roo Code Only"
     value = "roo-code"
+  }
+  option {
+    name  = "OpenCode CLI Only"
+    value = "opencode"
   }
   option {
     name  = "None"
@@ -187,11 +195,11 @@ data "coder_parameter" "ai_assistant" {
   }
 }
 
-# LiteLLM virtual key (generated per-user by admin)
+# LiteLLM virtual key (auto-provisioned if left empty)
 data "coder_parameter" "litellm_api_key" {
   name         = "litellm_api_key"
   display_name = "AI API Key"
-  description  = "Your AI API key (provided by platform admin)"
+  description  = "Leave empty for auto-provisioning, or paste a key from your admin"
   type         = "string"
   default      = ""
   mutable      = true
@@ -395,16 +403,14 @@ password=${data.coder_parameter.git_password.value}
     fi
 
     # ==========================================================================
-    # AI AGENT CONFIGURATION (Roo Code + LiteLLM)
+    # AI AGENT CONFIGURATION (Roo Code + OpenCode + LiteLLM)
     # ==========================================================================
     AI_ASSISTANT="${data.coder_parameter.ai_assistant.value}"
     LITELLM_KEY="${data.coder_parameter.litellm_api_key.value}"
     AI_MODEL="${data.coder_parameter.ai_model.value}"
     AI_GATEWAY_URL="${data.coder_parameter.ai_gateway_url.value}"
 
-    if [ "$AI_ASSISTANT" = "roo-code" ] && [ -n "$LITELLM_KEY" ]; then
-      echo "Configuring Roo Code with LiteLLM proxy..."
-
+    if [ "$AI_ASSISTANT" != "none" ]; then
       # Determine model name for LiteLLM
       case "$AI_MODEL" in
         "claude-sonnet")         LITELLM_MODEL="claude-sonnet-4-5" ;;
@@ -415,10 +421,44 @@ password=${data.coder_parameter.git_password.value}
         *)                       LITELLM_MODEL="claude-sonnet-4-5" ;;
       esac
 
-      # Generate Roo Code auto-import config with the user's virtual key
-      # Uses providerProfiles format required by Roo Code v3.x+
-      mkdir -p /home/coder/.config/roo-code
-      cat > /home/coder/.config/roo-code/settings.json << ROOCONFIG
+      # Auto-provision key if not provided
+      if [ -z "$LITELLM_KEY" ]; then
+        echo "Auto-provisioning AI API key via key-provisioner..."
+        PROVISIONER_URL="http://key-provisioner:8100"
+        WORKSPACE_ID="${data.coder_workspace.me.id}"
+        WORKSPACE_OWNER="${data.coder_workspace_owner.me.name}"
+        WORKSPACE_NAME="${data.coder_workspace.me.name}"
+
+        for attempt in 1 2 3; do
+          RESPONSE=$(curl -sf -X POST "$PROVISIONER_URL/api/v1/keys/workspace" \
+            -H "Authorization: Bearer $PROVISIONER_SECRET" \
+            -H "Content-Type: application/json" \
+            -d "{\"workspace_id\": \"$WORKSPACE_ID\", \"username\": \"$WORKSPACE_OWNER\", \"workspace_name\": \"$WORKSPACE_NAME\"}" \
+            2>/dev/null) && break
+          echo "Key provisioner not ready (attempt $attempt/3), retrying in 5s..."
+          sleep 5
+        done
+
+        if [ -n "$RESPONSE" ]; then
+          LITELLM_KEY=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('key',''))" 2>/dev/null || echo "")
+          if [ -n "$LITELLM_KEY" ]; then
+            REUSED=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('reused',False))" 2>/dev/null || echo "")
+            echo "AI API key provisioned (reused=$REUSED)"
+          else
+            echo "WARNING: Key provisioner returned empty key"
+          fi
+        else
+          echo "WARNING: Could not reach key provisioner after 3 attempts"
+        fi
+      fi
+
+      # Configure AI tools if we have a key
+      if [ -n "$LITELLM_KEY" ]; then
+        # --- Roo Code configuration ---
+        if [ "$AI_ASSISTANT" = "roo-code" ] || [ "$AI_ASSISTANT" = "both" ]; then
+          echo "Configuring Roo Code with LiteLLM proxy..."
+          mkdir -p /home/coder/.config/roo-code
+          cat > /home/coder/.config/roo-code/settings.json << ROOCONFIG
 {
   "providerProfiles": {
     "currentApiConfigName": "litellm",
@@ -434,24 +474,53 @@ password=${data.coder_parameter.git_password.value}
   }
 }
 ROOCONFIG
+          echo "Roo Code configured: model=$LITELLM_MODEL"
+        fi
 
-      echo "Roo Code configured: model=$LITELLM_MODEL, gateway=litellm:4000"
+        # --- OpenCode CLI configuration ---
+        if [ "$AI_ASSISTANT" = "opencode" ] || [ "$AI_ASSISTANT" = "both" ]; then
+          if command -v opencode >/dev/null 2>&1; then
+            echo "Configuring OpenCode CLI with LiteLLM proxy..."
+            mkdir -p /home/coder/.config/opencode
+            cat > /home/coder/.config/opencode/config.json << OPENCODECONFIG
+{
+  "provider": {
+    "litellm": {
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "http://litellm:4000/v1",
+        "apiKey": "$LITELLM_KEY"
+      }
+    }
+  },
+  "model": {
+    "big": "litellm/$LITELLM_MODEL",
+    "small": "litellm/claude-haiku-4-5"
+  }
+}
+OPENCODECONFIG
+            echo "OpenCode configured: model=litellm/$LITELLM_MODEL"
+          else
+            echo "Note: OpenCode CLI not found in PATH, skipping configuration"
+          fi
+        fi
 
-      # Set environment variables for CLI AI tools
-      cat >> ~/.bashrc << AICONFIG
-# AI Configuration (Roo Code + LiteLLM)
+        # --- Environment variables for CLI AI tools ---
+        cat >> ~/.bashrc << AICONFIG
+# AI Configuration (LiteLLM)
 export AI_GATEWAY_URL="http://litellm:4000"
 export OPENAI_API_BASE="http://litellm:4000/v1"
 export OPENAI_API_KEY="$LITELLM_KEY"
 export AI_MODEL="$LITELLM_MODEL"
-alias ai-models="echo 'Agent: Roo Code, Model: $LITELLM_MODEL, Gateway: litellm:4000'"
+alias ai-models="echo 'Agent: $AI_ASSISTANT, Model: $LITELLM_MODEL, Gateway: litellm:4000'"
 alias ai-usage="curl -s http://litellm:4000/user/info -H 'Authorization: Bearer $LITELLM_KEY' | python3 -m json.tool"
 AICONFIG
-
-    elif [ "$AI_ASSISTANT" = "none" ]; then
-      echo "AI assistant disabled"
+        echo "AI environment configured: gateway=litellm:4000"
+      else
+        echo "Note: No AI API key available. Ask your platform admin or use the self-service script."
+      fi
     else
-      echo "Note: AI assistant requires an API key. Ask your platform admin for one."
+      echo "AI assistant disabled"
     fi
 
     # ==========================================================================
@@ -657,6 +726,8 @@ resource "docker_container" "workspace" {
     "AI_MODEL=${data.coder_parameter.ai_model.value}",
     "AI_GATEWAY_URL=${data.coder_parameter.ai_gateway_url.value}",
     "LITELLM_API_KEY=${data.coder_parameter.litellm_api_key.value}",
+    # Key Provisioner: Secret for auto-provisioning AI API keys
+    "PROVISIONER_SECRET=poc-provisioner-secret-change-in-production",
     # TLS: Trust the self-signed Coder certificate so the agent can connect via HTTPS
     "SSL_CERT_FILE=/certs/coder.crt",
     "NODE_EXTRA_CA_CERTS=/certs/coder.crt",

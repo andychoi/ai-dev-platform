@@ -258,6 +258,110 @@ resource "aws_ecs_service" "litellm" {
 }
 
 # =============================================================================
+# KEY PROVISIONER
+# =============================================================================
+
+resource "aws_cloudwatch_log_group" "key_provisioner" {
+  name              = "/ecs/${local.name_prefix}/key-provisioner"
+  retention_in_days = 30
+
+  tags = var.tags
+}
+
+resource "aws_service_discovery_service" "key_provisioner" {
+  name = "key-provisioner"
+
+  dns_config {
+    namespace_id = module.ecs.service_discovery_namespace_id
+
+    dns_records {
+      ttl  = 10
+      type = "A"
+    }
+
+    routing_policy = "MULTIVALUE"
+  }
+
+  health_check_custom_config {
+    failure_threshold = 1
+  }
+}
+
+resource "aws_ecs_task_definition" "key_provisioner" {
+  family                   = "${local.name_prefix}-key-provisioner"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = 256
+  memory                   = 512
+  execution_role_arn       = module.iam.task_execution_role_arn
+  task_role_arn            = module.iam.key_provisioner_task_role_arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "key-provisioner"
+      image     = var.key_provisioner_image
+      essential = true
+
+      portMappings = [
+        {
+          containerPort = 8100
+          protocol      = "tcp"
+        }
+      ]
+
+      environment = [
+        { name = "LITELLM_URL", value = "http://litellm.coder-production.local:4000" },
+        { name = "CODER_URL", value = "https://coder.${var.domain_name}" },
+      ]
+
+      secrets = [
+        {
+          name      = "LITELLM_MASTER_KEY"
+          valueFrom = module.secrets.litellm_master_key_secret_arn
+        },
+        {
+          name      = "PROVISIONER_SECRET"
+          valueFrom = module.secrets.provisioner_secret_arn
+        },
+      ]
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.key_provisioner.name
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "key-provisioner"
+        }
+      }
+    }
+  ])
+
+  tags = var.tags
+}
+
+resource "aws_ecs_service" "key_provisioner" {
+  name            = "${local.name_prefix}-key-provisioner"
+  cluster         = module.ecs.cluster_arn
+  task_definition = aws_ecs_task_definition.key_provisioner.arn
+  desired_count   = 1
+  launch_type     = "FARGATE"
+
+  network_configuration {
+    subnets          = module.vpc.private_app_subnet_ids
+    security_groups  = [aws_security_group.ecs_services.id]
+    assign_public_ip = false
+  }
+
+  service_registries {
+    registry_arn = aws_service_discovery_service.key_provisioner.arn
+  }
+
+  depends_on = [aws_ecs_service.litellm]
+
+  tags = var.tags
+}
+
+# =============================================================================
 # AUTHENTIK
 # =============================================================================
 

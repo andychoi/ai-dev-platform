@@ -380,6 +380,35 @@ services:
       retries: 3
 
   # ==========================================================================
+  # KEY PROVISIONER - Scoped LiteLLM key management microservice
+  # Isolates LiteLLM master key from workspace containers
+  # Workspaces call this to auto-provision virtual keys
+  # ==========================================================================
+  key-provisioner:
+    build:
+      context: ./key-provisioner
+      dockerfile: Dockerfile
+    container_name: key-provisioner
+    restart: unless-stopped
+    depends_on:
+      litellm:
+        condition: service_healthy
+    environment:
+      - LITELLM_URL=http://litellm:4000
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-poc-litellm-master-key-change-in-production}
+      - PROVISIONER_SECRET=${PROVISIONER_SECRET:-}
+      - CODER_URL=http://coder-server:7080
+    ports:
+      - "8100:8100"
+    networks:
+      - coder-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ==========================================================================
   # AUTHENTIK - Identity Provider & RBAC
   # Provides SSO, RBAC, approval workflows for contractor access
   # Optional Azure AD federation supported

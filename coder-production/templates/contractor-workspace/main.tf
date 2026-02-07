@@ -120,19 +120,21 @@ data "coder_parameter" "git_repo" {
 data "coder_parameter" "ai_assistant" {
   name         = "ai_assistant"
   display_name = "AI Assistant"
-  description  = "Enable Roo Code AI agent"
+  description  = "AI coding agent for development assistance"
   type         = "string"
-  default      = "roo-code"
+  default      = "both"
   mutable      = true
 
-  option { name = "Roo Code (Enabled)";  value = "roo-code" }
-  option { name = "None (Disabled)";     value = "none" }
+  option { name = "Roo Code + OpenCode (Recommended)"; value = "both" }
+  option { name = "Roo Code Only";                     value = "roo-code" }
+  option { name = "OpenCode CLI Only";                 value = "opencode" }
+  option { name = "None (Disabled)";                   value = "none" }
 }
 
 data "coder_parameter" "litellm_api_key" {
   name         = "litellm_api_key"
   display_name = "AI API Key"
-  description  = "LiteLLM virtual key (provided by admin)"
+  description  = "Leave empty for auto-provisioning, or paste a key from your admin"
   type         = "string"
   default      = ""
   mutable      = true
@@ -185,6 +187,9 @@ locals {
 
   # LiteLLM endpoint via Cloud Map service discovery
   litellm_url = "http://litellm.coder-production.local:4000"
+
+  # Key Provisioner endpoint via Cloud Map
+  key_provisioner_url = "http://key-provisioner.coder-production.local:8100"
 }
 
 # =============================================================================
@@ -215,31 +220,85 @@ resource "coder_agent" "main" {
       fi
     fi
 
-    # Configure Roo Code AI agent
-    if [ "${data.coder_parameter.ai_assistant.value}" = "roo-code" ] && [ -n "${data.coder_parameter.litellm_api_key.value}" ]; then
-      mkdir -p "$HOME/.config/roo-code"
-      cat > "$HOME/.config/roo-code/settings.json" <<ROOEOF
+    # Configure AI agents
+    AI_ASSISTANT="${data.coder_parameter.ai_assistant.value}"
+    LITELLM_KEY="${data.coder_parameter.litellm_api_key.value}"
+    LITELLM_MODEL="${local.ai_model_id}"
+    LITELLM_URL="${local.litellm_url}"
+    PROVISIONER_URL="${local.key_provisioner_url}"
+
+    if [ "$AI_ASSISTANT" != "none" ]; then
+      # Auto-provision key if not provided
+      if [ -z "$LITELLM_KEY" ] && [ -n "$PROVISIONER_SECRET" ]; then
+        echo "Auto-provisioning AI API key..."
+        for attempt in 1 2 3; do
+          RESPONSE=$(curl -sf -X POST "$PROVISIONER_URL/api/v1/keys/workspace" \
+            -H "Authorization: Bearer $PROVISIONER_SECRET" \
+            -H "Content-Type: application/json" \
+            -d "{\"workspace_id\": \"${data.coder_workspace.me.id}\", \"username\": \"${data.coder_workspace_owner.me.name}\", \"workspace_name\": \"${data.coder_workspace.me.name}\"}" \
+            2>/dev/null) && break
+          echo "Key provisioner not ready (attempt $attempt/3), retrying in 5s..."
+          sleep 5
+        done
+
+        if [ -n "$RESPONSE" ]; then
+          LITELLM_KEY=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('key',''))" 2>/dev/null || echo "")
+          [ -n "$LITELLM_KEY" ] && echo "AI API key provisioned"
+        fi
+      fi
+
+      if [ -n "$LITELLM_KEY" ]; then
+        # --- Roo Code configuration ---
+        if [ "$AI_ASSISTANT" = "roo-code" ] || [ "$AI_ASSISTANT" = "both" ]; then
+          mkdir -p "$HOME/.config/roo-code"
+          cat > "$HOME/.config/roo-code/settings.json" <<ROOEOF
     {
       "providerProfiles": {
         "currentApiConfigName": "litellm",
         "apiConfigs": {
           "litellm": {
             "apiProvider": "openai",
-            "openAiBaseUrl": "${local.litellm_url}/v1",
-            "openAiApiKey": "${data.coder_parameter.litellm_api_key.value}",
-            "openAiModelId": "${local.ai_model_id}",
+            "openAiBaseUrl": "$LITELLM_URL/v1",
+            "openAiApiKey": "$LITELLM_KEY",
+            "openAiModelId": "$LITELLM_MODEL",
             "id": "litellm-default"
           }
         }
       }
     }
     ROOEOF
+        fi
 
-      # Set env vars for CLI tools
-      echo "export AI_GATEWAY_URL=${local.litellm_url}" >> "$HOME/.bashrc"
-      echo "export OPENAI_API_BASE=${local.litellm_url}/v1" >> "$HOME/.bashrc"
-      echo "export OPENAI_API_KEY=${data.coder_parameter.litellm_api_key.value}" >> "$HOME/.bashrc"
-      echo "export AI_MODEL=${local.ai_model_id}" >> "$HOME/.bashrc"
+        # --- OpenCode CLI configuration ---
+        if [ "$AI_ASSISTANT" = "opencode" ] || [ "$AI_ASSISTANT" = "both" ]; then
+          if command -v opencode >/dev/null 2>&1; then
+            mkdir -p "$HOME/.config/opencode"
+            cat > "$HOME/.config/opencode/config.json" <<OCEOF
+    {
+      "provider": {
+        "litellm": {
+          "npm": "@ai-sdk/openai-compatible",
+          "options": {
+            "baseURL": "$LITELLM_URL/v1",
+            "apiKey": "$LITELLM_KEY"
+          }
+        }
+      },
+      "model": {
+        "big": "litellm/$LITELLM_MODEL",
+        "small": "litellm/claude-haiku-4-5"
+      }
+    }
+    OCEOF
+          fi
+        fi
+
+        # --- Environment variables ---
+        echo "export AI_GATEWAY_URL=$LITELLM_URL" >> "$HOME/.bashrc"
+        echo "export OPENAI_API_BASE=$LITELLM_URL/v1" >> "$HOME/.bashrc"
+        echo "export OPENAI_API_KEY=$LITELLM_KEY" >> "$HOME/.bashrc"
+        echo "export AI_MODEL=$LITELLM_MODEL" >> "$HOME/.bashrc"
+      fi
     fi
   EOT
 }

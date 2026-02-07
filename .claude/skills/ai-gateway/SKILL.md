@@ -14,16 +14,21 @@ AI capabilities in Coder workspaces are provided by **Roo Code** (VS Code extens
 ## Architecture
 
 ```
-Workspace (code-server)
-  └─ Roo Code Extension
+Workspace (code-server + terminal)
+  ├─ Roo Code Extension (VS Code sidebar)
+  └─ OpenCode CLI (terminal TUI)
      └─ OpenAI-compatible API (apiProvider: "openai")
         └─ LiteLLM Proxy (litellm:4000)
            ├─ Virtual Key Validation
-           ├─ Budget Enforcement ($10/user default)
+           ├─ Budget Enforcement ($10/workspace default)
            ├─ Rate Limiting (60 RPM default)
            └─ Provider Routing
               ├─ Anthropic Direct API (ANTHROPIC_API_KEY)
               └─ AWS Bedrock (AWS credentials)
+
+Key Provisioning:
+  Workspace startup → Key Provisioner (key-provisioner:8100) → LiteLLM /key/generate
+  (auto-provisions scoped virtual key; master key never exposed to workspaces)
 ```
 
 ## Access
@@ -60,29 +65,35 @@ grep "^ANTHROPIC_API_KEY=" coder-poc/.env
 cd coder-poc && docker compose up -d litellm
 ```
 
-### Virtual Keys Required per User
+### Virtual Keys — Auto-Provisioned
 
-Each workspace user needs a LiteLLM virtual key. Generate keys:
+Workspace keys are **auto-provisioned** by the key-provisioner service (port 8100). Leave the "AI API Key" parameter empty — a scoped key is generated on workspace start.
+
+For manual or self-service key generation:
 
 ```bash
-# Run the setup script
-cd coder-poc && ./scripts/setup-litellm-keys.sh
+# Self-service (requires Coder session token)
+./scripts/generate-ai-key.sh
 
-# Or generate individually
-curl http://localhost:4000/key/generate \
-  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"user_id":"contractor1","max_budget":10.00,"rpm_limit":60}'
+# Admin: CI/agent service keys
+./scripts/manage-service-keys.sh create ci frontend-repo
+./scripts/manage-service-keys.sh create agent review
+
+# Legacy bootstrap
+./scripts/setup-litellm-keys.sh
 ```
 
-## Roo Code Configuration
+See `skills/key-management/SKILL.md` for full key taxonomy and management.
+
+## AI Agent Configuration
 
 ### How It Works
 
-1. User provides their LiteLLM virtual key as workspace parameter
-2. Startup script generates `/home/coder/.config/roo-code/settings.json`
-3. VS Code setting `roo-cline.autoImportSettingsPath` points to that file
-4. Roo Code auto-imports the provider profile on activation
+1. Workspace starts → key auto-provisioned (or user provides one)
+2. Startup script generates Roo Code config + OpenCode config
+3. Roo Code: `/home/coder/.config/roo-code/settings.json` (auto-import via `roo-cline.autoImportSettingsPath`)
+4. OpenCode: `/home/coder/.config/opencode/config.json`
+5. Both tools use same LiteLLM virtual key and endpoint
 
 ### Config Format (providerProfiles)
 
@@ -147,8 +158,12 @@ Extensions removed in Dockerfile: `github.copilot`, `github.copilot-chat`, `sour
 | `coder-poc/templates/contractor-workspace/main.tf` | Workspace template with AI params |
 | `coder-poc/templates/contractor-workspace/build/settings.json` | VS Code settings |
 | `coder-poc/templates/contractor-workspace/build/Dockerfile` | Extension installation |
-| `coder-poc/scripts/setup-litellm-keys.sh` | Virtual key generation |
+| `coder-poc/key-provisioner/app.py` | Key provisioner microservice |
+| `coder-poc/scripts/setup-litellm-keys.sh` | Bootstrap key generation |
+| `coder-poc/scripts/generate-ai-key.sh` | Self-service key generation |
+| `coder-poc/scripts/manage-service-keys.sh` | CI/agent key management |
 | `coder-poc/docs/ROO-CODE-LITELLM.md` | Full setup documentation |
+| `coder-poc/docs/KEY-MANAGEMENT.md` | Key management documentation |
 | (in workspace) `/home/coder/.config/roo-code/settings.json` | Generated Roo Code config |
 
 ## Verification Commands

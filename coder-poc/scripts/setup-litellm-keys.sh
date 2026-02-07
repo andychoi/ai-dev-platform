@@ -94,8 +94,11 @@ except:
       \"max_budget\": $budget,
       \"rpm_limit\": $rpm,
       \"metadata\": {
+        \"scope\": \"user:$username\",
+        \"key_type\": \"user\",
         \"workspace_user\": \"$username\",
-        \"created_by\": \"setup-script\"
+        \"created_by\": \"setup-litellm-keys\",
+        \"purpose\": \"bootstrap key (setup script)\"
       }
     }" 2>/dev/null || echo "{}")
 
