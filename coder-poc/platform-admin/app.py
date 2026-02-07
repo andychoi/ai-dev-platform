@@ -8,6 +8,7 @@ Unified administration interface for the Coder WebIDE Platform
 - AI usage tracking
 """
 
+import json
 import os
 import math
 import psycopg2
@@ -1503,6 +1504,125 @@ def api_bucket_details(bucket_name):
         })
     except S3Error as e:
         return jsonify({'error': str(e)}), 404
+
+
+# =============================================================================
+# AI Keys Management
+# =============================================================================
+
+LITELLM_URL = os.environ.get('LITELLM_URL', 'http://litellm:4000')
+LITELLM_MASTER_KEY = os.environ.get('LITELLM_MASTER_KEY', '')
+
+@app.route('/ai-keys')
+@require_auth
+def ai_keys():
+    """AI API key management page — lists all LiteLLM virtual keys with spend/budget."""
+    keys = []
+    error = None
+    try:
+        conn = get_litellm_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("""
+            SELECT
+                token,
+                key_name,
+                key_alias,
+                spend,
+                max_budget,
+                metadata,
+                expires,
+                models,
+                tpm_limit,
+                rpm_limit,
+                max_parallel_requests,
+                budget_duration,
+                created_at,
+                updated_at
+            FROM "LiteLLM_VerificationToken"
+            ORDER BY key_alias NULLS LAST, created_at DESC
+        """)
+        keys = cur.fetchall()
+        conn.close()
+
+        # Parse metadata JSON
+        for k in keys:
+            if isinstance(k.get('metadata'), str):
+                try:
+                    k['metadata'] = json.loads(k['metadata'])
+                except Exception:
+                    k['metadata'] = {}
+            elif k.get('metadata') is None:
+                k['metadata'] = {}
+
+    except Exception as e:
+        app.logger.error(f"Failed to fetch AI keys: {e}")
+        error = str(e)
+
+    return render_template('ai_keys.html',
+                           keys=keys,
+                           error=error,
+                           current_user=session.get('user'))
+
+
+@app.route('/api/ai-keys/revoke', methods=['POST'])
+@require_auth
+def revoke_ai_key():
+    """Revoke (delete) an AI key by its token hash."""
+    data = request.get_json()
+    token_hash = data.get('token')
+    if not token_hash or not LITELLM_MASTER_KEY:
+        return jsonify({'error': 'Missing token or master key not configured'}), 400
+
+    try:
+        resp = requests.post(
+            f"{LITELLM_URL}/key/delete",
+            headers={"Authorization": f"Bearer {LITELLM_MASTER_KEY}",
+                     "Content-Type": "application/json"},
+            json={"keys": [token_hash]},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            return jsonify({'success': True})
+        return jsonify({'error': resp.text}), resp.status_code
+    except Exception as e:
+        return jsonify({'error': str(e)}), 502
+
+
+@app.route('/api/ai-keys/generate', methods=['POST'])
+@require_auth
+def generate_ai_key():
+    """Generate a new AI key via key-provisioner self-service endpoint."""
+    data = request.get_json()
+    alias = data.get('alias', '')
+    scope = data.get('scope', 'user')
+
+    if not PROVISIONER_SECRET:
+        return jsonify({'error': 'PROVISIONER_SECRET not configured'}), 500
+
+    try:
+        # Use key-provisioner to create a properly scoped key
+        resp = requests.post(
+            f"{KEY_PROVISIONER_URL}/api/v1/keys/workspace",
+            headers={"Authorization": f"Bearer {PROVISIONER_SECRET}",
+                     "Content-Type": "application/json"},
+            json={
+                "workspace_id": alias or "admin-generated",
+                "workspace_name": alias,
+                "username": alias,
+                "scope": scope,
+            },
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            result = resp.json()
+            return jsonify({
+                'success': True,
+                'key': result.get('key', ''),
+                'alias': result.get('alias', alias),
+            })
+        return jsonify({'error': resp.text}), resp.status_code
+    except Exception as e:
+        return jsonify({'error': str(e)}), 502
 
 
 if __name__ == '__main__':

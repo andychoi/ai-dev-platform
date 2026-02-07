@@ -240,6 +240,9 @@ services:
       MINIO_URL: http://minio:9002
       AI_GATEWAY_URL: http://litellm:4000
       AUTHENTIK_URL: http://authentik-server:9000
+      # LiteLLM admin API (for AI Keys management)
+      LITELLM_URL: http://litellm:4000
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-}
       # Key Provisioner (for admin reset actions)
       KEY_PROVISIONER_URL: http://key-provisioner:8100
       PROVISIONER_SECRET: ${PROVISIONER_SECRET:-}
