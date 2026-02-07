@@ -617,15 +617,11 @@ ENFORCEMENTMD
         "apiKey": "$LITELLM_KEY"
       },
       "models": {
-        "claude-sonnet-4-5": {
-          "name": "Claude Sonnet 4.5"
-        },
-        "claude-haiku-4-5": {
-          "name": "Claude Haiku 4.5"
-        },
-        "claude-opus-4": {
-          "name": "Claude Opus 4"
-        }
+        "claude-sonnet-4-5": { "name": "Claude Sonnet 4.5" },
+        "claude-haiku-4-5": { "name": "Claude Haiku 4.5" },
+        "claude-opus-4": { "name": "Claude Opus 4" },
+        "bedrock-claude-sonnet": { "name": "Bedrock Claude Sonnet" },
+        "bedrock-claude-haiku": { "name": "Bedrock Claude Haiku" }
       }
     }
   },
