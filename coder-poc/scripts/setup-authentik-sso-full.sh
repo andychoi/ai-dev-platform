@@ -114,6 +114,8 @@ MINIO_CLIENT_ID=""
 MINIO_CLIENT_SECRET=""
 PLATFORM_ADMIN_CLIENT_ID=""
 PLATFORM_ADMIN_CLIENT_SECRET=""
+LITELLM_CLIENT_ID=""
+LITELLM_CLIENT_SECRET=""
 
 # Get authorization flow
 AUTH_FLOW=$(api_call GET '/flows/instances/?designation=authorization' | python3 -c 'import sys,json; r=json.load(sys.stdin)["results"]; print(r[0]["pk"] if r else "")' 2>/dev/null)
@@ -188,6 +190,10 @@ for p in data.get('results', []):
             PLATFORM_ADMIN_CLIENT_ID="$CLIENT_ID"
             PLATFORM_ADMIN_CLIENT_SECRET="$CLIENT_SECRET"
             ;;
+        litellm)
+            LITELLM_CLIENT_ID="$CLIENT_ID"
+            LITELLM_CLIENT_SECRET="$CLIENT_SECRET"
+            ;;
     esac
 
     # Link to application (use slug in URL for reliability)
@@ -206,6 +212,7 @@ create_oauth_provider "Coder OIDC" "coder" "http://localhost:7080/api/v2/users/o
 create_oauth_provider "Gitea OIDC" "gitea" "http://localhost:3000/user/oauth2/Authentik/callback"
 create_oauth_provider "MinIO OIDC" "minio" "http://localhost:9001/oauth_callback"
 create_oauth_provider "Platform Admin OIDC" "platform-admin" "http://localhost:5050/auth/callback"
+create_oauth_provider "LiteLLM OIDC" "litellm" "http://localhost:4000/sso/callback"
 
 echo -e "${GREEN}✓ OAuth2 providers created${NC}"
 
@@ -252,6 +259,10 @@ PLATFORM_ADMIN_OIDC_ISSUER_URL=${AUTHENTIK_INTERNAL_URL}/application/o/platform-
 PLATFORM_ADMIN_OIDC_CLIENT_ID=${PLATFORM_ADMIN_CLIENT_ID}
 PLATFORM_ADMIN_OIDC_CLIENT_SECRET=${PLATFORM_ADMIN_CLIENT_SECRET}
 
+# LiteLLM Admin UI OIDC
+LITELLM_OIDC_CLIENT_ID=${LITELLM_CLIENT_ID}
+LITELLM_OIDC_CLIENT_SECRET=${LITELLM_CLIENT_SECRET}
+
 EOF
 
 echo -e "${GREEN}✓ Configuration saved to ${SSO_ENV_FILE}${NC}"
@@ -285,6 +296,8 @@ if [ -f "$ENV_FILE" ]; then
     update_env_var "MINIO_IDENTITY_OPENID_CLIENT_SECRET" "$MINIO_CLIENT_SECRET"
     update_env_var "PLATFORM_ADMIN_OIDC_CLIENT_ID" "$PLATFORM_ADMIN_CLIENT_ID"
     update_env_var "PLATFORM_ADMIN_OIDC_CLIENT_SECRET" "$PLATFORM_ADMIN_CLIENT_SECRET"
+    update_env_var "LITELLM_OIDC_CLIENT_ID" "$LITELLM_CLIENT_ID"
+    update_env_var "LITELLM_OIDC_CLIENT_SECRET" "$LITELLM_CLIENT_SECRET"
 
     # Clean up sed backup file
     rm -f "${ENV_FILE}.bak"
@@ -326,6 +339,7 @@ echo "Coder:          ID=${CODER_CLIENT_ID}"
 echo "Gitea:          ID=${GITEA_CLIENT_ID}"
 echo "MinIO:          ID=${MINIO_CLIENT_ID}"
 echo "Platform Admin: ID=${PLATFORM_ADMIN_CLIENT_ID}"
+echo "LiteLLM:        ID=${LITELLM_CLIENT_ID}"
 echo ""
 echo "Files updated:"
 echo "  - ${ENV_FILE} (OIDC secrets for Docker Compose)"
@@ -354,7 +368,8 @@ echo "3. Test SSO login:"
 echo "   - Coder: https://host.docker.internal:7443 (accept cert warning, click 'Login with OIDC')"
 echo "     NOTE: HTTPS required for extension webviews. Accept the self-signed cert warning."
 echo "   - MinIO: http://localhost:9001 (click 'Login with SSO')"
-echo "   - Platform Admin: http://localhost:5050 (click 'Sign in with Authentik SSO')"
+echo "   - Platform Admin: http://localhost:5050 (click 'Sign in with Authentik SSO')
+   - LiteLLM:        http://localhost:4000/ui (click 'SSO Login')"
 echo ""
 echo "4. Local fallback accounts (if Authentik is down):"
 echo "   - Coder: admin@example.com / CoderAdmin123!"

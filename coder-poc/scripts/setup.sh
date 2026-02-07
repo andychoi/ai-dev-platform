@@ -197,6 +197,7 @@ apps = [
     {'name': 'Gitea', 'slug': 'gitea', 'provider_name': 'Gitea OIDC'},
     {'name': 'MinIO', 'slug': 'minio', 'provider_name': 'MinIO OIDC'},
     {'name': 'Platform Admin', 'slug': 'platform-admin', 'provider_name': 'Platform Admin OIDC'},
+    {'name': 'LiteLLM', 'slug': 'litellm', 'provider_name': 'LiteLLM OIDC'},
 ]
 
 for a in apps:

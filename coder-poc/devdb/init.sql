@@ -6,6 +6,9 @@
 -- Create extension for UUID generation
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
+-- dblink allows CREATE DATABASE outside the calling transaction
+CREATE EXTENSION IF NOT EXISTS dblink;
+
 -- =============================================================================
 -- PROVISIONING SCHEMA
 -- Stores metadata about provisioned databases
@@ -41,6 +44,7 @@ CREATE TABLE IF NOT EXISTS provisioning.db_users (
 
 -- Function to create an individual developer database
 -- Note: Uses trust-based auth for internal network (no password required)
+-- Uses dblink for CREATE DATABASE/USER (cannot run inside a transaction)
 CREATE OR REPLACE FUNCTION provisioning.create_individual_db(
     p_username VARCHAR(64),
     p_workspace_id VARCHAR(64) DEFAULT NULL
@@ -55,26 +59,26 @@ BEGIN
 
     -- Check if database already exists
     IF EXISTS (SELECT 1 FROM pg_database WHERE datname = v_db_name) THEN
-        -- Database exists, just return connection info
-        -- Update last accessed time
         UPDATE provisioning.databases
         SET last_accessed = CURRENT_TIMESTAMP,
             workspace_id = COALESCE(p_workspace_id, workspace_id)
         WHERE db_name = v_db_name;
 
-        -- Return existing info (no password needed - trust auth)
         RETURN QUERY SELECT v_db_name::VARCHAR, v_db_user::VARCHAR, ''::VARCHAR;
         RETURN;
     END IF;
 
-    -- Create the database
-    EXECUTE format('CREATE DATABASE %I OWNER devdb_admin', v_db_name);
+    -- CREATE DATABASE/USER via dblink (runs outside this transaction)
+    PERFORM dblink_exec('dbname=' || current_database() || ' user=devdb_admin',
+        format('CREATE DATABASE %I OWNER devdb_admin', v_db_name));
 
-    -- Create dedicated user for this database (no password - trust auth for internal network)
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = v_db_user) THEN
-        EXECUTE format('CREATE USER %I', v_db_user);
+        PERFORM dblink_exec('dbname=' || current_database() || ' user=devdb_admin',
+            format('CREATE USER %I', v_db_user));
     END IF;
-    EXECUTE format('GRANT ALL PRIVILEGES ON DATABASE %I TO %I', v_db_name, v_db_user);
+
+    PERFORM dblink_exec('dbname=' || current_database() || ' user=devdb_admin',
+        format('GRANT ALL PRIVILEGES ON DATABASE %I TO %I', v_db_name, v_db_user));
 
     -- Record in provisioning table
     INSERT INTO provisioning.databases (db_name, db_type, owner_username, workspace_id)
@@ -83,13 +87,13 @@ BEGIN
     INSERT INTO provisioning.db_users (username, db_name, access_level)
     VALUES (p_username, v_db_name, 'owner');
 
-    -- Return connection info (no password for trust auth)
     RETURN QUERY SELECT v_db_name::VARCHAR, v_db_user::VARCHAR, ''::VARCHAR;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Function to create a team/shared database
 -- Note: Uses trust-based auth for internal network (no password required)
+-- Uses dblink for CREATE DATABASE/USER (cannot run inside a transaction)
 CREATE OR REPLACE FUNCTION provisioning.create_team_db(
     p_template_name VARCHAR(64),
     p_owner_username VARCHAR(64) DEFAULT NULL
@@ -104,7 +108,6 @@ BEGIN
 
     -- Check if database already exists
     IF EXISTS (SELECT 1 FROM pg_database WHERE datname = v_db_name) THEN
-        -- Database exists, return connection info
         UPDATE provisioning.databases
         SET last_accessed = CURRENT_TIMESTAMP
         WHERE db_name = v_db_name;
@@ -113,14 +116,17 @@ BEGIN
         RETURN;
     END IF;
 
-    -- Create the database
-    EXECUTE format('CREATE DATABASE %I OWNER devdb_admin', v_db_name);
+    -- CREATE DATABASE/USER via dblink (runs outside this transaction)
+    PERFORM dblink_exec('dbname=' || current_database() || ' user=devdb_admin',
+        format('CREATE DATABASE %I OWNER devdb_admin', v_db_name));
 
-    -- Create dedicated user for this database (no password - trust auth)
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = v_db_user) THEN
-        EXECUTE format('CREATE USER %I', v_db_user);
+        PERFORM dblink_exec('dbname=' || current_database() || ' user=devdb_admin',
+            format('CREATE USER %I', v_db_user));
     END IF;
-    EXECUTE format('GRANT ALL PRIVILEGES ON DATABASE %I TO %I', v_db_name, v_db_user);
+
+    PERFORM dblink_exec('dbname=' || current_database() || ' user=devdb_admin',
+        format('GRANT ALL PRIVILEGES ON DATABASE %I TO %I', v_db_name, v_db_user));
 
     -- Record in provisioning table
     INSERT INTO provisioning.databases (db_name, db_type, template_name, owner_username)
@@ -131,7 +137,6 @@ BEGIN
         VALUES (p_owner_username, v_db_name, 'owner');
     END IF;
 
-    -- Return connection info (no password for trust auth)
     RETURN QUERY SELECT v_db_name::VARCHAR, v_db_user::VARCHAR, ''::VARCHAR;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -153,18 +158,18 @@ BEGIN
         RAISE EXCEPTION 'Team database % not found', p_db_name;
     END IF;
 
-    -- Create user-specific login if doesn't exist
+    -- Create user-specific login if doesn't exist (via dblink)
     v_db_user := lower(regexp_replace(p_username, '[^a-zA-Z0-9]', '_', 'g'));
 
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = v_db_user) THEN
-        EXECUTE format('CREATE USER %I WITH PASSWORD %L',
-            v_db_user, encode(gen_random_bytes(16), 'hex'));
+        PERFORM dblink_exec('dbname=' || current_database() || ' user=devdb_admin',
+            format('CREATE USER %I WITH PASSWORD %L',
+                v_db_user, encode(gen_random_bytes(16), 'hex')));
     END IF;
 
     -- Grant appropriate access
     IF p_access_level = 'read' THEN
         EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I', p_db_name, v_db_user);
-        -- Note: GRANT SELECT on tables must be done within the target database
     ELSE
         EXECUTE format('GRANT ALL PRIVILEGES ON DATABASE %I TO %I', p_db_name, v_db_user);
     END IF;

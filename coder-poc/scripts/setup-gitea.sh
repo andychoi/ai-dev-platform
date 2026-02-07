@@ -73,22 +73,93 @@ gitea_api() {
 echo ""
 echo -e "${BLUE}Setting up admin user...${NC}"
 
-docker exec gitea /bin/sh -c "
-    # Check if admin exists
-    if ! gitea admin user list 2>/dev/null | grep -q '${GITEA_ADMIN_USER}'; then
-        gitea admin user create \
-            --username '${GITEA_ADMIN_USER}' \
-            --password '${GITEA_ADMIN_PASSWORD}' \
-            --email '${GITEA_ADMIN_EMAIL}' \
-            --admin \
-            --must-change-password=false 2>/dev/null || true
-        echo 'Admin user created'
-    else
-        echo 'Admin user already exists'
-    fi
-" 2>/dev/null || echo "Note: Could not create admin via CLI (may already exist)"
+docker exec -u git gitea gitea admin user list --config /data/gitea/conf/app.ini 2>/dev/null | grep -q "${GITEA_ADMIN_USER}" && {
+    echo "Admin user already exists"
+} || {
+    docker exec -u git gitea gitea admin user create \
+        --username "${GITEA_ADMIN_USER}" \
+        --password "${GITEA_ADMIN_PASSWORD}" \
+        --email "${GITEA_ADMIN_EMAIL}" \
+        --admin \
+        --must-change-password=false \
+        --config /data/gitea/conf/app.ini 2>/dev/null || true
+    echo "Admin user created"
+}
 
 echo -e "${GREEN}[OK]${NC} Admin user: ${GITEA_ADMIN_USER} / ${GITEA_ADMIN_PASSWORD}"
+
+# =============================================================================
+# Configure OIDC Authentication Source (Authentik)
+# =============================================================================
+echo ""
+echo -e "${BLUE}Configuring OIDC authentication (Authentik)...${NC}"
+
+GITEA_OIDC_CLIENT_ID="${GITEA_OIDC_CLIENT_ID:-gitea}"
+GITEA_OIDC_CLIENT_SECRET="${GITEA_OIDC_CLIENT_SECRET:-}"
+OIDC_DISCOVERY_URL="http://host.docker.internal:9000/application/o/gitea/.well-known/openid-configuration"
+
+# Source .env if client secret not set
+if [ -z "$GITEA_OIDC_CLIENT_SECRET" ] && [ -f "$POC_DIR/.env" ]; then
+    GITEA_OIDC_CLIENT_SECRET=$(grep '^GITEA_OIDC_CLIENT_SECRET=' "$POC_DIR/.env" 2>/dev/null | cut -d= -f2 | tr -d '"' | tr -d "'" || true)
+fi
+
+if [ -n "$GITEA_OIDC_CLIENT_SECRET" ]; then
+    # Check if auth source already exists
+    if docker exec -u git gitea gitea admin auth list --config /data/gitea/conf/app.ini 2>/dev/null | grep -q "Authentik"; then
+        echo -e "  ${YELLOW}[!]${NC} OIDC auth source 'Authentik' already exists"
+    else
+        docker exec -u git gitea gitea admin auth add-oauth \
+            --name "Authentik" \
+            --provider "openidConnect" \
+            --key "$GITEA_OIDC_CLIENT_ID" \
+            --secret "$GITEA_OIDC_CLIENT_SECRET" \
+            --auto-discover-url "$OIDC_DISCOVERY_URL" \
+            --scopes "openid" --scopes "profile" --scopes "email" \
+            --config /data/gitea/conf/app.ini 2>/dev/null
+        echo -e "  ${GREEN}[OK]${NC} OIDC auth source created (Authentik)"
+    fi
+else
+    echo -e "  ${YELLOW}[!]${NC} GITEA_OIDC_CLIENT_SECRET not set — skipping OIDC setup"
+    echo "       Run setup-authentik-sso-full.sh first, then re-run this script"
+fi
+
+# =============================================================================
+# Create Drone CI OAuth2 Application
+# =============================================================================
+echo ""
+echo -e "${BLUE}Configuring Drone CI OAuth2 application...${NC}"
+
+# Check if Drone OAuth2 app already exists
+EXISTING_APPS=$(gitea_api "GET" "/user/applications/oauth2" 2>/dev/null)
+if echo "$EXISTING_APPS" | grep -q '"Drone CI"'; then
+    echo -e "  ${YELLOW}[!]${NC} Drone CI OAuth2 app already exists"
+else
+    DRONE_APP_RESULT=$(gitea_api "POST" "/user/applications/oauth2" '{
+        "name": "Drone CI",
+        "redirect_uris": ["http://localhost:8080/login"]
+    }' 2>/dev/null)
+
+    if echo "$DRONE_APP_RESULT" | grep -q '"client_id"'; then
+        DRONE_CID=$(echo "$DRONE_APP_RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('client_id',''))" 2>/dev/null)
+        DRONE_CSEC=$(echo "$DRONE_APP_RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('client_secret',''))" 2>/dev/null)
+        echo -e "  ${GREEN}[OK]${NC} Drone CI OAuth2 app created"
+
+        # Update .env with Drone credentials
+        if [ -f "$POC_DIR/.env" ]; then
+            if grep -q "^DRONE_GITEA_CLIENT_ID=" "$POC_DIR/.env" 2>/dev/null; then
+                sed -i.bak "s|^DRONE_GITEA_CLIENT_ID=.*|DRONE_GITEA_CLIENT_ID=${DRONE_CID}|" "$POC_DIR/.env"
+                sed -i.bak "s|^DRONE_GITEA_CLIENT_SECRET=.*|DRONE_GITEA_CLIENT_SECRET=${DRONE_CSEC}|" "$POC_DIR/.env"
+            else
+                echo "DRONE_GITEA_CLIENT_ID=${DRONE_CID}" >> "$POC_DIR/.env"
+                echo "DRONE_GITEA_CLIENT_SECRET=${DRONE_CSEC}" >> "$POC_DIR/.env"
+            fi
+            rm -f "$POC_DIR/.env.bak"
+            echo -e "  ${GREEN}[OK]${NC} .env updated with Drone OAuth2 credentials"
+        fi
+    else
+        echo -e "  ${YELLOW}[!]${NC} Failed to create Drone CI OAuth2 app"
+    fi
+fi
 
 # Create contractor users via API
 echo ""
@@ -292,14 +363,16 @@ echo "  | private-project  | write       | none        | none        | none     
 echo "  | shared-libs      | read        | read        | write       | none     |"
 echo "  +------------------+-------------+-------------+-------------+----------+"
 echo ""
-echo "OIDC Configuration:"
-echo "  To configure OIDC with Authentik:"
-echo "  1. Go to Site Administration > Authentication Sources"
-echo "  2. Add New Source > OAuth2"
-echo "  3. Authentication Name: authentik"
-echo "  4. OAuth2 Provider: OpenID Connect"
-echo "  5. Client ID: gitea"
-echo "  6. Client Secret: (from .env.sso)"
-echo "  7. OpenID Connect Auto Discovery URL:"
-echo "     http://authentik-server:9000/application/o/gitea/.well-known/openid-configuration"
+echo "OIDC:"
+if [ -n "$GITEA_OIDC_CLIENT_SECRET" ]; then
+    echo "  SSO via Authentik is configured automatically."
+    echo "  Login at ${GITEA_URL} and click 'Sign in with Authentik'"
+else
+    echo "  OIDC not configured (client secret missing)."
+    echo "  Run setup-authentik-sso-full.sh, then re-run this script."
+fi
+echo ""
+echo "Drone CI:"
+echo "  OAuth2 app created in Gitea (credentials written to .env)"
+echo "  Restart Drone after setup: docker compose up -d drone-server"
 echo ""

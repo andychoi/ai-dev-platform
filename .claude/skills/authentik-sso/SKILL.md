@@ -45,22 +45,23 @@ All test users have password: `password123`
 
 | Application | Client ID | Redirect URI |
 |-------------|-----------|--------------|
-| Coder | `coder` | `http://localhost:7080/api/v2/users/oidc/callback` |
+| Coder | `coder` | `https://host.docker.internal:7443/api/v2/users/oidc/callback` |
 | Gitea | `gitea` | `http://localhost:3000/user/oauth2/Authentik/callback` |
 | MinIO | `minio` | `http://localhost:9001/oauth_callback` |
 | Platform Admin | `platform-admin` | `http://localhost:5050/auth/callback` |
+| LiteLLM | `litellm` | `http://localhost:4000/sso/callback` |
 
 ### OIDC Endpoints
 
 | Endpoint | URL Pattern |
 |----------|-------------|
-| Discovery | `http://authentik-server:9000/application/o/{app}/.well-known/openid-configuration` |
-| Authorization | `http://authentik-server:9000/application/o/authorize/` |
-| Token | `http://authentik-server:9000/application/o/token/` |
-| User Info | `http://authentik-server:9000/application/o/userinfo/` |
+| Discovery | `http://host.docker.internal:9000/application/o/{app}/.well-known/openid-configuration` |
+| Authorization | `http://host.docker.internal:9000/application/o/authorize/` |
+| Token | `http://host.docker.internal:9000/application/o/token/` |
+| User Info | `http://host.docker.internal:9000/application/o/userinfo/` |
 | End Session | `http://localhost:9000/application/o/{app}/end-session/` |
 
-**Note:** Internal services use `authentik-server:9000`, browsers use `localhost:9000`.
+**Note:** Always use `host.docker.internal:9000` — it works for both containers and browser. Never use `authentik-server:9000` (browser can't resolve Docker service names).
 
 ## Managing Users
 

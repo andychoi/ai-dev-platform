@@ -207,18 +207,24 @@ services:
       MINIO_URL: http://minio:9002
       AI_GATEWAY_URL: http://litellm:4000
       AUTHENTIK_URL: http://authentik-server:9000
-      # Admin credentials
+      # Admin credentials (local fallback when OIDC is unavailable)
       ADMIN_USERNAME: ${PLATFORM_ADMIN_USER:-admin}
       ADMIN_PASSWORD: ${PLATFORM_ADMIN_PASSWORD:-admin123}
+      # OIDC via Authentik (created by setup-authentik-sso-full.sh)
+      # Uses host.docker.internal so browser can reach Authentik's auth endpoint
+      OIDC_ISSUER_URL: http://host.docker.internal:9000/application/o/platform-admin/
+      OIDC_CLIENT_ID: ${PLATFORM_ADMIN_OIDC_CLIENT_ID:-platform-admin}
+      OIDC_CLIENT_SECRET: ${PLATFORM_ADMIN_OIDC_CLIENT_SECRET:-}
     ports:
       - "5050:5000"
     networks:
       - coder-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 10s
 
   # ==========================================================================
   # GITEA - Self-hosted Git Server with native OIDC support
@@ -260,14 +266,16 @@ services:
       gitea:
         condition: service_healthy
     environment:
-      - DRONE_GITEA_SERVER=http://gitea:3000
+      - DRONE_GITEA_SERVER=http://host.docker.internal:3000
+      - DRONE_GITEA_CLIENT_ID=${DRONE_GITEA_CLIENT_ID}
+      - DRONE_GITEA_CLIENT_SECRET=${DRONE_GITEA_CLIENT_SECRET}
       - DRONE_RPC_SECRET=${DRONE_RPC_SECRET:-super-secret-rpc-key}
       - DRONE_SERVER_HOST=${DRONE_SERVER_HOST:-localhost:8080}
       - DRONE_SERVER_PROTO=http
       - DRONE_DATABASE_DRIVER=sqlite3
       - DRONE_DATABASE_DATASOURCE=/data/database.sqlite
       - DRONE_GIT_ALWAYS_AUTH=false
-      - DRONE_USER_CREATE=username:admin,admin:true
+      - DRONE_USER_CREATE=username:gitea,admin:true
     ports:
       - "8080:80"
     volumes:
@@ -373,6 +381,14 @@ services:
       - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-lf_pk_poc_changeme}
       - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-lf_sk_poc_changeme}
       - LANGFUSE_HOST=http://langfuse-web:3000
+      # OIDC SSO for LiteLLM Admin UI (via Authentik)
+      - PROXY_BASE_URL=http://localhost:4000
+      - GENERIC_CLIENT_ID=${LITELLM_OIDC_CLIENT_ID:-litellm}
+      - GENERIC_CLIENT_SECRET=${LITELLM_OIDC_CLIENT_SECRET:-}
+      - GENERIC_AUTHORIZATION_ENDPOINT=http://host.docker.internal:9000/application/o/authorize/
+      - GENERIC_TOKEN_ENDPOINT=http://host.docker.internal:9000/application/o/token/
+      - GENERIC_USERINFO_ENDPOINT=http://host.docker.internal:9000/application/o/userinfo/
+      - GENERIC_SCOPE=openid profile email
     ports:
       - "4000:4000"
     volumes:
@@ -677,6 +693,14 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      # OIDC SSO via Authentik
+      MINIO_IDENTITY_OPENID_CONFIG_URL: http://host.docker.internal:9000/application/o/minio/.well-known/openid-configuration
+      MINIO_IDENTITY_OPENID_CLIENT_ID: ${MINIO_IDENTITY_OPENID_CLIENT_ID:-minio}
+      MINIO_IDENTITY_OPENID_CLIENT_SECRET: ${MINIO_IDENTITY_OPENID_CLIENT_SECRET:-}
+      MINIO_IDENTITY_OPENID_CLAIM_NAME: policy
+      MINIO_IDENTITY_OPENID_SCOPES: "openid,profile,email,minio"
+      MINIO_IDENTITY_OPENID_REDIRECT_URI: http://localhost:9001/oauth_callback
+      MINIO_IDENTITY_OPENID_DISPLAY_NAME: "Login with Authentik"
     ports:
       - "9001:9001"   # Console UI
       - "9002:9002"   # S3 API
