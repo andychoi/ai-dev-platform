@@ -1,0 +1,336 @@
+###############################################################################
+# IAM Module – Main
+#
+# Creates ECS task roles for Fargate services:
+#   - Shared task execution role (ECR pull, Secrets Manager, CloudWatch Logs)
+#   - coder-task-role        (Secrets Manager, S3, ECS provisioning, EFS)
+#   - litellm-task-role      (Bedrock invoke, Secrets Manager)
+#   - authentik-task-role    (Secrets Manager, SES)
+#   - workspace-task-role    (CloudWatch Logs only)
+###############################################################################
+
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
+
+data "aws_caller_identity" "current" {}
+data "aws_partition" "current" {}
+
+###############################################################################
+# Helper: ECS Task Trust Policy
+###############################################################################
+
+data "aws_iam_policy_document" "ecs_task_trust" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["ecs-tasks.amazonaws.com"]
+    }
+  }
+}
+
+###############################################################################
+# 1. Shared ECS Task Execution Role
+#
+# Used by ALL ECS services for:
+#   - Pulling images from ECR
+#   - Reading secrets from Secrets Manager (prod/*)
+#   - Writing logs to CloudWatch
+###############################################################################
+
+resource "aws_iam_role" "task_execution" {
+  name               = "${var.name_prefix}-ecs-task-execution"
+  assume_role_policy = data.aws_iam_policy_document.ecs_task_trust.json
+  tags               = var.tags
+}
+
+resource "aws_iam_role_policy_attachment" "task_execution_managed" {
+  role       = aws_iam_role.task_execution.name
+  policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+}
+
+data "aws_iam_policy_document" "task_execution" {
+  # Secrets Manager – read all prod/* secrets for container injection
+  statement {
+    sid    = "SecretsManagerRead"
+    effect = "Allow"
+    actions = [
+      "secretsmanager:GetSecretValue",
+      "secretsmanager:DescribeSecret",
+    ]
+    resources = [
+      "arn:${data.aws_partition.current.partition}:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:prod/*",
+    ]
+  }
+
+  # CloudWatch Logs – create and write log streams
+  statement {
+    sid    = "CloudWatchLogs"
+    effect = "Allow"
+    actions = [
+      "logs:CreateLogGroup",
+      "logs:CreateLogStream",
+      "logs:PutLogEvents",
+    ]
+    resources = [
+      "arn:${data.aws_partition.current.partition}:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/ecs/${var.name_prefix}*",
+      "arn:${data.aws_partition.current.partition}:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/ecs/${var.name_prefix}*:*",
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "task_execution" {
+  name   = "${var.name_prefix}-ecs-task-execution-policy"
+  role   = aws_iam_role.task_execution.id
+  policy = data.aws_iam_policy_document.task_execution.json
+}
+
+###############################################################################
+# 2. Coder Task Role
+#
+# Permissions:
+#   - Secrets Manager (coder secrets)
+#   - S3 (terraform state for workspace provisioning)
+#   - ECS (RunTask, DescribeTaskDefinition, DescribeServices,
+#          RegisterTaskDefinition – for workspace provisioning)
+#   - EFS (create access points for workspaces)
+###############################################################################
+
+resource "aws_iam_role" "coder" {
+  name               = "${var.name_prefix}-coder-task-role"
+  assume_role_policy = data.aws_iam_policy_document.ecs_task_trust.json
+  tags               = var.tags
+}
+
+data "aws_iam_policy_document" "coder" {
+  # Secrets Manager – read Coder-specific secrets
+  statement {
+    sid    = "SecretsManagerRead"
+    effect = "Allow"
+    actions = [
+      "secretsmanager:GetSecretValue",
+      "secretsmanager:DescribeSecret",
+    ]
+    resources = [
+      lookup(var.secrets_arns, "coder_database", "arn:${data.aws_partition.current.partition}:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:prod/coder/*"),
+      lookup(var.secrets_arns, "coder_oidc", "arn:${data.aws_partition.current.partition}:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:prod/coder/*"),
+    ]
+  }
+
+  # S3 – read/write to terraform state bucket (workspace provisioning)
+  statement {
+    sid    = "S3ReadWrite"
+    effect = "Allow"
+    actions = [
+      "s3:GetObject",
+      "s3:PutObject",
+      "s3:DeleteObject",
+      "s3:ListBucket",
+    ]
+    resources = [
+      lookup(var.s3_bucket_arns, "terraform_state", ""),
+      "${lookup(var.s3_bucket_arns, "terraform_state", "")}/*",
+    ]
+  }
+
+  # ECS – manage tasks and task definitions for workspace provisioning
+  statement {
+    sid    = "ECSWorkspaceProvisioning"
+    effect = "Allow"
+    actions = [
+      "ecs:RunTask",
+      "ecs:StopTask",
+      "ecs:DescribeTasks",
+      "ecs:DescribeTaskDefinition",
+      "ecs:DescribeServices",
+      "ecs:RegisterTaskDefinition",
+      "ecs:DeregisterTaskDefinition",
+      "ecs:ListTasks",
+    ]
+    resources = [
+      var.ecs_cluster_arn,
+      "${var.ecs_cluster_arn}/*",
+      "arn:${data.aws_partition.current.partition}:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:task-definition/${var.name_prefix}-workspace*",
+      "arn:${data.aws_partition.current.partition}:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:task/${var.name_prefix}-cluster/*",
+    ]
+  }
+
+  # IAM – pass execution role and workspace task role to ECS tasks
+  statement {
+    sid    = "IAMPassRole"
+    effect = "Allow"
+    actions = [
+      "iam:PassRole",
+    ]
+    resources = [
+      aws_iam_role.task_execution.arn,
+      aws_iam_role.workspace.arn,
+    ]
+    condition {
+      test     = "StringEquals"
+      variable = "iam:PassedToService"
+      values   = ["ecs-tasks.amazonaws.com"]
+    }
+  }
+
+  # EFS – create and manage access points for workspace volumes
+  statement {
+    sid    = "EFSAccessPoints"
+    effect = "Allow"
+    actions = [
+      "elasticfilesystem:CreateAccessPoint",
+      "elasticfilesystem:DeleteAccessPoint",
+      "elasticfilesystem:DescribeAccessPoints",
+      "elasticfilesystem:DescribeFileSystems",
+    ]
+    resources = [
+      var.efs_file_system_arn,
+      "${var.efs_file_system_arn}/*",
+      "arn:${data.aws_partition.current.partition}:elasticfilesystem:${var.aws_region}:${data.aws_caller_identity.current.account_id}:access-point/*",
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "coder" {
+  name   = "${var.name_prefix}-coder-task-role-policy"
+  role   = aws_iam_role.coder.id
+  policy = data.aws_iam_policy_document.coder.json
+}
+
+###############################################################################
+# 3. LiteLLM Task Role
+#
+# Permissions:
+#   - Bedrock (invoke models)
+#   - Secrets Manager (LiteLLM secrets)
+###############################################################################
+
+resource "aws_iam_role" "litellm" {
+  name               = "${var.name_prefix}-litellm-task-role"
+  assume_role_policy = data.aws_iam_policy_document.ecs_task_trust.json
+  tags               = var.tags
+}
+
+data "aws_iam_policy_document" "litellm" {
+  # Bedrock – invoke models in the configured region
+  statement {
+    sid    = "BedrockInvoke"
+    effect = "Allow"
+    actions = [
+      "bedrock:InvokeModel",
+      "bedrock:InvokeModelWithResponseStream",
+    ]
+    resources = [
+      "arn:${data.aws_partition.current.partition}:bedrock:${var.aws_region}::foundation-model/*",
+    ]
+  }
+
+  # Secrets Manager – read LiteLLM-specific secrets
+  statement {
+    sid    = "SecretsManagerRead"
+    effect = "Allow"
+    actions = [
+      "secretsmanager:GetSecretValue",
+      "secretsmanager:DescribeSecret",
+    ]
+    resources = [
+      lookup(var.secrets_arns, "litellm_master_key", "arn:${data.aws_partition.current.partition}:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:prod/litellm/*"),
+      lookup(var.secrets_arns, "litellm_anthropic_api_key", "arn:${data.aws_partition.current.partition}:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:prod/litellm/*"),
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "litellm" {
+  name   = "${var.name_prefix}-litellm-task-role-policy"
+  role   = aws_iam_role.litellm.id
+  policy = data.aws_iam_policy_document.litellm.json
+}
+
+###############################################################################
+# 4. Authentik Task Role
+#
+# Permissions:
+#   - Secrets Manager (Authentik secrets)
+#   - SES (send email)
+###############################################################################
+
+resource "aws_iam_role" "authentik" {
+  name               = "${var.name_prefix}-authentik-task-role"
+  assume_role_policy = data.aws_iam_policy_document.ecs_task_trust.json
+  tags               = var.tags
+}
+
+data "aws_iam_policy_document" "authentik" {
+  # Secrets Manager – read Authentik-specific secrets
+  statement {
+    sid    = "SecretsManagerRead"
+    effect = "Allow"
+    actions = [
+      "secretsmanager:GetSecretValue",
+      "secretsmanager:DescribeSecret",
+    ]
+    resources = [
+      lookup(var.secrets_arns, "authentik_secret_key", "arn:${data.aws_partition.current.partition}:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:prod/authentik/*"),
+    ]
+  }
+
+  # SES – send emails for authentication flows
+  statement {
+    sid    = "SESSendEmail"
+    effect = "Allow"
+    actions = [
+      "ses:SendEmail",
+      "ses:SendRawEmail",
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "authentik" {
+  name   = "${var.name_prefix}-authentik-task-role-policy"
+  role   = aws_iam_role.authentik.id
+  policy = data.aws_iam_policy_document.authentik.json
+}
+
+###############################################################################
+# 5. Workspace Task Role
+#
+# Minimal permissions – workspaces access LiteLLM via network,
+# not via IAM. Only CloudWatch Logs for observability.
+###############################################################################
+
+resource "aws_iam_role" "workspace" {
+  name               = "${var.name_prefix}-workspace-task-role"
+  assume_role_policy = data.aws_iam_policy_document.ecs_task_trust.json
+  tags               = var.tags
+}
+
+data "aws_iam_policy_document" "workspace" {
+  # CloudWatch Logs – write workspace logs
+  statement {
+    sid    = "CloudWatchLogs"
+    effect = "Allow"
+    actions = [
+      "logs:CreateLogStream",
+      "logs:PutLogEvents",
+    ]
+    resources = [
+      "arn:${data.aws_partition.current.partition}:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/ecs/${var.name_prefix}-workspace*",
+      "arn:${data.aws_partition.current.partition}:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/ecs/${var.name_prefix}-workspace*:*",
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "workspace" {
+  name   = "${var.name_prefix}-workspace-task-role-policy"
+  role   = aws_iam_role.workspace.id
+  policy = data.aws_iam_policy_document.workspace.json
+}

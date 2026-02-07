@@ -1,0 +1,205 @@
+# =============================================================================
+# Coder WebIDE Production — GitLab CI/CD Pipeline
+# Self-hosted GitLab with AWS Runner for ECR/ECS access
+# =============================================================================
+
+stages:
+  - validate
+  - build
+  - scan
+  - deploy
+  - post-deploy
+
+variables:
+  AWS_REGION: us-west-2
+  ECS_CLUSTER: coder-production-cluster
+  ECR_REPO: "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/coder-workspace"
+
+# =============================================================================
+# Terraform — Infrastructure
+# =============================================================================
+
+terraform-validate:
+  stage: validate
+  tags: [aws-runner]
+  image: hashicorp/terraform:1.7
+  script:
+    - cd terraform
+    - terraform init -backend=false
+    - terraform validate
+    - terraform fmt -check -recursive
+  rules:
+    - if: $CI_MERGE_REQUEST_IID
+      changes: [terraform/**/*]
+
+terraform-plan:
+  stage: build
+  tags: [aws-runner]
+  image: hashicorp/terraform:1.7
+  script:
+    - cd terraform
+    - terraform init
+    - terraform plan -out=tfplan
+  artifacts:
+    paths: [terraform/tfplan]
+    expire_in: 1 day
+  rules:
+    - if: $CI_MERGE_REQUEST_IID
+      changes: [terraform/**/*]
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes: [terraform/**/*]
+
+terraform-apply:
+  stage: deploy
+  tags: [aws-runner]
+  image: hashicorp/terraform:1.7
+  environment:
+    name: production
+  script:
+    - cd terraform
+    - terraform init
+    - terraform apply -auto-approve tfplan
+  dependencies: [terraform-plan]
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes: [terraform/**/*]
+      when: manual
+  allow_failure: false
+
+# =============================================================================
+# Workspace Image — Build & Scan
+# =============================================================================
+
+build-workspace-image:
+  stage: build
+  tags: [aws-runner]
+  script:
+    - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REPO
+    - docker build -t $ECR_REPO:$CI_COMMIT_TAG -t $ECR_REPO:latest templates/contractor-workspace/build/
+    - docker push $ECR_REPO:$CI_COMMIT_TAG
+    - docker push $ECR_REPO:latest
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v.*/
+
+scan-workspace-image:
+  stage: scan
+  tags: [aws-runner]
+  script:
+    - trivy image --severity CRITICAL,HIGH --exit-code 1 --no-progress $ECR_REPO:$CI_COMMIT_TAG
+  dependencies: [build-workspace-image]
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v.*/
+  allow_failure: false
+
+# =============================================================================
+# Application Deploy — ECS Services
+# =============================================================================
+
+deploy-coder:
+  stage: deploy
+  tags: [aws-runner]
+  environment:
+    name: production
+  script:
+    - |
+      # Force new deployment of Coder ECS service
+      aws ecs update-service \
+        --cluster $ECS_CLUSTER \
+        --service coder \
+        --force-new-deployment \
+        --region $AWS_REGION
+      # Wait for service to stabilize
+      aws ecs wait services-stable \
+        --cluster $ECS_CLUSTER \
+        --services coder \
+        --region $AWS_REGION
+      echo "Coder service deployed successfully"
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v.*/
+      when: manual
+
+deploy-litellm:
+  stage: deploy
+  tags: [aws-runner]
+  environment:
+    name: production
+  script:
+    - |
+      aws ecs update-service \
+        --cluster $ECS_CLUSTER \
+        --service litellm \
+        --force-new-deployment \
+        --region $AWS_REGION
+      aws ecs wait services-stable \
+        --cluster $ECS_CLUSTER \
+        --services litellm \
+        --region $AWS_REGION
+      echo "LiteLLM service deployed successfully"
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v.*/
+      when: manual
+
+deploy-authentik:
+  stage: deploy
+  tags: [aws-runner]
+  environment:
+    name: production
+  script:
+    - |
+      aws ecs update-service \
+        --cluster $ECS_CLUSTER \
+        --service authentik \
+        --force-new-deployment \
+        --region $AWS_REGION
+      aws ecs wait services-stable \
+        --cluster $ECS_CLUSTER \
+        --services authentik \
+        --region $AWS_REGION
+      echo "Authentik service deployed successfully"
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v.*/
+      when: manual
+
+# =============================================================================
+# Post-Deploy — Push Workspace Template
+# =============================================================================
+
+push-workspace-template:
+  stage: post-deploy
+  tags: [aws-runner]
+  script:
+    - |
+      # Get Coder CLI from the internal ALB
+      CODER_URL=https://coder.${DOMAIN_NAME}
+      curl -fsSL ${CODER_URL}/bin/coder-linux-amd64 -o /usr/local/bin/coder
+      chmod +x /usr/local/bin/coder
+      export CODER_URL
+      export CODER_SESSION_TOKEN=$CODER_DEPLOY_TOKEN
+      coder templates push contractor-workspace --directory templates/contractor-workspace --yes
+  dependencies: [deploy-coder]
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v.*/
+  needs: [deploy-coder]
+
+# =============================================================================
+# Smoke Test
+# =============================================================================
+
+smoke-test:
+  stage: post-deploy
+  tags: [aws-runner]
+  script:
+    - |
+      CODER_URL=https://coder.${DOMAIN_NAME}
+      echo "Checking Coder health..."
+      curl -sf ${CODER_URL}/api/v2/buildinfo || exit 1
+
+      echo "Checking LiteLLM health..."
+      LITELLM_URL=https://ai.${DOMAIN_NAME}
+      curl -sf ${LITELLM_URL}/health/readiness || exit 1
+
+      echo "All smoke tests passed"
+  dependencies: [deploy-coder, deploy-litellm]
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v.*/
+  needs: [push-workspace-template]

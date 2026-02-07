@@ -1,0 +1,114 @@
+# -----------------------------------------------------------------------------
+# Global Variables
+# -----------------------------------------------------------------------------
+
+variable "project_name" {
+  description = "Project name used for resource naming and tagging"
+  type        = string
+  default     = "coder"
+}
+
+variable "environment" {
+  description = "Environment name (e.g., production, staging)"
+  type        = string
+  default     = "production"
+}
+
+variable "aws_region" {
+  description = "AWS region for all resources"
+  type        = string
+  default     = "us-west-2"
+}
+
+# -----------------------------------------------------------------------------
+# VPC
+# -----------------------------------------------------------------------------
+
+variable "vpc_cidr" {
+  description = "CIDR block for the VPC"
+  type        = string
+  default     = "10.0.0.0/16"
+}
+
+variable "availability_zones" {
+  description = "Availability zones to use"
+  type        = list(string)
+  default     = ["us-west-2a", "us-west-2b"]
+}
+
+# -----------------------------------------------------------------------------
+# ECS
+# -----------------------------------------------------------------------------
+
+variable "coder_image" {
+  description = "Docker image for Coder server"
+  type        = string
+  default     = "ghcr.io/coder/coder:latest"
+}
+
+variable "workspace_image" {
+  description = "Default workspace image (ECR URI in production)"
+  type        = string
+  default     = "contractor-workspace:latest"
+}
+
+# -----------------------------------------------------------------------------
+# RDS
+# -----------------------------------------------------------------------------
+
+variable "rds_instance_class" {
+  description = "RDS instance class"
+  type        = string
+  default     = "db.r6g.large"
+}
+
+variable "rds_allocated_storage" {
+  description = "Initial storage allocation in GB"
+  type        = number
+  default     = 100
+}
+
+variable "rds_max_allocated_storage" {
+  description = "Maximum auto-scaling storage in GB"
+  type        = number
+  default     = 500
+}
+
+# -----------------------------------------------------------------------------
+# ElastiCache
+# -----------------------------------------------------------------------------
+
+variable "redis_node_type" {
+  description = "ElastiCache Redis node type"
+  type        = string
+  default     = "cache.r6g.large"
+}
+
+# -----------------------------------------------------------------------------
+# Domain
+# -----------------------------------------------------------------------------
+
+variable "domain_name" {
+  description = "Primary domain for the platform"
+  type        = string
+  default     = "coder.company.com"
+}
+
+variable "hosted_zone_id" {
+  description = "Route 53 hosted zone ID for DNS validation"
+  type        = string
+  default     = ""
+}
+
+# -----------------------------------------------------------------------------
+# Tags
+# -----------------------------------------------------------------------------
+
+variable "tags" {
+  description = "Common tags applied to all resources"
+  type        = map(string)
+  default = {
+    Project   = "coder-webide"
+    ManagedBy = "terraform"
+  }
+}
