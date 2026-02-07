@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dev Platform Portal</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    background: #f5f7fa;
+    color: #333;
+    line-height: 1.6;
+  }
+
+  /* Hero */
+  .hero {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: #fff;
+    padding: 3rem 2rem 2.5rem;
+    text-align: center;
+  }
+  .hero h1 { font-size: 2rem; font-weight: 700; margin-bottom: 0.4rem; }
+  .hero p { font-size: 1.05rem; opacity: 0.9; }
+
+  /* Container */
+  .container { max-width: 1100px; margin: 0 auto; padding: 2rem 1.5rem 3rem; }
+
+  /* Section titles */
+  .section-title {
+    font-size: 1.15rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+    color: #444;
+  }
+
+  /* Card grid */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2.5rem;
+  }
+
+  .card {
+    background: #fff;
+    border-radius: 10px;
+    padding: 1.4rem 1.5rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    text-decoration: none;
+    color: inherit;
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.12);
+  }
+
+  .card-icon {
+    width: 42px;
+    height: 42px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.3rem;
+    flex-shrink: 0;
+  }
+
+  .card-body h3 { font-size: 1rem; font-weight: 600; margin-bottom: 0.2rem; }
+  .card-body p { font-size: 0.85rem; color: #666; margin-bottom: 0.35rem; }
+  .card-body .url { font-size: 0.78rem; color: #888; font-family: 'SF Mono', SFMono-Regular, Consolas, monospace; }
+
+  /* Icon colors */
+  .icon-coder    { background: #e8eaff; color: #667eea; }
+  .icon-admin    { background: #f0e6ff; color: #764ba2; }
+  .icon-authentik{ background: #fff3e0; color: #ef6c00; }
+  .icon-gitea    { background: #e8f5e9; color: #388e3c; }
+  .icon-drone    { background: #e3f2fd; color: #1976d2; }
+  .icon-minio    { background: #fce4ec; color: #c62828; }
+  .icon-litellm  { background: #e0f7fa; color: #00838f; }
+  .icon-mailpit  { background: #f3e5f5; color: #7b1fa2; }
+
+  /* Credentials */
+  details {
+    background: #fff;
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    margin-bottom: 2.5rem;
+    overflow: hidden;
+  }
+  summary {
+    padding: 1rem 1.5rem;
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  summary::before { content: '\25B6'; font-size: 0.7rem; transition: transform 0.2s; }
+  details[open] summary::before { transform: rotate(90deg); }
+  summary::-webkit-details-marker { display: none; }
+
+  .cred-inner { padding: 0 1.5rem 1.5rem; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+    margin-bottom: 1.2rem;
+  }
+  table:last-child { margin-bottom: 0; }
+  th, td { text-align: left; padding: 0.55rem 0.8rem; border-bottom: 1px solid #eee; }
+  th { font-weight: 600; color: #555; background: #fafafa; }
+  td { font-family: 'SF Mono', SFMono-Regular, Consolas, monospace; font-size: 0.82rem; }
+
+  .table-label { font-weight: 600; font-size: 0.9rem; margin-bottom: 0.5rem; color: #555; }
+  .table-label:not(:first-child) { margin-top: 1rem; }
+
+  /* Quick start */
+  .steps {
+    background: #fff;
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    padding: 1.5rem;
+  }
+  .steps ol {
+    padding-left: 1.4rem;
+    font-size: 0.92rem;
+    color: #444;
+  }
+  .steps li { margin-bottom: 0.6rem; }
+  .steps li:last-child { margin-bottom: 0; }
+  .steps code {
+    background: #f0f0f5;
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.84rem;
+  }
+  .steps a { color: #667eea; }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>Dev Platform</h1>
+  <p>Browser-based development environments for contractors</p>
+</div>
+
+<div class="container">
+
+  <h2 class="section-title">Services</h2>
+  <div class="grid">
+
+    <a class="card" href="https://host.docker.internal:7443" target="_blank">
+      <div class="card-icon icon-coder">&#9675;</div>
+      <div class="card-body">
+        <h3>Coder WebIDE</h3>
+        <p>Browser-based development environments</p>
+        <span class="url">host.docker.internal:7443</span>
+      </div>
+    </a>
+
+    <a class="card" href="http://localhost:5050" target="_blank">
+      <div class="card-icon icon-admin">&#9881;</div>
+      <div class="card-body">
+        <h3>Platform Admin</h3>
+        <p>Service health, users, AI usage dashboard</p>
+        <span class="url">localhost:5050</span>
+      </div>
+    </a>
+
+    <a class="card" href="http://localhost:9000" target="_blank">
+      <div class="card-icon icon-authentik">&#9919;</div>
+      <div class="card-body">
+        <h3>Authentik SSO</h3>
+        <p>Identity provider &amp; user management</p>
+        <span class="url">localhost:9000</span>
+      </div>
+    </a>
+
+    <a class="card" href="http://localhost:3000" target="_blank">
+      <div class="card-icon icon-gitea">&#9733;</div>
+      <div class="card-body">
+        <h3>Gitea Git Server</h3>
+        <p>Git repositories &amp; code hosting</p>
+        <span class="url">localhost:3000</span>
+      </div>
+    </a>
+
+    <a class="card" href="http://localhost:8080" target="_blank">
+      <div class="card-icon icon-drone">&#9654;</div>
+      <div class="card-body">
+        <h3>Drone CI</h3>
+        <p>CI/CD pipelines</p>
+        <span class="url">localhost:8080</span>
+      </div>
+    </a>
+
+    <a class="card" href="http://localhost:9001" target="_blank">
+      <div class="card-icon icon-minio">&#9744;</div>
+      <div class="card-body">
+        <h3>MinIO Storage</h3>
+        <p>S3-compatible object storage</p>
+        <span class="url">localhost:9001</span>
+      </div>
+    </a>
+
+    <a class="card" href="http://localhost:4000" target="_blank">
+      <div class="card-icon icon-litellm">&#9672;</div>
+      <div class="card-body">
+        <h3>LiteLLM AI Gateway</h3>
+        <p>AI proxy &mdash; models, keys, spend tracking</p>
+        <span class="url">localhost:4000</span>
+      </div>
+    </a>
+
+    <a class="card" href="http://localhost:8025" target="_blank">
+      <div class="card-icon icon-mailpit">&#9993;</div>
+      <div class="card-body">
+        <h3>Mailpit Email</h3>
+        <p>Email testing &mdash; captures all outgoing mail</p>
+        <span class="url">localhost:8025</span>
+      </div>
+    </a>
+
+  </div>
+
+  <h2 class="section-title">Credentials</h2>
+  <details>
+    <summary>Admin &amp; Test User Credentials</summary>
+    <div class="cred-inner">
+
+      <div class="table-label">Admin Accounts</div>
+      <table>
+        <thead><tr><th>Service</th><th>Username</th><th>Password</th></tr></thead>
+        <tbody>
+          <tr><td>Coder</td><td>admin@example.com</td><td>CoderAdmin123!</td></tr>
+          <tr><td>Authentik</td><td>akadmin</td><td>admin</td></tr>
+          <tr><td>Gitea</td><td>gitea</td><td>admin123</td></tr>
+          <tr><td>MinIO</td><td>minioadmin</td><td>minioadmin</td></tr>
+          <tr><td>Platform Admin</td><td>admin</td><td>admin123</td></tr>
+        </tbody>
+      </table>
+
+      <div class="table-label">Test Users (SSO Login)</div>
+      <table>
+        <thead><tr><th>Username</th><th>Email</th><th>Password</th></tr></thead>
+        <tbody>
+          <tr><td>appmanager</td><td>appmanager@example.com</td><td>password123</td></tr>
+          <tr><td>contractor1</td><td>contractor1@example.com</td><td>password123</td></tr>
+          <tr><td>contractor2</td><td>contractor2@example.com</td><td>password123</td></tr>
+          <tr><td>contractor3</td><td>contractor3@example.com</td><td>password123</td></tr>
+          <tr><td>readonly</td><td>readonly@example.com</td><td>password123</td></tr>
+        </tbody>
+      </table>
+
+    </div>
+  </details>
+
+  <h2 class="section-title">Quick Start</h2>
+  <div class="steps">
+    <ol>
+      <li>Open <a href="https://host.docker.internal:7443" target="_blank">Coder WebIDE</a> and accept the self-signed certificate warning</li>
+      <li>Click <strong>Login with OIDC</strong> and sign in with a test user (e.g. <code>contractor1</code> / <code>password123</code>)</li>
+      <li>Create a workspace from the <strong>contractor-workspace</strong> template</li>
+      <li>Click <strong>code-server</strong> to open VS Code in the browser</li>
+      <li>Open <strong>Roo Code</strong> in the sidebar &mdash; AI chat is pre-configured via LiteLLM</li>
+    </ol>
+  </div>
+
+</div>
+
+</body>
+</html>

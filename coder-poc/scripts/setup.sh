@@ -381,6 +381,7 @@ print_summary() {
     echo ""
     echo -e "${BLUE}Access URLs:${NC}"
     echo "  ┌─────────────────┬───────────────────────────────────────────┐"
+    echo "  │ Demo Portal     │ http://localhost:3333                     │"
     echo "  │ Coder WebIDE    │ https://host.docker.internal:7443        │"
     echo "  │ Authentik SSO   │ http://localhost:9000                     │"
     echo "  │ Gitea (Git)     │ http://localhost:3000                     │"
@@ -450,6 +451,15 @@ print_summary() {
     echo "     - Paste the user's LiteLLM key into the 'LiteLLM API Key' field"
     echo "  4. Click 'code-server' to open VS Code in browser"
     echo "  5. Open Roo Code (sidebar icon) — AI chat should work immediately"
+
+    # Open portal in browser
+    if command -v open &>/dev/null; then
+        open "http://localhost:3333"
+    elif command -v xdg-open &>/dev/null; then
+        xdg-open "http://localhost:3333"
+    else
+        echo "  Open http://localhost:3333 in your browser to get started"
+    fi
 
     echo ""
 }

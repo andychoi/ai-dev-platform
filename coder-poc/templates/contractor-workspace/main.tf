@@ -479,35 +479,48 @@ ROOCONFIG
 
         # --- OpenCode CLI configuration ---
         if [ "$AI_ASSISTANT" = "opencode" ] || [ "$AI_ASSISTANT" = "both" ]; then
-          if command -v opencode >/dev/null 2>&1; then
+          # Always write config if the binary exists (don't rely on PATH/command -v)
+          if [ -x /home/coder/.opencode/bin/opencode ]; then
             echo "Configuring OpenCode CLI with LiteLLM proxy..."
             mkdir -p /home/coder/.config/opencode
-            cat > /home/coder/.config/opencode/config.json << OPENCODECONFIG
+            cat > /home/coder/.config/opencode/opencode.json << OPENCODECONFIG
 {
+  "\$schema": "https://opencode.ai/config.json",
   "provider": {
     "litellm": {
       "npm": "@ai-sdk/openai-compatible",
+      "name": "LiteLLM",
       "options": {
         "baseURL": "http://litellm:4000/v1",
         "apiKey": "$LITELLM_KEY"
+      },
+      "models": {
+        "claude-sonnet-4-5": {
+          "name": "Claude Sonnet 4.5"
+        },
+        "claude-haiku-4-5": {
+          "name": "Claude Haiku 4.5"
+        },
+        "claude-opus-4": {
+          "name": "Claude Opus 4"
+        }
       }
     }
   },
-  "model": {
-    "big": "litellm/$LITELLM_MODEL",
-    "small": "litellm/claude-haiku-4-5"
-  }
+  "model": "litellm/$LITELLM_MODEL",
+  "small_model": "litellm/claude-haiku-4-5"
 }
 OPENCODECONFIG
             echo "OpenCode configured: model=litellm/$LITELLM_MODEL"
           else
-            echo "Note: OpenCode CLI not found in PATH, skipping configuration"
+            echo "Note: OpenCode CLI not found at ~/.opencode/bin/opencode, skipping configuration"
           fi
         fi
 
         # --- Environment variables for CLI AI tools ---
         cat >> ~/.bashrc << AICONFIG
 # AI Configuration (LiteLLM)
+export PATH="/home/coder/.opencode/bin:\$PATH"
 export AI_GATEWAY_URL="http://litellm:4000"
 export OPENAI_API_BASE="http://litellm:4000/v1"
 export OPENAI_API_KEY="$LITELLM_KEY"
