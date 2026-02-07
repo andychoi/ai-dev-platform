@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # =============================================================================
 # Full Authentik SSO Setup - Automated Configuration
-# Creates providers, configures services, and updates docker-compose
+# Reads OIDC client IDs and secrets from .env (source of truth) and syncs
+# them into Authentik as OAuth2 providers + applications.
+#
+# .env is NEVER written to by this script. All secrets must be pre-defined.
+# To generate a new secret: openssl rand -base64 96 | tr -d '\n'
 # =============================================================================
 
 set -e
@@ -12,6 +16,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 AUTHENTIK_URL="${AUTHENTIK_URL:-http://host.docker.internal:9000}"
 AUTHENTIK_INTERNAL_URL="http://host.docker.internal:9000"
+ENV_FILE="${PROJECT_DIR}/.env"
 
 # Colors
 RED='\033[0;31m'
@@ -24,9 +29,58 @@ echo -e "${GREEN}=== Full Authentik SSO Setup ===${NC}"
 echo ""
 
 # -----------------------------------------------------------------------------
-# Step 1: Check Authentik is running
+# Step 1: Load secrets from .env (read-only)
 # -----------------------------------------------------------------------------
-echo -e "${BLUE}[1/6] Checking Authentik...${NC}"
+echo -e "${BLUE}[1/5] Loading OIDC secrets from .env...${NC}"
+
+if [ ! -f "$ENV_FILE" ]; then
+    echo -e "${RED}Error: ${ENV_FILE} not found. Copy from .env.example first.${NC}"
+    exit 1
+fi
+
+# Source .env to get all OIDC variables
+# (safe: .env is key=value pairs only, no commands)
+set -a
+source "$ENV_FILE"
+set +a
+
+# Define the 5 OIDC apps: slug|client_id_var|client_secret_var
+OIDC_APPS=(
+    "coder|CODER_OIDC_CLIENT_ID|CODER_OIDC_CLIENT_SECRET"
+    "gitea|GITEA_OIDC_CLIENT_ID|GITEA_OIDC_CLIENT_SECRET"
+    "minio|MINIO_IDENTITY_OPENID_CLIENT_ID|MINIO_IDENTITY_OPENID_CLIENT_SECRET"
+    "platform-admin|PLATFORM_ADMIN_OIDC_CLIENT_ID|PLATFORM_ADMIN_OIDC_CLIENT_SECRET"
+    "litellm|LITELLM_OIDC_CLIENT_ID|LITELLM_OIDC_CLIENT_SECRET"
+)
+
+# Validate all secrets are present
+MISSING=0
+for app_def in "${OIDC_APPS[@]}"; do
+    IFS='|' read -r slug id_var secret_var <<< "$app_def"
+    id_val="${!id_var}"
+    secret_val="${!secret_var}"
+    if [ -z "$id_val" ] || [ -z "$secret_val" ]; then
+        echo -e "${RED}  Missing: ${id_var} or ${secret_var}${NC}"
+        MISSING=1
+    else
+        echo -e "  ${slug}: ID=${id_val}"
+    fi
+done
+
+if [ "$MISSING" -eq 1 ]; then
+    echo ""
+    echo -e "${RED}Error: Some OIDC secrets are missing in .env${NC}"
+    echo "Generate missing secrets with:  openssl rand -base64 96 | tr -d '\\n'"
+    echo "Then add them to .env and re-run this script."
+    exit 1
+fi
+echo -e "${GREEN}✓ All OIDC secrets loaded from .env${NC}"
+
+# -----------------------------------------------------------------------------
+# Step 2: Check Authentik is running + get API token
+# -----------------------------------------------------------------------------
+echo -e "${BLUE}[2/5] Connecting to Authentik...${NC}"
+
 if ! curl -s "${AUTHENTIK_URL}/-/health/ready/" > /dev/null 2>&1; then
     echo -e "${RED}Error: Authentik is not running at ${AUTHENTIK_URL}${NC}"
     echo "Start it with: docker compose up -d authentik-server authentik-worker"
@@ -34,13 +88,7 @@ if ! curl -s "${AUTHENTIK_URL}/-/health/ready/" > /dev/null 2>&1; then
 fi
 echo -e "${GREEN}✓ Authentik is running${NC}"
 
-# -----------------------------------------------------------------------------
-# Step 2: Get or create API token
-# -----------------------------------------------------------------------------
-echo -e "${BLUE}[2/6] Getting API token...${NC}"
-
 if [ -z "$AUTHENTIK_TOKEN" ]; then
-    # Create token via Authentik shell
     TOKEN_OUTPUT=$(docker exec authentik-server ak shell -c "
 from authentik.core.models import Token, User
 user = User.objects.get(username='akadmin')
@@ -78,9 +126,10 @@ api_call() {
 }
 
 # -----------------------------------------------------------------------------
-# Step 3: Get signing key
+# Step 3: Get signing key + flows
 # -----------------------------------------------------------------------------
-echo -e "${BLUE}[3/6] Getting signing key...${NC}"
+echo -e "${BLUE}[3/5] Getting signing key and flows...${NC}"
+
 SIGNING_KEY=$(api_call GET "/crypto/certificatekeypairs/" | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
@@ -98,33 +147,13 @@ if [ -z "$SIGNING_KEY" ]; then
         "validity_days": 365
     }' | python3 -c "import sys,json; print(json.load(sys.stdin).get('pk',''))")
 fi
-echo -e "${GREEN}✓ Signing key: ${SIGNING_KEY:0:8}...${NC}"
+echo -e "  Signing key: ${SIGNING_KEY:0:8}..."
 
-# -----------------------------------------------------------------------------
-# Step 4: Create OAuth2 Providers
-# -----------------------------------------------------------------------------
-echo -e "${BLUE}[4/6] Creating OAuth2 providers...${NC}"
-
-# Store credentials in simple variables
-CODER_CLIENT_ID=""
-CODER_CLIENT_SECRET=""
-GITEA_CLIENT_ID=""
-GITEA_CLIENT_SECRET=""
-MINIO_CLIENT_ID=""
-MINIO_CLIENT_SECRET=""
-PLATFORM_ADMIN_CLIENT_ID=""
-PLATFORM_ADMIN_CLIENT_SECRET=""
-LITELLM_CLIENT_ID=""
-LITELLM_CLIENT_SECRET=""
-
-# Get authorization flow
 AUTH_FLOW=$(api_call GET '/flows/instances/?designation=authorization' | python3 -c 'import sys,json; r=json.load(sys.stdin)["results"]; print(r[0]["pk"] if r else "")' 2>/dev/null)
 
-# Get invalidation flow (required in Authentik 2025.x)
 INVAL_FLOW=$(api_call GET '/flows/instances/?designation=invalidation' | python3 -c '
 import sys,json
 results = json.load(sys.stdin)["results"]
-# Prefer the provider-specific invalidation flow
 for r in results:
     if "provider" in r.get("slug",""):
         print(r["pk"]); break
@@ -132,17 +161,25 @@ else:
     if results: print(results[0]["pk"])
 ' 2>/dev/null)
 
-# Get OAuth2 scope property mappings (endpoint moved in Authentik 2025.x)
 PROP_MAPPINGS=$(api_call GET '/propertymappings/provider/scope/' | python3 -c '
 import sys,json
 mappings = json.load(sys.stdin).get("results",[])
 print(json.dumps([m["pk"] for m in mappings if m.get("managed","")]))
 ' 2>/dev/null)
 
-create_oauth_provider() {
+echo -e "${GREEN}✓ Signing key and flows ready${NC}"
+
+# -----------------------------------------------------------------------------
+# Step 4: Create/update OAuth2 Providers (secrets from .env)
+# -----------------------------------------------------------------------------
+echo -e "${BLUE}[4/5] Syncing OAuth2 providers to Authentik...${NC}"
+
+sync_oauth_provider() {
     local name=$1
     local slug=$2
-    shift 2
+    local client_id=$3
+    local client_secret=$4
+    shift 4
     # Remaining args are redirect URIs
     local redirect_uris_json="["
     local first=true
@@ -152,31 +189,36 @@ create_oauth_provider() {
     done
     redirect_uris_json+="]"
 
-    echo "  Creating provider: $name"
+    echo "  Syncing provider: $name (client_id=${client_id})"
 
-    # Check if provider exists
-    EXISTING=$(api_call GET "/providers/oauth2/?search=${slug}" | python3 -c "
+    # Check if provider already exists (list all, filter by client_id)
+    EXISTING_PK=$(api_call GET "/providers/oauth2/?page_size=50" | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
 for p in data.get('results', []):
-    if p.get('name') == '${name}':
-        print(f\"{p['pk']}|{p['client_id']}|{p.get('client_secret', '')}\")
+    if p.get('client_id') == '${client_id}':
+        print(p['pk'])
         break
 " 2>/dev/null)
 
-    if [ -n "$EXISTING" ]; then
-        PK=$(echo "$EXISTING" | cut -d'|' -f1)
-        CLIENT_ID=$(echo "$EXISTING" | cut -d'|' -f2)
-        CLIENT_SECRET=$(echo "$EXISTING" | cut -d'|' -f3)
-        echo "    Provider exists (pk=$PK)"
+    if [ -n "$EXISTING_PK" ]; then
+        # Update existing provider with secrets from .env
+        RESULT=$(api_call PATCH "/providers/oauth2/${EXISTING_PK}/" "{
+            \"client_secret\": \"${client_secret}\",
+            \"redirect_uris\": ${redirect_uris_json},
+            \"signing_key\": \"${SIGNING_KEY}\",
+            \"property_mappings\": ${PROP_MAPPINGS}
+        }")
+        echo "    Updated existing provider (pk=${EXISTING_PK})"
     else
-        # Create new provider (Authentik 2025.x: redirect_uris=JSON array, invalidation_flow required)
+        # Create new provider with secrets from .env
         RESULT=$(api_call POST "/providers/oauth2/" "{
             \"name\": \"${name}\",
             \"authorization_flow\": \"${AUTH_FLOW}\",
             \"invalidation_flow\": \"${INVAL_FLOW}\",
             \"client_type\": \"confidential\",
-            \"client_id\": \"${slug}\",
+            \"client_id\": \"${client_id}\",
+            \"client_secret\": \"${client_secret}\",
             \"redirect_uris\": ${redirect_uris_json},
             \"signing_key\": \"${SIGNING_KEY}\",
             \"sub_mode\": \"user_username\",
@@ -184,193 +226,82 @@ for p in data.get('results', []):
             \"property_mappings\": ${PROP_MAPPINGS}
         }")
 
-        PK=$(echo "$RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('pk',''))" 2>/dev/null)
-        CLIENT_ID=$(echo "$RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('client_id',''))" 2>/dev/null)
-        CLIENT_SECRET=$(echo "$RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('client_secret',''))" 2>/dev/null)
+        EXISTING_PK=$(echo "$RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('pk',''))" 2>/dev/null)
 
-        if [ -n "$PK" ]; then
-            echo "    Created (pk=$PK)"
+        if [ -n "$EXISTING_PK" ]; then
+            echo "    Created provider (pk=${EXISTING_PK})"
         else
             echo -e "${YELLOW}    Warning: Failed to create provider${NC}"
             echo "$RESULT" | head -c 200
+            echo ""
             return
         fi
     fi
 
-    # Export to global variables based on slug
-    case "$slug" in
-        coder)
-            CODER_CLIENT_ID="$CLIENT_ID"
-            CODER_CLIENT_SECRET="$CLIENT_SECRET"
-            ;;
-        gitea)
-            GITEA_CLIENT_ID="$CLIENT_ID"
-            GITEA_CLIENT_SECRET="$CLIENT_SECRET"
-            ;;
-        minio)
-            MINIO_CLIENT_ID="$CLIENT_ID"
-            MINIO_CLIENT_SECRET="$CLIENT_SECRET"
-            ;;
-        platform-admin)
-            PLATFORM_ADMIN_CLIENT_ID="$CLIENT_ID"
-            PLATFORM_ADMIN_CLIENT_SECRET="$CLIENT_SECRET"
-            ;;
-        litellm)
-            LITELLM_CLIENT_ID="$CLIENT_ID"
-            LITELLM_CLIENT_SECRET="$CLIENT_SECRET"
-            ;;
-    esac
-
-    # Create or update application and link provider
-    if [ -n "$PK" ]; then
-        # Check if application exists
-        APP_CHECK=$(api_call GET "/core/applications/${slug}/" 2>&1)
-        if echo "$APP_CHECK" | python3 -c "import sys,json; json.load(sys.stdin)['slug']" &>/dev/null; then
-            # App exists, link provider
-            LINK_RESULT=$(api_call PATCH "/core/applications/${slug}/" "{\"provider\": ${PK}}" 2>&1)
-            echo "    Linked to existing application"
+    # Create or link application
+    APP_CHECK=$(api_call GET "/core/applications/${slug}/" 2>&1)
+    if echo "$APP_CHECK" | python3 -c "import sys,json; json.load(sys.stdin)['slug']" &>/dev/null; then
+        api_call PATCH "/core/applications/${slug}/" "{\"provider\": ${EXISTING_PK}}" > /dev/null 2>&1
+        echo "    Linked to existing application"
+    else
+        LINK_RESULT=$(api_call POST "/core/applications/" "{
+            \"name\": \"${name}\",
+            \"slug\": \"${slug}\",
+            \"provider\": ${EXISTING_PK},
+            \"meta_launch_url\": \"\",
+            \"open_in_new_tab\": true
+        }" 2>&1)
+        if echo "$LINK_RESULT" | python3 -c "import sys,json; json.load(sys.stdin)['slug']" &>/dev/null; then
+            echo "    Created application and linked provider"
         else
-            # Create application with provider
-            LINK_RESULT=$(api_call POST "/core/applications/" "{
-                \"name\": \"${name}\",
-                \"slug\": \"${slug}\",
-                \"provider\": ${PK},
-                \"meta_launch_url\": \"\",
-                \"open_in_new_tab\": true
-            }" 2>&1)
-            if echo "$LINK_RESULT" | python3 -c "import sys,json; json.load(sys.stdin)['slug']" &>/dev/null; then
-                echo "    Created application and linked provider"
-            else
-                echo -e "${YELLOW}    Warning: Could not create application${NC}"
-                echo "$LINK_RESULT" | head -c 200
-            fi
+            echo -e "${YELLOW}    Warning: Could not create application${NC}"
+            echo "$LINK_RESULT" | head -c 200
+            echo ""
         fi
     fi
 }
 
-# Create providers for each service (each URI is a separate arg)
-create_oauth_provider "Coder OIDC" "coder" \
+# Sync all 5 providers (secrets read from .env, passed to Authentik)
+sync_oauth_provider "Coder OIDC" "coder" \
+    "$CODER_OIDC_CLIENT_ID" "$CODER_OIDC_CLIENT_SECRET" \
     "https://host.docker.internal:7443/api/v2/users/oidc/callback"
-create_oauth_provider "Gitea OIDC" "gitea" \
+
+sync_oauth_provider "Gitea OIDC" "gitea" \
+    "$GITEA_OIDC_CLIENT_ID" "$GITEA_OIDC_CLIENT_SECRET" \
     "http://localhost:3000/user/oauth2/Authentik/callback"
-create_oauth_provider "MinIO OIDC" "minio" \
+
+sync_oauth_provider "MinIO OIDC" "minio" \
+    "$MINIO_IDENTITY_OPENID_CLIENT_ID" "$MINIO_IDENTITY_OPENID_CLIENT_SECRET" \
     "http://localhost:9001/oauth_callback"
-create_oauth_provider "Platform Admin OIDC" "platform-admin" \
-    "http://localhost:5050/auth/callback"
-create_oauth_provider "LiteLLM OIDC" "litellm" \
+
+sync_oauth_provider "Platform Admin OIDC" "platform-admin" \
+    "$PLATFORM_ADMIN_OIDC_CLIENT_ID" "$PLATFORM_ADMIN_OIDC_CLIENT_SECRET" \
+    "http://localhost:5050/auth/callback" \
+    "http://host.docker.internal:5050/auth/callback"
+
+sync_oauth_provider "LiteLLM OIDC" "litellm" \
+    "$LITELLM_OIDC_CLIENT_ID" "$LITELLM_OIDC_CLIENT_SECRET" \
     "http://localhost:4000/sso/callback"
 
-echo -e "${GREEN}✓ OAuth2 providers created${NC}"
+echo -e "${GREEN}✓ All OAuth2 providers synced${NC}"
 
 # -----------------------------------------------------------------------------
-# Step 5: Generate environment file
+# Step 5: Verify and summarize
 # -----------------------------------------------------------------------------
-echo -e "${BLUE}[5/6] Generating SSO configuration...${NC}"
+echo -e "${BLUE}[5/5] Verifying configuration...${NC}"
 
-SSO_ENV_FILE="${PROJECT_DIR}/.env.sso"
-
-cat > "$SSO_ENV_FILE" << EOF
-# =============================================================================
-# Authentik SSO Configuration
-# Generated by setup-authentik-sso-full.sh
-# Source this file or add to docker-compose environment
-# =============================================================================
-
-# Coder OIDC
-CODER_OIDC_ISSUER_URL=${AUTHENTIK_INTERNAL_URL}/application/o/coder/
-CODER_OIDC_CLIENT_ID=${CODER_CLIENT_ID}
-CODER_OIDC_CLIENT_SECRET=${CODER_CLIENT_SECRET}
-CODER_OIDC_ALLOW_SIGNUPS=true
-CODER_OIDC_EMAIL_DOMAIN=
-CODER_OIDC_SCOPES=openid,profile,email
-CODER_DISABLE_PASSWORD_AUTH=false
-
-# MinIO OIDC
-MINIO_IDENTITY_OPENID_CONFIG_URL=${AUTHENTIK_INTERNAL_URL}/application/o/minio/.well-known/openid-configuration
-MINIO_IDENTITY_OPENID_CLIENT_ID=${MINIO_CLIENT_ID}
-MINIO_IDENTITY_OPENID_CLIENT_SECRET=${MINIO_CLIENT_SECRET}
-MINIO_IDENTITY_OPENID_CLAIM_NAME=policy
-MINIO_IDENTITY_OPENID_SCOPES=openid,profile,email
-MINIO_IDENTITY_OPENID_REDIRECT_URI=http://localhost:9001/oauth_callback
-
-# Gitea OIDC (configure via Gitea Admin UI > Authentication Sources > Add OAuth2)
-# Provider: OpenID Connect
-# Auto Discovery URL: ${AUTHENTIK_INTERNAL_URL}/application/o/gitea/.well-known/openid-configuration
-GITEA_OIDC_CLIENT_ID=${GITEA_CLIENT_ID}
-GITEA_OIDC_CLIENT_SECRET=${GITEA_CLIENT_SECRET}
-GITEA_OIDC_DISCOVERY_URL=${AUTHENTIK_INTERNAL_URL}/application/o/gitea/.well-known/openid-configuration
-
-# Platform Admin OIDC
-PLATFORM_ADMIN_OIDC_ISSUER_URL=${AUTHENTIK_INTERNAL_URL}/application/o/platform-admin/
-PLATFORM_ADMIN_OIDC_CLIENT_ID=${PLATFORM_ADMIN_CLIENT_ID}
-PLATFORM_ADMIN_OIDC_CLIENT_SECRET=${PLATFORM_ADMIN_CLIENT_SECRET}
-
-# LiteLLM Admin UI OIDC
-LITELLM_OIDC_CLIENT_ID=${LITELLM_CLIENT_ID}
-LITELLM_OIDC_CLIENT_SECRET=${LITELLM_CLIENT_SECRET}
-
-EOF
-
-echo -e "${GREEN}✓ Configuration saved to ${SSO_ENV_FILE}${NC}"
-
-# -----------------------------------------------------------------------------
-# Step 5b: Update .env with generated secrets
-# Docker Compose auto-loads .env (not .env.sso), so secrets must be here
-# -----------------------------------------------------------------------------
-ENV_FILE="${PROJECT_DIR}/.env"
-
-if [ -f "$ENV_FILE" ]; then
-    echo "  Updating .env with generated secrets..."
-
-    # Helper: update or append a key=value in .env
-    update_env_var() {
-        local key=$1
-        local value=$2
-        if grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
-            # Use | as sed delimiter since values may contain /
-            sed -i.bak "s|^${key}=.*|${key}=${value}|" "$ENV_FILE"
-        else
-            echo "${key}=${value}" >> "$ENV_FILE"
-        fi
-    }
-
-    update_env_var "CODER_OIDC_CLIENT_SECRET" "$CODER_CLIENT_SECRET"
-    update_env_var "CODER_OIDC_CLIENT_ID" "$CODER_CLIENT_ID"
-    update_env_var "GITEA_OIDC_CLIENT_ID" "$GITEA_CLIENT_ID"
-    update_env_var "GITEA_OIDC_CLIENT_SECRET" "$GITEA_CLIENT_SECRET"
-    update_env_var "MINIO_IDENTITY_OPENID_CLIENT_ID" "$MINIO_CLIENT_ID"
-    update_env_var "MINIO_IDENTITY_OPENID_CLIENT_SECRET" "$MINIO_CLIENT_SECRET"
-    update_env_var "PLATFORM_ADMIN_OIDC_CLIENT_ID" "$PLATFORM_ADMIN_CLIENT_ID"
-    update_env_var "PLATFORM_ADMIN_OIDC_CLIENT_SECRET" "$PLATFORM_ADMIN_CLIENT_SECRET"
-    update_env_var "LITELLM_OIDC_CLIENT_ID" "$LITELLM_CLIENT_ID"
-    update_env_var "LITELLM_OIDC_CLIENT_SECRET" "$LITELLM_CLIENT_SECRET"
-
-    # Clean up sed backup file
-    rm -f "${ENV_FILE}.bak"
-
-    echo -e "${GREEN}✓ .env updated with OIDC secrets${NC}"
-else
-    echo -e "${YELLOW}  Warning: ${ENV_FILE} not found. Create it from .env.example first.${NC}"
-fi
-
-# -----------------------------------------------------------------------------
-# Step 6: Verify configuration
-# docker-compose.yml reads OIDC secrets from .env via ${VAR} references
-# No overlay file needed — .env is the single source of truth
-# -----------------------------------------------------------------------------
-echo -e "${BLUE}[6/6] Verifying configuration...${NC}"
-
-# Remove stale overlay if it exists (secrets were hardcoded and go stale)
-if [ -f "${PROJECT_DIR}/docker-compose.sso.yml" ]; then
-    rm -f "${PROJECT_DIR}/docker-compose.sso.yml"
-    echo "  Removed stale docker-compose.sso.yml (secrets now managed via .env)"
-fi
+# Remove stale generated files (secrets are now in .env only)
+for stale_file in "${PROJECT_DIR}/docker-compose.sso.yml" "${PROJECT_DIR}/.env.sso"; do
+    if [ -f "$stale_file" ]; then
+        rm -f "$stale_file"
+        echo "  Removed stale file: $(basename "$stale_file")"
+    fi
+done
 
 if grep -q "CODER_OIDC_ISSUER_URL" "${PROJECT_DIR}/docker-compose.yml" 2>/dev/null; then
     echo -e "${GREEN}✓ OIDC config found in docker-compose.yml${NC}"
 else
     echo -e "${YELLOW}  Warning: OIDC config not found in docker-compose.yml${NC}"
-    echo "  Add CODER_OIDC_* environment variables to the coder service"
 fi
 
 # -----------------------------------------------------------------------------
@@ -379,46 +310,42 @@ fi
 echo ""
 echo -e "${GREEN}=== SSO Setup Complete ===${NC}"
 echo ""
-echo "OAuth2 Credentials:"
-echo "-------------------"
-echo "Coder:          ID=${CODER_CLIENT_ID}"
-echo "Gitea:          ID=${GITEA_CLIENT_ID}"
-echo "MinIO:          ID=${MINIO_CLIENT_ID}"
-echo "Platform Admin: ID=${PLATFORM_ADMIN_CLIENT_ID}"
-echo "LiteLLM:        ID=${LITELLM_CLIENT_ID}"
+echo "Authentik providers synced with secrets from .env (read-only)."
 echo ""
-echo "Files updated:"
-echo "  - ${ENV_FILE} (OIDC secrets for Docker Compose)"
-echo "  - ${SSO_ENV_FILE} (reference copy)"
+echo "OAuth2 Applications:"
+echo "  Coder:          client_id=${CODER_OIDC_CLIENT_ID}"
+echo "  Gitea:          client_id=${GITEA_OIDC_CLIENT_ID}"
+echo "  MinIO:          client_id=${MINIO_IDENTITY_OPENID_CLIENT_ID}"
+echo "  Platform Admin: client_id=${PLATFORM_ADMIN_OIDC_CLIENT_ID}"
+echo "  LiteLLM:        client_id=${LITELLM_OIDC_CLIENT_ID}"
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
 echo ""
 echo -e "${RED}0. REQUIRED - Add hosts entries (one-time):${NC}"
-echo "   sudo sh -c 'echo \"127.0.0.1    host.docker.internal authentik-server\" >> /etc/hosts'"
-echo "   This allows your browser to reach Coder (OIDC) and the SSO server."
+echo "   sudo sh -c 'echo \"127.0.0.1    host.docker.internal\" >> /etc/hosts'"
 echo ""
-echo "1. Restart services to pick up new secrets:"
-echo "   docker compose up -d coder minio"
+echo "1. Restart services to pick up secrets:"
+echo "   docker compose up -d coder minio platform-admin"
 echo ""
-echo "2. Configure Gitea OIDC (one-time):"
+echo "2. Configure Gitea OIDC (one-time, via Gitea Admin UI):"
 echo "   a. Go to http://localhost:3000/admin/auths/new"
 echo "   b. Authentication Type: OAuth2"
 echo "   c. Provider: OpenID Connect"
 echo "   d. Authentication Name: Authentik"
-echo "   e. Client ID: ${GITEA_CLIENT_ID}"
-echo "   f. Client Secret: ${GITEA_CLIENT_SECRET}"
-echo "   g. OpenID Connect Auto Discovery URL:"
+echo "   e. Client ID: ${GITEA_OIDC_CLIENT_ID}"
+echo "   f. Client Secret: (from .env GITEA_OIDC_CLIENT_SECRET)"
+echo "   g. Auto Discovery URL:"
 echo "      ${AUTHENTIK_INTERNAL_URL}/application/o/gitea/.well-known/openid-configuration"
 echo ""
 echo "3. Test SSO login:"
-echo "   - Coder: https://host.docker.internal:7443 (accept cert warning, click 'Login with OIDC')"
-echo "     NOTE: HTTPS required for extension webviews. Accept the self-signed cert warning."
-echo "   - MinIO: http://localhost:9001 (click 'Login with SSO')"
-echo "   - Platform Admin: http://localhost:5050 (click 'Sign in with Authentik SSO')
-   - LiteLLM:        http://localhost:4000/ui (click 'SSO Login')"
+echo "   - Coder:          https://host.docker.internal:7443"
+echo "   - MinIO:          http://localhost:9001"
+echo "   - Platform Admin: http://localhost:5050"
+echo "   - LiteLLM:        http://localhost:4000/ui"
 echo ""
 echo "4. Local fallback accounts (if Authentik is down):"
 echo "   - Coder: admin@example.com / CoderAdmin123!"
 echo "   - MinIO: minioadmin / minioadmin"
 echo "   - Gitea: gitea / admin123"
+echo "   - Platform Admin: admin / admin123"
 echo ""

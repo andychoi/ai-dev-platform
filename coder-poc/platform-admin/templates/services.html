@@ -1,67 +1,9 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Service Status - Platform Admin</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+{% extends "base.html" %}
+{% set active_page = "services" %}
 
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            background: #f5f7fa;
-            color: #333;
-            line-height: 1.6;
-        }
+{% block title %}Service Status - Platform Admin{% endblock %}
 
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-
-        /* Header */
-        header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 20px 0;
-            margin-bottom: 30px;
-        }
-
-        header .container {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        header h1 {
-            font-size: 1.8em;
-            font-weight: 600;
-        }
-
-        header nav a {
-            color: white;
-            text-decoration: none;
-            padding: 5px 10px;
-            border-radius: 4px;
-        }
-
-        header nav a:hover, header nav a.active {
-            background: rgba(255,255,255,0.2);
-        }
-
-        .status-badge {
-            padding: 5px 12px;
-            border-radius: 20px;
-            font-size: 0.85em;
-            font-weight: 500;
-            background: rgba(255,255,255,0.2);
-        }
-
+{% block extra_css %}
         /* Summary */
         .summary {
             display: flex;
@@ -70,7 +12,6 @@
             margin-bottom: 30px;
             flex-wrap: wrap;
         }
-
         .summary-stat {
             background: white;
             border-radius: 12px;
@@ -80,25 +21,10 @@
             align-items: center;
             gap: 15px;
         }
-
-        .summary-stat .count {
-            font-size: 2.5em;
-            font-weight: 700;
-            color: #667eea;
-        }
-
-        .summary-stat.healthy .count {
-            color: #27ae60;
-        }
-
-        .summary-stat.unhealthy .count {
-            color: #e74c3c;
-        }
-
-        .summary-stat .label {
-            color: #666;
-            font-size: 0.9em;
-        }
+        .summary-stat .count { font-size: 2.5em; font-weight: 700; color: #667eea; }
+        .summary-stat.healthy .count { color: #27ae60; }
+        .summary-stat.unhealthy .count { color: #e74c3c; }
+        .summary-stat .label { color: #666; font-size: 0.9em; }
 
         /* Service Grid */
         .services-grid {
@@ -106,7 +32,6 @@
             grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
             gap: 20px;
         }
-
         .service-card {
             background: white;
             border-radius: 12px;
@@ -117,212 +42,74 @@
             gap: 15px;
             transition: transform 0.2s, box-shadow 0.2s;
         }
-
         .service-card:hover {
             transform: translateY(-2px);
             box-shadow: 0 4px 16px rgba(0,0,0,0.12);
         }
-
         .service-icon {
-            width: 50px;
-            height: 50px;
+            width: 50px; height: 50px;
             border-radius: 10px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.5em;
-            flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.5em; flex-shrink: 0;
         }
+        .service-icon.healthy { background: #e8f5e9; color: #27ae60; }
+        .service-icon.unhealthy { background: #ffebee; color: #e74c3c; }
+        .service-icon.degraded { background: #fff3e0; color: #f39c12; }
+        .service-icon.unknown { background: #f5f5f5; color: #95a5a6; }
 
-        .service-icon.healthy {
-            background: #e8f5e9;
-            color: #27ae60;
-        }
-
-        .service-icon.unhealthy {
-            background: #ffebee;
-            color: #e74c3c;
-        }
-
-        .service-icon.degraded {
-            background: #fff3e0;
-            color: #f39c12;
-        }
-
-        .service-icon.unknown {
-            background: #f5f5f5;
-            color: #95a5a6;
-        }
-
-        .service-info {
-            flex: 1;
-            min-width: 0;
-        }
-
+        .service-info { flex: 1; min-width: 0; }
         .service-name {
-            font-weight: 600;
-            font-size: 1.1em;
-            margin-bottom: 5px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
+            font-weight: 600; font-size: 1.1em; margin-bottom: 5px;
+            display: flex; align-items: center; gap: 10px;
         }
-
         .service-name .status-pill {
-            font-size: 0.7em;
-            font-weight: 500;
-            padding: 3px 8px;
-            border-radius: 10px;
+            font-size: 0.7em; font-weight: 500;
+            padding: 3px 8px; border-radius: 10px;
             text-transform: uppercase;
         }
+        .status-pill.healthy { background: #e8f5e9; color: #27ae60; }
+        .status-pill.unhealthy { background: #ffebee; color: #e74c3c; }
+        .status-pill.degraded { background: #fff3e0; color: #f39c12; }
+        .status-pill.unknown { background: #f5f5f5; color: #95a5a6; }
 
-        .status-pill.healthy {
-            background: #e8f5e9;
-            color: #27ae60;
-        }
-
-        .status-pill.unhealthy {
-            background: #ffebee;
-            color: #e74c3c;
-        }
-
-        .status-pill.degraded {
-            background: #fff3e0;
-            color: #f39c12;
-        }
-
-        .status-pill.unknown {
-            background: #f5f5f5;
-            color: #95a5a6;
-        }
-
-        .service-details {
-            font-size: 0.85em;
-            color: #666;
-        }
-
+        .service-details { font-size: 0.85em; color: #666; }
         .service-details .metric {
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-            margin-right: 15px;
+            display: inline-flex; align-items: center;
+            gap: 5px; margin-right: 15px;
         }
-
         .service-error {
-            margin-top: 8px;
-            padding: 8px 12px;
-            background: #fff5f5;
-            border-radius: 6px;
-            color: #c62828;
-            font-size: 0.85em;
+            margin-top: 8px; padding: 8px 12px;
+            background: #fff5f5; border-radius: 6px;
+            color: #c62828; font-size: 0.85em;
         }
-
-        .service-link {
-            margin-top: 10px;
-        }
-
+        .service-link { margin-top: 10px; }
         .service-link a {
-            color: #667eea;
-            text-decoration: none;
-            font-size: 0.85em;
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
+            color: #667eea; text-decoration: none;
+            font-size: 0.85em; display: inline-flex;
+            align-items: center; gap: 5px;
         }
+        .service-link a:hover { text-decoration: underline; }
 
-        .service-link a:hover {
-            text-decoration: underline;
-        }
+        .icon { width: 1em; height: 1em; vertical-align: middle; }
+        .last-updated { color: #999; font-size: 0.85em; }
 
-        /* Icons */
-        .icon {
-            width: 1em;
-            height: 1em;
-            vertical-align: middle;
-        }
-
-        /* Refresh button */
-        .refresh-btn {
-            background: none;
-            border: none;
-            color: white;
-            cursor: pointer;
-            padding: 8px;
-            border-radius: 50%;
-            transition: background 0.2s;
-        }
-
-        .refresh-btn:hover {
-            background: rgba(255,255,255,0.2);
-        }
-
-        /* Footer */
-        .footer {
-            margin-top: 30px;
-            text-align: center;
-            color: #666;
-            font-size: 0.9em;
-        }
-
-        .footer a {
-            color: #667eea;
-        }
-
-        /* Last updated */
-        .last-updated {
-            color: #999;
-            font-size: 0.85em;
-        }
-
-        /* Responsive */
         @media (max-width: 768px) {
-            .services-grid {
-                grid-template-columns: 1fr;
-            }
-
-            .summary {
-                flex-direction: column;
-                align-items: stretch;
-            }
+            .services-grid { grid-template-columns: 1fr; }
+            .summary { flex-direction: column; align-items: stretch; }
         }
-    </style>
-</head>
-<body>
-    <header>
-        <div class="container">
-            <div style="display: flex; align-items: center; gap: 20px;">
-                <h1>Platform Admin</h1>
-                <nav style="display: flex; gap: 15px;">
-                    <a href="{{ url_for('dashboard') }}">Databases</a>
-                    <a href="{{ url_for('services') }}" class="active" style="background: rgba(255,255,255,0.2);">Services</a>
-                    <a href="{{ url_for('ai_usage') }}">AI Usage</a>
-                    <a href="{{ url_for('ai_keys') }}">AI Keys</a>
-                    <a href="{{ url_for('users') }}">Users</a>
-                    <a href="{{ url_for('workspaces') }}">Workspaces</a>
-                </nav>
-            </div>
-            <div class="status">
+{% endblock %}
+
+{% block header_status %}
                 <span class="status-badge">{{ healthy_count }}/{{ total_count }} Healthy</span>
-                {% if current_user %}
-                <span style="color: rgba(255,255,255,0.9); font-size: 0.9em;">
-                    {{ current_user.username }}
-                    {% if current_user.auth_type == 'oidc' %}
-                    <small style="opacity: 0.7;">(SSO)</small>
-                    {% endif %}
-                </span>
-                <a href="{{ url_for('logout') }}" style="color: white; text-decoration: none; padding: 5px 12px; background: rgba(255,255,255,0.2); border-radius: 4px; font-size: 0.85em;">Logout</a>
-                {% endif %}
                 <button class="refresh-btn" onclick="location.reload()" title="Refresh">
                     <svg width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
                         <path d="M11.534 7h3.932a.25.25 0 0 1 .192.41l-1.966 2.36a.25.25 0 0 1-.384 0l-1.966-2.36a.25.25 0 0 1 .192-.41zm-11 2h3.932a.25.25 0 0 0 .192-.41L2.692 6.23a.25.25 0 0 0-.384 0L.342 8.59A.25.25 0 0 0 .534 9z"/>
                         <path fill-rule="evenodd" d="M8 3c-1.552 0-2.94.707-3.857 1.818a.5.5 0 1 1-.771-.636A6.002 6.002 0 0 1 13.917 7H12.9A5.002 5.002 0 0 0 8 3zM3.1 9a5.002 5.002 0 0 0 8.757 2.182.5.5 0 1 1 .771.636A6.002 6.002 0 0 1 2.083 9H3.1z"/>
                     </svg>
                 </button>
-            </div>
-        </div>
-    </header>
+{% endblock %}
 
-    <div class="container">
+{% block content %}
         <!-- Summary -->
         <div class="summary">
             <div class="summary-stat healthy">
@@ -416,17 +203,11 @@
             </div>
             {% endfor %}
         </div>
+{% endblock %}
 
-        <!-- Footer -->
+{% block footer %}
         <div class="footer">
             <p>Platform Admin - Coder WebIDE Platform</p>
-            <p><a href="/health">API Health</a> · <a href="/api/services">Services API</a></p>
+            <p><a href="/health">API Health</a> &middot; <a href="/api/services">Services API</a></p>
         </div>
-    </div>
-
-    <script>
-        // Auto-refresh every 30 seconds
-        // setTimeout(() => location.reload(), 30000);
-    </script>
-</body>
-</html>
+{% endblock %}

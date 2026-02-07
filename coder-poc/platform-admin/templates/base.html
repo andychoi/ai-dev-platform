@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Platform Admin{% endblock %}</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #f5f7fa;
+            color: #333;
+            line-height: 1.6;
+        }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+
+        /* Header */
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px 0;
+            margin-bottom: 30px;
+        }
+        header .container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        header h1 { font-size: 1.8em; font-weight: 600; }
+        header nav { display: flex; gap: 15px; }
+        header nav a {
+            color: white;
+            text-decoration: none;
+            padding: 5px 10px;
+            border-radius: 4px;
+        }
+        header nav a:hover, header nav a.active {
+            background: rgba(255,255,255,0.2);
+        }
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        /* Status Badge */
+        .status-badge {
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 500;
+            background: rgba(255,255,255,0.2);
+        }
+        .status-connected { background: rgba(255,255,255,0.2); }
+        .status-disconnected { background: rgba(255,100,100,0.3); }
+
+        /* Refresh Button */
+        .refresh-btn {
+            background: none;
+            border: none;
+            color: white;
+            cursor: pointer;
+            padding: 8px;
+            border-radius: 50%;
+            transition: background 0.2s;
+        }
+        .refresh-btn:hover { background: rgba(255,255,255,0.2); }
+
+        /* Flash Messages */
+        .flash {
+            padding: 12px 20px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            font-weight: 500;
+        }
+        .flash-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .flash-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        /* Footer */
+        .footer {
+            margin-top: 30px;
+            text-align: center;
+            color: #666;
+            font-size: 0.9em;
+        }
+        .footer a { color: #667eea; text-decoration: none; }
+        .footer a:hover { text-decoration: underline; }
+
+        {% block extra_css %}{% endblock %}
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div style="display: flex; align-items: center; gap: 20px;">
+                <h1>Platform Admin</h1>
+                <nav>
+                    <a href="{{ url_for('services') }}"{% if active_page == 'services' %} class="active"{% endif %}>Services</a>
+                    <a href="{{ url_for('dashboard') }}"{% if active_page == 'dashboard' %} class="active"{% endif %}>Databases</a>
+                    <a href="{{ url_for('ai_usage') }}"{% if active_page == 'ai_usage' %} class="active"{% endif %}>AI Usage</a>
+                    <a href="{{ url_for('ai_keys') }}"{% if active_page == 'ai_keys' %} class="active"{% endif %}>AI Keys</a>
+                    <a href="{{ url_for('users') }}"{% if active_page == 'users' %} class="active"{% endif %}>Users</a>
+                    <a href="{{ url_for('workspaces') }}"{% if active_page == 'workspaces' %} class="active"{% endif %}>Workspaces</a>
+                    <a href="{{ url_for('storage') }}"{% if active_page == 'storage' %} class="active"{% endif %}>Storage</a>
+                </nav>
+            </div>
+            <div class="header-right">
+                {% block header_status %}{% endblock %}
+                {% if current_user %}
+                <span style="color: rgba(255,255,255,0.9); font-size: 0.9em;">
+                    {{ current_user.username }}
+                    {% if current_user.auth_type == 'oidc' %}
+                    <small style="opacity: 0.7;">(SSO)</small>
+                    {% endif %}
+                </span>
+                <a href="{{ url_for('logout') }}" style="color: white; text-decoration: none; padding: 5px 12px; background: rgba(255,255,255,0.2); border-radius: 4px; font-size: 0.85em;">Logout</a>
+                {% endif %}
+            </div>
+        </div>
+    </header>
+
+    <div class="container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+
+        {% block footer %}
+        <div class="footer">
+            <p>Platform Admin - Coder WebIDE Platform</p>
+        </div>
+        {% endblock %}
+    </div>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>

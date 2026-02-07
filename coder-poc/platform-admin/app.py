@@ -556,7 +556,7 @@ def is_admin():
 def login():
     """Login page with OIDC and local form options"""
     error = None
-    next_url = request.args.get('next', url_for('dashboard'))
+    next_url = request.args.get('next', url_for('services'))
 
     # Already logged in?
     if 'user' in session:
@@ -594,7 +594,7 @@ def login_oidc():
         flash('OIDC is not configured', 'error')
         return redirect(url_for('login'))
 
-    next_url = request.args.get('next', url_for('dashboard'))
+    next_url = request.args.get('next', url_for('services'))
     session['login_next'] = next_url
 
     redirect_uri = url_for('auth_callback', _external=True)
@@ -626,7 +626,7 @@ def auth_callback():
         flash(f'SSO login failed: {str(e)}', 'error')
         return redirect(url_for('login'))
 
-    next_url = session.pop('login_next', url_for('dashboard'))
+    next_url = session.pop('login_next', url_for('services'))
     return redirect(next_url)
 
 
@@ -652,7 +652,7 @@ def inject_user():
     return {'current_user': get_current_user()}
 
 
-@app.route('/')
+@app.route('/databases')
 @require_auth
 def dashboard():
     """Main dashboard view"""
@@ -1002,6 +1002,7 @@ def check_all_services():
     return sorted(results, key=lambda x: x['name'])
 
 
+@app.route('/')
 @app.route('/services')
 @require_auth
 def services():
@@ -1011,10 +1012,18 @@ def services():
     healthy_count = sum(1 for s in service_status if s['status'] == 'healthy')
     total_count = len(service_status)
 
+    # Hide dashboard links for admin-only services when user is not admin
+    admin_only_services = {'ai_gateway', 'authentik'}
+    if not is_admin():
+        for svc in service_status:
+            if svc['key'] in admin_only_services:
+                svc['dashboard_url'] = None
+
     return render_template('services.html',
         services=service_status,
         healthy_count=healthy_count,
-        total_count=total_count
+        total_count=total_count,
+        is_admin=is_admin()
     )
 
 
