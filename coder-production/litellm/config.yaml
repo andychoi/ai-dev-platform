@@ -1,0 +1,67 @@
+# LiteLLM Proxy Configuration — Production (AWS)
+# Bedrock primary (IAM task role, no static keys) + Anthropic API fallback
+
+model_list:
+  # Claude Sonnet 4.5 — Bedrock primary (IAM role), Anthropic fallback
+  - model_name: claude-sonnet-4-5
+    litellm_params:
+      model: bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0
+      aws_region_name: os.environ/AWS_REGION
+    model_info:
+      max_tokens: 8192
+      input_cost_per_token: 0.000003
+      output_cost_per_token: 0.000015
+
+  - model_name: claude-sonnet-4-5
+    litellm_params:
+      model: anthropic/claude-sonnet-4-5-20250929
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  # Claude Haiku 4.5 — Bedrock primary, Anthropic fallback
+  - model_name: claude-haiku-4-5
+    litellm_params:
+      model: bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0
+      aws_region_name: os.environ/AWS_REGION
+    model_info:
+      max_tokens: 8192
+      input_cost_per_token: 0.0000008
+      output_cost_per_token: 0.000004
+
+  - model_name: claude-haiku-4-5
+    litellm_params:
+      model: anthropic/claude-haiku-4-5-20251001
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  # Claude Opus 4 — Bedrock primary, Anthropic fallback
+  - model_name: claude-opus-4
+    litellm_params:
+      model: bedrock/us.anthropic.claude-opus-4-20250514-v1:0
+      aws_region_name: os.environ/AWS_REGION
+    model_info:
+      max_tokens: 8192
+      input_cost_per_token: 0.000015
+      output_cost_per_token: 0.000075
+
+  - model_name: claude-opus-4
+    litellm_params:
+      model: anthropic/claude-opus-4-20250514
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+
+litellm_settings:
+  # Default budget per end-user (developers)
+  max_end_user_budget: 10.00
+  # Drop params not supported by provider instead of erroring
+  drop_params: true
+  # Enable logging — log_to_db for LiteLLM UI
+  success_callback: ["log_to_db"]
+  failure_callback: ["log_to_db"]
+  # Privacy-first: only log metadata (model, tokens, cost, latency) — no prompt/completion content
+  turn_off_message_logging: true
+  # Callbacks:
+  # 1. enforcement_hook — injects system prompts based on key metadata (design-first)
+  # 2. guardrails_hook — blocks PII, financial data, secrets before reaching model
+  callbacks: ["enforcement_hook.proxy_handler_instance", "guardrails_hook.guardrails_instance"]

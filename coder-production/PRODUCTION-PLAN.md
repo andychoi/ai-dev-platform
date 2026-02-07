@@ -561,6 +561,12 @@ litellm_settings:
   drop_params: true
   success_callback: ["log_to_db"]
   failure_callback: ["log_to_db"]
+  # Privacy-first: only log metadata (model, tokens, cost, latency) — no prompt/completion content
+  turn_off_message_logging: true
+  # Callbacks:
+  # 1. enforcement_hook — injects system prompts based on key metadata (design-first)
+  # 2. guardrails_hook — blocks PII, financial data, secrets before reaching model
+  callbacks: ["enforcement_hook.proxy_handler_instance", "guardrails_hook.guardrails_instance"]
 ```
 
 > **Model groups:** Each model name has two provider entries. LiteLLM tries Bedrock first (IAM role, no static key). If Bedrock fails (quota, region issue), it auto-falls back to Anthropic direct API. This is the same pattern validated in the PoC.

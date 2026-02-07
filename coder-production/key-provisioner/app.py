@@ -9,6 +9,8 @@ Endpoints:
   POST /api/v1/keys/workspace     - Auto-provision workspace key (idempotent)
   POST /api/v1/keys/self-service  - Generate personal key (Coder token auth)
   GET  /api/v1/keys/info          - Get key usage/budget info
+  POST /api/v1/keys/reset-user    - Reset user spend (admin-only)
+  GET  /api/v1/keys/list          - List all keys (admin-only)
   GET  /health                    - Health check
 """
 
@@ -286,6 +288,50 @@ def get_key_info():
     except Exception as e:
         log.error("Failed to get key info: %s", e)
         return jsonify({"error": "failed to contact LiteLLM"}), 502
+
+
+# ---------------------------------------------------------------------------
+# Admin endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.route("/api/v1/keys/reset-user", methods=["POST"])
+@require_provisioner_secret
+def reset_user_spend():
+    """Reset a user's spend counter (admin-only, called from Platform Admin)."""
+    body = request.get_json(silent=True) or {}
+    user_id = body.get("user_id", "").strip()
+    if not user_id:
+        return jsonify({"error": "user_id required"}), 400
+
+    # Call LiteLLM /user/update to reset spend to 0
+    resp = requests.post(
+        f"{LITELLM_URL}/user/update",
+        headers=_litellm_headers(),
+        json={"user_id": user_id, "spend": 0},
+        timeout=10,
+    )
+    if resp.status_code not in (200, 201):
+        log.error("Failed to reset spend for user=%s: %s %s", user_id, resp.status_code, resp.text)
+        return jsonify({"error": f"LiteLLM error: {resp.text}"}), resp.status_code
+
+    log.info("Reset spend for user=%s", user_id)
+    return jsonify({"status": "ok", "user_id": user_id, "spend_reset": True})
+
+
+@app.route("/api/v1/keys/list", methods=["GET"])
+@require_provisioner_secret
+def list_keys():
+    """List all virtual keys with budget/rate-limit status."""
+    resp = requests.get(
+        f"{LITELLM_URL}/key/list",
+        headers=_litellm_headers(),
+        timeout=15,
+    )
+    if resp.status_code != 200:
+        log.error("Failed to list keys: %s %s", resp.status_code, resp.text)
+        return jsonify({"error": "failed to list keys"}), resp.status_code
+    return jsonify(resp.json())
 
 
 # ---------------------------------------------------------------------------

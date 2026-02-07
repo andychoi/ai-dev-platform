@@ -1,0 +1,11 @@
+{
+  "_comment": "Custom guardrail patterns — extend or override built-in patterns. Edit without restart (mtime-cached).",
+  "_format": {
+    "pattern": "Python regex",
+    "label": "Human-readable description shown in block messages",
+    "category": "pii | financial | secret | compliance",
+    "severity": "high | medium",
+    "action": "block | flag",
+    "context_required": "Optional boolean — only match when financial keywords present"
+  }
+}
