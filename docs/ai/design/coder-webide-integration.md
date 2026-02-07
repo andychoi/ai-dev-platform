@@ -676,7 +676,7 @@ erDiagram
 
 ## Deployment Architecture
 
-> **Production Migration:** For transitioning from PoC to production, see [Production Implementation Plan](../../../coder-production/PRODUCTION-PLAN.md) which details the Kubernetes deployment strategy and security hardening requirements.
+> **Production Migration:** For transitioning from PoC to production, see [Production Implementation Plan](../../../aws-production/PRODUCTION-PLAN.md) which details the Kubernetes deployment strategy and security hardening requirements.
 
 ### Kubernetes Resources
 

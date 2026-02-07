@@ -19,7 +19,7 @@ This document provides guidance for deploying the Coder WebIDE Development Platf
 
 ## 1. Production Readiness Assessment
 
-**Related Document:** See [PRODUCTION-PLAN.md](../../coder-production/PRODUCTION-PLAN.md) for the detailed implementation plan addressing security issues from the PoC review.
+**Related Document:** See [PRODUCTION-PLAN.md](../../aws-production/PRODUCTION-PLAN.md) for the detailed implementation plan addressing security issues from the PoC review.
 
 ### 1.1 Current PoC vs Production
 

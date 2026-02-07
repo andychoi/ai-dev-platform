@@ -672,7 +672,7 @@ grafana:
 
 ## Phase 3: Production Kubernetes Deployment
 
-> **Note:** For detailed production deployment planning, see [Production Implementation Plan](../../../coder-production/PRODUCTION-PLAN.md) which includes a 6-week timeline and addresses 68 identified security issues.
+> **Note:** For detailed production deployment planning, see [Production Implementation Plan](../../../aws-production/PRODUCTION-PLAN.md) which includes a 6-week timeline and addresses 68 identified security issues.
 
 ### Objective
 Deploy Coder to production Kubernetes cluster.

@@ -352,7 +352,7 @@ Legend: ✓ Write  ○ Read  ✗ No Access
 
 ### 4.3 PoC vs Production Gap
 
-> **Production Roadmap:** A comprehensive 6-week production implementation plan is available at [coder-production/PRODUCTION-PLAN.md](../../../coder-production/PRODUCTION-PLAN.md). This plan addresses 68 security issues identified during PoC review, covering:
+> **Production Roadmap:** A comprehensive 6-week production implementation plan is available at [aws-production/PRODUCTION-PLAN.md](../../../aws-production/PRODUCTION-PLAN.md). This plan addresses 68 security issues identified during PoC review, covering:
 > - Week 1-2: Foundation & Critical Security (Vault, TLS, authentication hardening)
 > - Week 3-4: Code Fixes & Hardening (SQL injection, SSH keys, network isolation)
 > - Week 5-6: Operational Readiness (logging, monitoring, backup)

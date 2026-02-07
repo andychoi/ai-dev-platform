@@ -5,7 +5,7 @@ This document describes the security architecture, controls, and best practices 
 **Related Documents:**
 - [PRODUCTION.md](PRODUCTION.md) - Production deployment guide
 - [POC-SECURITY-REVIEW.md](POC-SECURITY-REVIEW.md) - Comprehensive security audit findings
-- [PRODUCTION-PLAN.md](../../coder-production/PRODUCTION-PLAN.md) - Implementation plan for production
+- [PRODUCTION-PLAN.md](../../aws-production/PRODUCTION-PLAN.md) - Implementation plan for production
 
 ## Table of Contents
 

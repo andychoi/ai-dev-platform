@@ -1022,7 +1022,7 @@ Options:
 ## File Structure
 
 ```
-coder-production/
+aws-production/
 ├── PRODUCTION-PLAN.md
 ├── terraform/
 │   ├── main.tf                     # Root module — infrastructure

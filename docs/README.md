@@ -9,7 +9,7 @@ This directory contains comprehensive documentation for the Coder WebIDE Develop
 | `docs/ai/` | Strategic documentation (requirements, design, planning) | Architects, Project Managers |
 | `shared/docs/` | Platform-wide documentation (AI, security, guardrails, keys) | All Teams |
 | `coder-poc/docs/` | PoC-specific operations (runbook, troubleshooting, SSO) | Developers, Operators |
-| `coder-production/` | Production migration planning | Platform Team |
+| `aws-production/` | Production migration planning | Platform Team |
 
 ## Quick Links
 
@@ -68,7 +68,7 @@ This directory contains comprehensive documentation for the Coder WebIDE Develop
 
 ### Production Planning
 
-- [Production Plan](../coder-production/PRODUCTION-PLAN.md) - 6-week production migration plan (68 security issues)
+- [Production Plan](../aws-production/PRODUCTION-PLAN.md) - 6-week production migration plan (68 security issues)
 
 ## Document Conventions
 
