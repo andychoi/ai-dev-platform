@@ -1,5 +1,5 @@
 {
-  "editor.fontSize": 14,
+  "editor.fontSize": 12,
   "editor.fontFamily": "'Fira Code', 'Droid Sans Mono', 'monospace', monospace",
   "editor.tabSize": 2,
   "editor.insertSpaces": true,
@@ -12,7 +12,7 @@
   "editor.suggestSelection": "first",
   "editor.acceptSuggestionOnEnter": "on",
 
-  "terminal.integrated.fontSize": 14,
+  "terminal.integrated.fontSize": 12,
   "terminal.integrated.cursorStyle": "line",
   "terminal.integrated.scrollback": 10000,
 

@@ -249,19 +249,14 @@ EXTRA_TEMPLATES=()
 [ -d "${POC_DIR}/templates/dotnet-workspace" ] && EXTRA_TEMPLATES+=("dotnet-workspace")
 
 if [ ${#EXTRA_TEMPLATES[@]} -gt 0 ]; then
-    echo -e "${YELLOW}Additional templates available (not deployed in PoC):${NC}"
-    echo ""
-    echo "  To build and push manually:"
-    echo ""
+    echo -e "${YELLOW}Additional templates (not deployed in PoC):${NC}"
     for tpl in "${EXTRA_TEMPLATES[@]}"; do
-        echo "    # ${tpl}"
-        echo "    docker build -t ${tpl}:latest ${POC_DIR}/templates/${tpl}/build"
-        echo "    ${POC_DIR}/scripts/setup-workspace.sh  # or push via Coder CLI"
-        echo ""
+        echo "  - ${tpl}"
     done
-    echo "  Or push a single template with the Coder CLI (inside coder-server container):"
-    echo "    docker exec -e CODER_URL=http://localhost:7080 -e CODER_SESSION_TOKEN=<token> \\"
-    echo "      coder-server coder templates push <name> --directory /tmp/template --yes"
+    echo ""
+    echo "  To deploy, build the image then push the template:"
+    echo "    docker build -t <name>:latest templates/<name>/build"
+    echo "    REBUILD_IMAGE=true ./scripts/setup-workspace.sh   # add to TEMPLATES array first"
     echo ""
 fi
 
