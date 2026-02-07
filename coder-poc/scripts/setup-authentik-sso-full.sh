@@ -10,7 +10,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-AUTHENTIK_URL="${AUTHENTIK_URL:-http://localhost:9000}"
+AUTHENTIK_URL="${AUTHENTIK_URL:-http://host.docker.internal:9000}"
 AUTHENTIK_INTERNAL_URL="http://host.docker.internal:9000"
 
 # Colors
@@ -120,13 +120,37 @@ LITELLM_CLIENT_SECRET=""
 # Get authorization flow
 AUTH_FLOW=$(api_call GET '/flows/instances/?designation=authorization' | python3 -c 'import sys,json; r=json.load(sys.stdin)["results"]; print(r[0]["pk"] if r else "")' 2>/dev/null)
 
-# Get property mappings
-PROP_MAPPINGS=$(api_call GET '/propertymappings/scope/?managed__isnull=false' | python3 -c 'import sys,json; print(json.dumps([p["pk"] for p in json.load(sys.stdin).get("results",[])]))' 2>/dev/null)
+# Get invalidation flow (required in Authentik 2025.x)
+INVAL_FLOW=$(api_call GET '/flows/instances/?designation=invalidation' | python3 -c '
+import sys,json
+results = json.load(sys.stdin)["results"]
+# Prefer the provider-specific invalidation flow
+for r in results:
+    if "provider" in r.get("slug",""):
+        print(r["pk"]); break
+else:
+    if results: print(results[0]["pk"])
+' 2>/dev/null)
+
+# Get OAuth2 scope property mappings (endpoint moved in Authentik 2025.x)
+PROP_MAPPINGS=$(api_call GET '/propertymappings/provider/scope/' | python3 -c '
+import sys,json
+mappings = json.load(sys.stdin).get("results",[])
+print(json.dumps([m["pk"] for m in mappings if m.get("managed","")]))
+' 2>/dev/null)
 
 create_oauth_provider() {
     local name=$1
     local slug=$2
-    local redirect_uri=$3
+    shift 2
+    # Remaining args are redirect URIs
+    local redirect_uris_json="["
+    local first=true
+    for uri in "$@"; do
+        if [ "$first" = true ]; then first=false; else redirect_uris_json+=","; fi
+        redirect_uris_json+="{\"matching_mode\":\"strict\",\"url\":\"${uri}\"}"
+    done
+    redirect_uris_json+="]"
 
     echo "  Creating provider: $name"
 
@@ -146,13 +170,14 @@ for p in data.get('results', []):
         CLIENT_SECRET=$(echo "$EXISTING" | cut -d'|' -f3)
         echo "    Provider exists (pk=$PK)"
     else
-        # Create new provider
+        # Create new provider (Authentik 2025.x: redirect_uris=JSON array, invalidation_flow required)
         RESULT=$(api_call POST "/providers/oauth2/" "{
             \"name\": \"${name}\",
             \"authorization_flow\": \"${AUTH_FLOW}\",
+            \"invalidation_flow\": \"${INVAL_FLOW}\",
             \"client_type\": \"confidential\",
             \"client_id\": \"${slug}\",
-            \"redirect_uris\": \"${redirect_uri}\",
+            \"redirect_uris\": ${redirect_uris_json},
             \"signing_key\": \"${SIGNING_KEY}\",
             \"sub_mode\": \"user_username\",
             \"include_claims_in_id_token\": true,
@@ -196,23 +221,44 @@ for p in data.get('results', []):
             ;;
     esac
 
-    # Link to application (use slug in URL for reliability)
+    # Create or update application and link provider
     if [ -n "$PK" ]; then
-        LINK_RESULT=$(api_call PATCH "/core/applications/${slug}/" "{\"provider\": ${PK}}" 2>&1)
-        if echo "$LINK_RESULT" | grep -q '"provider"'; then
-            echo "    Linked to application"
+        # Check if application exists
+        APP_CHECK=$(api_call GET "/core/applications/${slug}/" 2>&1)
+        if echo "$APP_CHECK" | python3 -c "import sys,json; json.load(sys.stdin)['slug']" &>/dev/null; then
+            # App exists, link provider
+            LINK_RESULT=$(api_call PATCH "/core/applications/${slug}/" "{\"provider\": ${PK}}" 2>&1)
+            echo "    Linked to existing application"
         else
-            echo "    Note: Could not link to application (app may not exist)"
+            # Create application with provider
+            LINK_RESULT=$(api_call POST "/core/applications/" "{
+                \"name\": \"${name}\",
+                \"slug\": \"${slug}\",
+                \"provider\": ${PK},
+                \"meta_launch_url\": \"\",
+                \"open_in_new_tab\": true
+            }" 2>&1)
+            if echo "$LINK_RESULT" | python3 -c "import sys,json; json.load(sys.stdin)['slug']" &>/dev/null; then
+                echo "    Created application and linked provider"
+            else
+                echo -e "${YELLOW}    Warning: Could not create application${NC}"
+                echo "$LINK_RESULT" | head -c 200
+            fi
         fi
     fi
 }
 
-# Create providers for each service
-create_oauth_provider "Coder OIDC" "coder" "http://localhost:7080/api/v2/users/oidc/callback\nhttp://host.docker.internal:7080/api/v2/users/oidc/callback\nhttps://host.docker.internal:7443/api/v2/users/oidc/callback"
-create_oauth_provider "Gitea OIDC" "gitea" "http://localhost:3000/user/oauth2/Authentik/callback"
-create_oauth_provider "MinIO OIDC" "minio" "http://localhost:9001/oauth_callback"
-create_oauth_provider "Platform Admin OIDC" "platform-admin" "http://localhost:5050/auth/callback"
-create_oauth_provider "LiteLLM OIDC" "litellm" "http://localhost:4000/sso/callback"
+# Create providers for each service (each URI is a separate arg)
+create_oauth_provider "Coder OIDC" "coder" \
+    "https://host.docker.internal:7443/api/v2/users/oidc/callback"
+create_oauth_provider "Gitea OIDC" "gitea" \
+    "http://localhost:3000/user/oauth2/Authentik/callback"
+create_oauth_provider "MinIO OIDC" "minio" \
+    "http://localhost:9001/oauth_callback"
+create_oauth_provider "Platform Admin OIDC" "platform-admin" \
+    "http://localhost:5050/auth/callback"
+create_oauth_provider "LiteLLM OIDC" "litellm" \
+    "http://localhost:4000/sso/callback"
 
 echo -e "${GREEN}✓ OAuth2 providers created${NC}"
 

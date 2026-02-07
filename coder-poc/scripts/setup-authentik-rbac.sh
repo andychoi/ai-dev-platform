@@ -23,7 +23,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-AUTHENTIK_URL="${AUTHENTIK_URL:-http://localhost:9000}"
+AUTHENTIK_URL="${AUTHENTIK_URL:-http://host.docker.internal:9000}"
 
 # Colors
 RED='\033[0;31m'
@@ -90,16 +90,10 @@ api_call() {
 
 echo -e "${BLUE}[3/5] Creating RBAC groups...${NC}"
 
-# Group definitions: name → description
-declare -A GROUPS=(
-    ["coder-admins"]="Coder Owner role — full platform admin access"
-    ["coder-template-admins"]="Coder Template Admin role — manage templates and view workspaces"
-    ["coder-auditors"]="Coder Auditor role — read-only audit log access"
-    ["coder-members"]="Coder Member role — standard contractor access (default)"
-)
+# Group definitions (bash 3.2 compatible — no associative arrays on macOS)
+GROUP_NAMES="coder-admins coder-template-admins coder-auditors coder-members"
 
-for group_name in "${!GROUPS[@]}"; do
-    description="${GROUPS[$group_name]}"
+for group_name in $GROUP_NAMES; do
 
     # Check if group exists
     EXISTING=$(api_call GET "/core/groups/?name=${group_name}" | python3 -c "
@@ -132,7 +126,7 @@ echo -e "${BLUE}[4/5] Creating OIDC 'groups' property mapping...${NC}"
 MAPPING_NAME="Coder Groups Claim"
 
 # Check if mapping exists
-EXISTING_MAPPING=$(api_call GET "/propertymappings/scope/?name=$(python3 -c 'import urllib.parse; print(urllib.parse.quote("'"${MAPPING_NAME}"'"))')" | python3 -c "
+EXISTING_MAPPING=$(api_call GET "/propertymappings/provider/scope/?name=$(python3 -c 'import urllib.parse; print(urllib.parse.quote("'"${MAPPING_NAME}"'"))')" | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
 results = data.get('results', [])
@@ -144,7 +138,7 @@ if [ -n "$EXISTING_MAPPING" ]; then
     MAPPING_PK="$EXISTING_MAPPING"
 else
     # Create a custom scope mapping that includes user's group names in the "groups" claim
-    MAPPING_RESULT=$(api_call POST "/propertymappings/scope/" "{
+    MAPPING_RESULT=$(api_call POST "/propertymappings/provider/scope/" "{
         \"name\": \"${MAPPING_NAME}\",
         \"scope_name\": \"groups\",
         \"description\": \"Include user group memberships in OIDC token for Coder role mapping\",
@@ -162,12 +156,13 @@ fi
 
 echo -e "${BLUE}[5/5] Adding groups mapping to Coder OIDC provider...${NC}"
 
-# Find the Coder provider
-CODER_PROVIDER=$(api_call GET "/providers/oauth2/?name=coder" | python3 -c "
+# Find the Coder provider (search by client_id which is always 'coder')
+CODER_PROVIDER=$(api_call GET "/providers/oauth2/?search=coder" | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
-results = data.get('results', [])
-print(results[0]['pk'] if results else '')
+for p in data.get('results', []):
+    if p.get('client_id') == 'coder':
+        print(p['pk']); break
 " 2>/dev/null)
 
 if [ -z "$CODER_PROVIDER" ]; then

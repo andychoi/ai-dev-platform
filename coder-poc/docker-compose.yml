@@ -98,6 +98,7 @@ services:
       CODER_OIDC_CLIENT_ID: "${CODER_OIDC_CLIENT_ID:-coder}"
       CODER_OIDC_CLIENT_SECRET: "${CODER_OIDC_CLIENT_SECRET:-}"
       CODER_OIDC_ALLOW_SIGNUPS: "true"
+      CODER_OIDC_IGNORE_EMAIL_VERIFIED: "true"
 
       # OIDC Group-to-Role Mapping (Authentik → Coder RBAC)
       # Reads the "groups" claim from the OIDC token and maps Authentik groups to Coder roles.
