@@ -340,6 +340,35 @@ Roo Code provides equivalent (and more powerful) capabilities through LiteLLM.
 
 ---
 
+### Q: What is design-first enforcement?
+
+**A:** Design-first enforcement is a platform feature that controls how AI agents approach your tasks. Depending on the enforcement level set for your workspace, the AI may be required to propose a design before writing any code.
+
+There are three levels:
+
+| Level | Behavior |
+|-------|----------|
+| `unrestricted` | AI responds normally with no constraints |
+| `standard` (default) | AI is encouraged to reason through changes before coding |
+| `design-first` | AI **must** propose a design first and cannot output code in its initial response |
+
+This is enforced server-side through LiteLLM — you cannot disable it from within your workspace. It is selected when creating a workspace (the "AI Behavior Mode" parameter).
+
+---
+
+### Q: How do I change the AI behavior mode?
+
+**A:** The AI behavior mode (enforcement level) is set when you create a workspace. To change it:
+
+1. Create a new workspace and select a different "AI Behavior Mode" option
+2. Or ask your admin to rotate your LiteLLM virtual key with an updated enforcement level
+
+Changing the mode on an existing workspace requires workspace recreation or key rotation because the enforcement level is stored in your LiteLLM key's metadata (server-side, not in your workspace config).
+
+See [AI.md Section 12](AI.md#12-design-first-ai-enforcement-layer) for the full explanation.
+
+---
+
 ### Q: Are my prompts logged or stored?
 
 **A:**

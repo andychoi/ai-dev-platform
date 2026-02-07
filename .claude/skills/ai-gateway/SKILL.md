@@ -40,6 +40,16 @@ Key Provisioning:
 | LiteLLM Admin | http://localhost:4000/ui | N/A |
 | Chat Completions | http://localhost:4000/v1/chat/completions | http://litellm:4000/v1/chat/completions |
 
+## Enforcement Layer
+
+LiteLLM uses a custom callback hook to inject system prompts based on per-key `enforcement_level` metadata. This controls how opinionated the AI agent's behavior is (e.g., requiring design docs before code).
+
+- **Hook**: `litellm/enforcement_hook.py` -- registered in `config.yaml` via `callbacks: ["enforcement_hook.proxy_handler_instance"]`
+- **Prompts directory**: `litellm/prompts/` -- editable `.md` files loaded with mtime-based cache (no restart required)
+- **Levels**: `unrestricted` (no injection), `standard` (general best practices), `design-first` (strict design-before-code workflow)
+- **Default level**: Controlled by `DEFAULT_ENFORCEMENT_LEVEL` env var (defaults to `standard`)
+- The `enforcement_level` is set in key metadata at provisioning time (see `skills/key-management/SKILL.md`)
+
 ## Available Models
 
 | Model Name (LiteLLM) | Provider | Use Case |
@@ -195,6 +205,8 @@ Extensions removed in Dockerfile: `github.copilot`, `github.copilot-chat`, `sour
 |------|---------|
 | `coder-poc/.env` | API keys and master key |
 | `coder-poc/litellm/config.yaml` | Model definitions and settings |
+| `coder-poc/litellm/enforcement_hook.py` | Enforcement callback hook (system prompt injection) |
+| `coder-poc/litellm/prompts/*.md` | Enforcement prompt templates (unrestricted, standard, design-first) |
 | `coder-poc/templates/contractor-workspace/main.tf` | Workspace template with AI params |
 | `coder-poc/templates/contractor-workspace/build/settings.json` | VS Code settings |
 | `coder-poc/templates/contractor-workspace/build/Dockerfile` | Extension installation |

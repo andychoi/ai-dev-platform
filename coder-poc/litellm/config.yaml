@@ -75,3 +75,5 @@ litellm_settings:
   # Enable logging
   success_callback: ["log_to_db"]
   failure_callback: ["log_to_db"]
+  # Design-first enforcement hook — injects system prompts based on key metadata
+  callbacks: ["enforcement_hook.proxy_handler_instance"]

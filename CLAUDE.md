@@ -6,8 +6,8 @@
 This file defines what Claude must know first when assisting with this repository.
 It intentionally stays high-level and references deeper operational detail in:
 
-- runbook.md – how to operate, configure, and manage the system
-- troubleshooting.md – failure modes, root causes, and fixes
+- coder-poc/docs/runbook.md – how to operate, configure, and manage the system
+- coder-poc/docs/troubleshooting.md – failure modes, root causes, and fixes
 
 Claude should reference those files instead of duplicating procedures.
 
@@ -27,7 +27,7 @@ Core components:
 - Gitea
 - MinIO
 - PostgreSQL / Redis
-- LiteLLM (AI proxy) + Key Provisioner (key management)
+- LiteLLM (AI proxy) + Key Provisioner (key management) + Enforcement Hook (design-first AI controls)
 - Roo Code (AI agent, VS Code) + OpenCode (AI agent, CLI)
 
 ---
@@ -47,7 +47,7 @@ Reason:
 - Redirect URI generation
 - Agent callback URLs
 
-See runbook.md → Environment Setup.
+See coder-poc/docs/runbook.md → Environment Setup.
 
 ---
 
@@ -56,7 +56,7 @@ See runbook.md → Environment Setup.
 - Coder requires PostgreSQL
 - SSO requires Authentik
 
-See runbook.md → Service Lifecycle.
+See coder-poc/docs/runbook.md → Service Lifecycle.
 
 ---
 
@@ -69,7 +69,7 @@ Any user must exist consistently in:
 
 Misalignment causes silent SSO failures.
 
-See runbook.md → User & Identity Management.
+See coder-poc/docs/runbook.md → User & Identity Management.
 
 ---
 
@@ -79,7 +79,7 @@ Users with login_type=password cannot log in via OIDC.
 
 This is the most common SSO failure.
 
-See troubleshooting.md → Login & SSO Issues.
+See coder-poc/docs/troubleshooting.md → Login & SSO Issues.
 
 ---
 
@@ -94,7 +94,7 @@ Changes require:
 1. Template push
 2. Workspace deletion & recreation
 
-See troubleshooting.md → Workspace & Agent Issues.
+See coder-poc/docs/troubleshooting.md → Workspace & Agent Issues.
 
 ---
 
@@ -154,6 +154,21 @@ See docs/ROO-CODE-LITELLM.md and skills/ai-gateway/SKILL.md.
 
 ---
 
+### AI Enforcement Level Rule (Design-First)
+
+The platform enforces AI behavior modes (`unrestricted`, `standard`, `design-first`) server-side via a LiteLLM callback hook. The enforcement level is stored in each virtual key's `metadata.enforcement_level` and cannot be changed from the workspace.
+
+Key facts:
+- Enforcement is tamper-proof — it happens at the LiteLLM proxy layer, not in the client
+- The level is set at workspace creation via the `ai_enforcement_level` template parameter
+- Existing keys are not updated when the template parameter changes — key rotation or workspace recreation is required
+- Client-side config (Roo Code `customInstructions`, OpenCode `enforcement.md`) is advisory reinforcement only
+- The `design-first` level blocks code output in the AI's first response and requires a design proposal
+
+See docs/AI.md Section 12 and docs/ROO-CODE-LITELLM.md Section 7.
+
+---
+
 ## Optimization Priorities for Claude
 
 - Correctness over convenience
@@ -174,6 +189,7 @@ See docs/ROO-CODE-LITELLM.md and skills/ai-gateway/SKILL.md.
 - Exposing master API keys to workspaces (use LiteLLM virtual keys via key-provisioner)
 - Using Roo Cloud auth when LiteLLM is the provider
 - Bypassing key-provisioner to call LiteLLM admin endpoints from workspaces
+- Assuming changing the `ai_enforcement_level` template parameter updates existing keys (it does not — key rotation or workspace recreation is required)
 
 ---
 

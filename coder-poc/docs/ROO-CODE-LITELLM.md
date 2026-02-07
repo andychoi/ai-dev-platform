@@ -10,9 +10,10 @@ This document covers the complete configuration of Roo Code AI coding agent with
 4. [Roo Code Extension Configuration](#4-roo-code-extension-configuration)
 5. [Workspace Template Integration](#5-workspace-template-integration)
 6. [User Key Management](#6-user-key-management)
-7. [Suppressing "Create Roo Account" Prompt](#7-suppressing-create-roo-account-prompt)
-8. [Troubleshooting](#8-troubleshooting)
-9. [Verification Checklist](#9-verification-checklist)
+7. [Design-First AI Enforcement](#7-design-first-ai-enforcement)
+8. [Suppressing "Create Roo Account" Prompt](#8-suppressing-create-roo-account-prompt)
+9. [Troubleshooting](#9-troubleshooting)
+10. [Verification Checklist](#10-verification-checklist)
 
 ---
 
@@ -175,6 +176,8 @@ litellm_settings:
   drop_params: true
   success_callback: ["log_to_db"]
   failure_callback: ["log_to_db"]
+  # Design-first enforcement hook — injects system prompts based on key metadata
+  callbacks: ["enforcement_hook.proxy_handler_instance"]
 ```
 
 ### Model Name Mapping
@@ -372,6 +375,7 @@ The template exposes these user-configurable parameters:
 | `litellm_api_key` | (empty) | Per-user LiteLLM virtual key |
 | `ai_model` | `claude-sonnet` | Model selection |
 | `ai_gateway_url` | `http://litellm:4000` | LiteLLM proxy URL |
+| `ai_enforcement_level` | `standard` | AI behavior mode (see [Section 7](#7-design-first-ai-enforcement)) |
 
 ### Startup Script Logic
 
@@ -473,7 +477,71 @@ See `docs/KEY-MANAGEMENT.md` for full key management documentation.
 
 ---
 
-## 7. Suppressing "Create Roo Account" Prompt
+## 7. Design-First AI Enforcement
+
+### Overview
+
+The enforcement layer controls how AI agents approach development tasks, replicating the structured workflow quality of Claude Code CLI across Roo Code and OpenCode. It operates at two levels:
+
+- **Server-side** (LiteLLM callback): Tamper-proof system prompt injection based on key metadata
+- **Client-side** (Roo Code + OpenCode config): UX-native instructions that reinforce the server-side rules
+
+### Enforcement Levels
+
+| Level | System Prompt | Design Proposal | Code in First Response | Use Case |
+|-------|--------------|----------------|----------------------|----------|
+| `unrestricted` | None | Not required | Allowed | Quick tasks, experienced devs |
+| `standard` (default) | Lightweight reasoning | Encouraged | Allowed | Daily development |
+| `design-first` | Full architect mode | **Required** | **Blocked** | Complex features, new contractors |
+
+### How It Works
+
+1. **Workspace creation** — User selects "AI Behavior Mode" parameter (`standard`, `design-first`, or `unrestricted`)
+2. **Key provisioning** — Startup script passes `enforcement_level` to key-provisioner, stored in LiteLLM key metadata
+3. **Server-side injection** — LiteLLM's `EnforcementHook` callback reads key metadata on every API call and prepends the appropriate system prompt from `/app/prompts/{level}.md`
+4. **Client-side reinforcement** — Roo Code's `customInstructions` and OpenCode's `enforcement.md` provide matching in-tool instructions
+
+### Configuration
+
+Set per-workspace at creation via the `ai_enforcement_level` template parameter. Stored in key's `metadata.enforcement_level`.
+
+**Changing enforcement level requires** either recreating the workspace or manually updating key metadata via LiteLLM admin API.
+
+### Prompt Files
+
+Located at `coder-poc/litellm/prompts/`:
+
+| File | Level | Content |
+|------|-------|---------|
+| `unrestricted.md` | `unrestricted` | Empty (no injection) |
+| `standard.md` | `standard` | 6-point reasoning checklist |
+| `design-first.md` | `design-first` | Mandatory design-before-code workflow |
+
+**Edit without restart:** Prompt files use mtime-based caching — changes take effect on the next API call.
+
+### Verify Enforcement
+
+```bash
+# Run the enforcement test suite
+bash scripts/test-enforcement.sh
+
+# Check hook is loaded (via admin API)
+curl -s -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  http://localhost:4000/get/config/callbacks | python3 -m json.tool
+
+# Check a key's enforcement level
+curl -s -X GET http://localhost:4000/key/info \
+  -H "Authorization: Bearer <user-key>" | python3 -c "
+import sys, json; d = json.load(sys.stdin)
+print('enforcement_level:', d.get('info',{}).get('metadata',{}).get('enforcement_level','NONE'))
+"
+```
+
+See `docs/AI.md` Section 12 for full architectural details.
+
+---
+
+## 8. Suppressing "Create Roo Account" Prompt
 
 ### Problem
 
@@ -507,7 +575,7 @@ See [Troubleshooting - Blank Roo Code Panel](#blank-roo-code-panel) below.
 
 ---
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 ### LiteLLM Returns 401 Authentication Error
 
@@ -645,7 +713,7 @@ curl http://localhost:4000/budget/update \
 
 ---
 
-## 9. Verification Checklist
+## 10. Verification Checklist
 
 ### Infrastructure Checks
 

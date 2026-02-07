@@ -56,12 +56,27 @@ User (in workspace)
 ## Auto-Provisioning Flow
 
 1. Workspace starts, startup script runs
-2. Script calls `POST /api/v1/keys/workspace` with `workspace_id`, `username`, `workspace_name`
+2. Script calls `POST /api/v1/keys/workspace` with `workspace_id`, `username`, `workspace_name`, and optionally `enforcement_level`
 3. Auth: `Authorization: Bearer $PROVISIONER_SECRET`
 4. Key-provisioner checks if alias `workspace-{id}` already exists (idempotent)
-5. If not, generates key via LiteLLM `/key/generate` with scope defaults
+5. If not, generates key via LiteLLM `/key/generate` with scope defaults and `enforcement_level` in metadata
 6. Returns virtual key to workspace
 7. Key is written to Roo Code config for immediate use
+
+### `enforcement_level` Metadata Field
+
+Each virtual key can carry an `enforcement_level` in its metadata. The LiteLLM enforcement hook (`enforcement_hook.py`) reads this field at request time and prepends the corresponding system prompt.
+
+| Value | Behavior |
+|-------|----------|
+| `unrestricted` | No system prompt injected |
+| `standard` | General best-practices prompt (default) |
+| `design-first` | Strict design-before-code workflow prompt |
+
+- Set at provisioning time via the `enforcement_level` body parameter on `POST /api/v1/keys/workspace`
+- Invalid values fall back to `standard`
+- Stored in key metadata as `metadata.enforcement_level`
+- See `skills/ai-gateway/SKILL.md` for enforcement hook details
 
 ## Scripts
 

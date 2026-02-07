@@ -90,6 +90,39 @@ docker compose up -d <service>
 
 ---
 
+## AI Enforcement Issues
+
+### AI Not Following Design-First Workflow
+
+Cause: enforcement_level in the LiteLLM key metadata may be wrong or missing.
+
+Diagnose:
+
+```bash
+# Check the key's enforcement level
+curl -s -X GET http://localhost:4000/key/info \
+  -H "Authorization: Bearer <user-key>" | python3 -c "
+import sys, json; d = json.load(sys.stdin)
+print('enforcement_level:', d.get('info',{}).get('metadata',{}).get('enforcement_level','NONE'))
+"
+
+# Verify the enforcement hook is loaded
+docker logs litellm 2>&1 | grep enforcement
+
+# Run the enforcement test suite
+bash scripts/test-enforcement.sh
+```
+
+Fix:
+
+- If enforcement_level is missing or wrong: rotate the key (delete + recreate with correct metadata) or recreate the workspace with the correct `ai_enforcement_level` template parameter.
+- If the hook is not loaded: check `litellm/config.yaml` includes `callbacks: ["enforcement_hook.proxy_handler_instance"]` and restart LiteLLM with `docker compose up -d litellm`.
+- Changing the template parameter alone does NOT update existing keys — key rotation or workspace recreation is required.
+
+See docs/AI.md Section 12 and docs/ROO-CODE-LITELLM.md Section 7.
+
+---
+
 ## OAuth Noise
 
 ### Disable Default GitHub Login

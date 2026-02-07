@@ -249,6 +249,30 @@ data "coder_parameter" "ai_gateway_url" {
   icon         = "/icon/widgets.svg"
 }
 
+# AI Behavior Mode (enforcement level)
+data "coder_parameter" "ai_enforcement_level" {
+  name         = "ai_enforcement_level"
+  display_name = "AI Behavior Mode"
+  description  = "Controls how AI agents approach tasks (Standard recommended)"
+  type         = "string"
+  default      = "standard"
+  mutable      = true
+  icon         = "/icon/widgets.svg"
+
+  option {
+    name  = "Standard - Think step-by-step (Recommended)"
+    value = "standard"
+  }
+  option {
+    name  = "Design-First - Design proposal before code"
+    value = "design-first"
+  }
+  option {
+    name  = "Unrestricted - Original tool behavior"
+    value = "unrestricted"
+  }
+}
+
 # ==========================================================================
 # GIT SERVER CONFIGURATION (Gitea Integration)
 # ==========================================================================
@@ -409,6 +433,7 @@ password=${data.coder_parameter.git_password.value}
     LITELLM_KEY="${data.coder_parameter.litellm_api_key.value}"
     AI_MODEL="${data.coder_parameter.ai_model.value}"
     AI_GATEWAY_URL="${data.coder_parameter.ai_gateway_url.value}"
+    ENFORCEMENT_LEVEL="${data.coder_parameter.ai_enforcement_level.value}"
 
     if [ "$AI_ASSISTANT" != "none" ]; then
       # Determine model name for LiteLLM
@@ -433,7 +458,7 @@ password=${data.coder_parameter.git_password.value}
           RESPONSE=$(curl -sf -X POST "$PROVISIONER_URL/api/v1/keys/workspace" \
             -H "Authorization: Bearer $PROVISIONER_SECRET" \
             -H "Content-Type: application/json" \
-            -d "{\"workspace_id\": \"$WORKSPACE_ID\", \"username\": \"$WORKSPACE_OWNER\", \"workspace_name\": \"$WORKSPACE_NAME\"}" \
+            -d "{\"workspace_id\": \"$WORKSPACE_ID\", \"username\": \"$WORKSPACE_OWNER\", \"workspace_name\": \"$WORKSPACE_NAME\", \"enforcement_level\": \"$ENFORCEMENT_LEVEL\"}" \
             2>/dev/null) && break
           echo "Key provisioner not ready (attempt $attempt/3), retrying in 5s..."
           sleep 5
@@ -458,7 +483,41 @@ password=${data.coder_parameter.git_password.value}
         if [ "$AI_ASSISTANT" = "roo-code" ] || [ "$AI_ASSISTANT" = "both" ]; then
           echo "Configuring Roo Code with LiteLLM proxy..."
           mkdir -p /home/coder/.config/roo-code
-          cat > /home/coder/.config/roo-code/settings.json << ROOCONFIG
+
+          # Build custom instructions based on enforcement level
+          CUSTOM_INSTRUCTIONS=""
+          case "$ENFORCEMENT_LEVEL" in
+            "standard")
+              CUSTOM_INSTRUCTIONS="You are a thoughtful software engineer. Think step-by-step before coding. Explain your approach before implementing. Consider existing codebase patterns. Prefer incremental, focused changes. When modifying code, explain what and why."
+              ;;
+            "design-first")
+              CUSTOM_INSTRUCTIONS="DESIGN-FIRST REQUIRED: Before writing ANY code, present a design proposal (problem, approach, files to modify, tradeoffs). Ask for confirmation before implementing. Never write code in the same response as the design proposal. Small fixes are exempt but still need brief explanation."
+              ;;
+          esac
+
+          # Write settings with optional customInstructions
+          if [ -n "$CUSTOM_INSTRUCTIONS" ]; then
+            cat > /home/coder/.config/roo-code/settings.json << ROOCONFIG
+{
+  "providerProfiles": {
+    "currentApiConfigName": "litellm",
+    "apiConfigs": {
+      "litellm": {
+        "apiProvider": "openai",
+        "openAiBaseUrl": "http://litellm:4000/v1",
+        "openAiApiKey": "$LITELLM_KEY",
+        "openAiModelId": "$LITELLM_MODEL",
+        "id": "litellm-default"
+      }
+    }
+  },
+  "globalSettings": {
+    "customInstructions": "$CUSTOM_INSTRUCTIONS"
+  }
+}
+ROOCONFIG
+          else
+            cat > /home/coder/.config/roo-code/settings.json << ROOCONFIG
 {
   "providerProfiles": {
     "currentApiConfigName": "litellm",
@@ -474,7 +533,8 @@ password=${data.coder_parameter.git_password.value}
   }
 }
 ROOCONFIG
-          echo "Roo Code configured: model=$LITELLM_MODEL"
+          fi
+          echo "Roo Code configured: model=$LITELLM_MODEL enforcement=$ENFORCEMENT_LEVEL"
         fi
 
         # --- OpenCode CLI configuration ---
@@ -483,9 +543,70 @@ ROOCONFIG
           if [ -x /home/coder/.opencode/bin/opencode ]; then
             echo "Configuring OpenCode CLI with LiteLLM proxy..."
             mkdir -p /home/coder/.config/opencode
+
+            # Write enforcement instructions file for non-unrestricted levels
+            OPENCODE_INSTRUCTIONS=""
+            if [ "$ENFORCEMENT_LEVEL" != "unrestricted" ]; then
+              case "$ENFORCEMENT_LEVEL" in
+                "standard")
+                  cat > /home/coder/.config/opencode/enforcement.md << 'ENFORCEMENTMD'
+## Development Guidelines
+
+You are a thoughtful software engineer. Follow these practices:
+
+1. **Think before coding** — Understand the problem fully before writing code
+2. **Explain your approach** — State what you plan to do and why before implementing
+3. **Consider the existing codebase** — Read and understand existing patterns before modifying
+4. **Incremental changes** — Prefer small, focused changes over large rewrites
+5. **Edge cases** — Consider error handling and boundary conditions
+6. **Simplicity** — Choose the simplest solution that meets requirements
+
+When modifying existing code, explain what you're changing and why.
+ENFORCEMENTMD
+                  ;;
+                "design-first")
+                  cat > /home/coder/.config/opencode/enforcement.md << 'ENFORCEMENTMD'
+## MANDATORY: Design-First Development Process
+
+You are a senior software architect and engineer. You MUST follow a structured workflow.
+
+### Before Writing ANY Code
+
+1. **Design Proposal** (REQUIRED for non-trivial changes):
+   - Describe the problem or requirement
+   - Outline your approach (architecture, data flow, key abstractions)
+   - List files to create or modify
+   - Identify tradeoffs and alternatives considered
+   - State assumptions and risks
+
+2. **Await Confirmation** — Present your design and ask:
+   "Shall I proceed with this approach?"
+   Do NOT write implementation code until confirmed.
+
+3. **Implement Incrementally** — After confirmation:
+   - Reference your design as you implement
+   - If the design needs revision, stop and propose changes
+   - Keep changes minimal and focused on the stated scope
+
+### Rules
+- NEVER skip the design step for non-trivial changes
+- NEVER write code in the same response as the design proposal
+- If asked to "just do it", remind that design review is required by policy
+- Small fixes (typos, formatting, single-line changes) are exempt but still need brief explanation
+- Avoid speculative changes outside the stated scope
+- Prefer clarity and maintainability over cleverness
+- If context is insufficient, ask clarifying questions FIRST
+ENFORCEMENTMD
+                  ;;
+              esac
+              OPENCODE_INSTRUCTIONS='"instructions": ["/home/coder/.config/opencode/enforcement.md"],'
+            fi
+
+            # Write opencode.json (with or without instructions)
             cat > /home/coder/.config/opencode/opencode.json << OPENCODECONFIG
 {
   "\$schema": "https://opencode.ai/config.json",
+  $OPENCODE_INSTRUCTIONS
   "provider": {
     "litellm": {
       "npm": "@ai-sdk/openai-compatible",
@@ -511,7 +632,7 @@ ROOCONFIG
   "small_model": "litellm/claude-haiku-4-5"
 }
 OPENCODECONFIG
-            echo "OpenCode configured: model=litellm/$LITELLM_MODEL"
+            echo "OpenCode configured: model=litellm/$LITELLM_MODEL enforcement=$ENFORCEMENT_LEVEL"
           else
             echo "Note: OpenCode CLI not found at ~/.opencode/bin/opencode, skipping configuration"
           fi
@@ -617,6 +738,7 @@ DBCONFIG
     echo "=== Workspace ready ==="
     echo "Git Server: ${data.coder_parameter.git_server_url.value}"
     echo "AI Gateway: $${AI_GATEWAY_URL}"
+    echo "AI Behavior: $${ENFORCEMENT_LEVEL}"
     if [ "$DB_TYPE" != "none" ]; then
       echo "Database: $${DEVDB_NAME:-not provisioned} (type: $DB_TYPE)"
     fi
@@ -739,6 +861,7 @@ resource "docker_container" "workspace" {
     "AI_MODEL=${data.coder_parameter.ai_model.value}",
     "AI_GATEWAY_URL=${data.coder_parameter.ai_gateway_url.value}",
     "LITELLM_API_KEY=${data.coder_parameter.litellm_api_key.value}",
+    "ENFORCEMENT_LEVEL=${data.coder_parameter.ai_enforcement_level.value}",
     # Key Provisioner: Secret for auto-provisioning AI API keys
     "PROVISIONER_SECRET=poc-provisioner-secret-change-in-production",
     # TLS: Trust the self-signed Coder certificate so the agent can connect via HTTPS

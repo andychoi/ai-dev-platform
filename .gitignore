@@ -35,5 +35,7 @@ coder-poc/drone-data/
 *.pem
 .vercel
 
+.playwright-mcp
+
 security-report*
 *.png

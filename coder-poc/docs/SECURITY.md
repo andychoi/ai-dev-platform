@@ -365,7 +365,27 @@ All built-in and third-party AI features are disabled to ensure AI traffic is ro
 2. **VS Code settings** — All `github.copilot.*`, `cody.*`, `chat.*` disabled
 3. **Dockerfile** — Explicit `--uninstall-extension` for Copilot, Copilot Chat, Cody
 
-### 6.4 Roo Code Extension Security
+### 6.4 Design-First AI Enforcement (Server-Side Prompt Injection)
+
+The platform includes a tamper-proof enforcement layer that controls AI agent behavior at the proxy level. A LiteLLM `CustomLogger` callback reads `enforcement_level` from each virtual key's metadata and prepends a mandatory system prompt to every chat completion request. Because enforcement happens server-side inside LiteLLM, users cannot disable, modify, or bypass it from the workspace.
+
+| Enforcement Level | Effect |
+|-------------------|--------|
+| `unrestricted` | No system prompt injected |
+| `standard` (default) | Lightweight reasoning checklist prepended |
+| `design-first` | Mandatory design-before-code workflow; code output blocked in first response |
+
+Security properties:
+- **Tamper-proof** — Prompt injection occurs at the proxy, outside workspace control
+- **Key-bound** — Enforcement level is stored in key metadata, not in client config
+- **Downgrade-resistant** — Changing the template parameter does not affect existing keys; key rotation is required
+- **Auditable** — LiteLLM logs include the enforcement level applied to each request
+
+Client-side config (Roo Code `customInstructions`, OpenCode `enforcement.md`) reinforces the server-side rules but is advisory only. The server-side hook is the authoritative control.
+
+See [AI.md Section 12](AI.md#12-design-first-ai-enforcement-layer) and [ROO-CODE-LITELLM.md Section 7](ROO-CODE-LITELLM.md#7-design-first-ai-enforcement) for implementation details.
+
+### 6.5 Roo Code Extension Security
 
 ```json
 // Workspace-level config (~/.config/roo-code/settings.json)
@@ -507,6 +527,7 @@ add_header Content-Security-Policy "default-src 'self';" always;
 | Privilege escalation | Medium | Non-root containers, RBAC |
 | Supply chain | Medium | Signed images, vulnerability scanning |
 | AI prompt injection | Low | Input validation, output filtering |
+| AI enforcement bypass | Low | Server-side prompt injection via LiteLLM hook; key-bound metadata |
 
 ### 9.3 Risk Assessment
 

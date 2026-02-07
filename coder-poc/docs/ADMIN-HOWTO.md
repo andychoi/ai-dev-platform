@@ -576,6 +576,27 @@ curl http://localhost:4000/key/delete \
   -d '{"keys": ["sk-user-key-to-revoke"]}'
 ```
 
+### Task: Change a User's AI Enforcement Level
+
+The Design-First AI Enforcement Layer controls how AI agents approach development tasks (e.g., requiring a design proposal before writing code). The enforcement level (`unrestricted`, `standard`, `design-first`) is stored in the LiteLLM virtual key's metadata and injected server-side by a LiteLLM callback — users cannot bypass it.
+
+**Option 1: Change for new workspaces** — Update the `ai_enforcement_level` template parameter default in `main.tf` and push the template.
+
+**Option 2: Change for an existing workspace** — The enforcement level is baked into the key at creation time. To change it, either:
+1. Delete the workspace and recreate it with the new level, or
+2. Rotate the key via the LiteLLM admin API (delete the old key, create a new one with updated `metadata.enforcement_level`)
+
+```bash
+# Check a key's current enforcement level
+curl -s -X GET http://localhost:4000/key/info \
+  -H "Authorization: Bearer <user-key>" | python3 -c "
+import sys, json; d = json.load(sys.stdin)
+print('enforcement_level:', d.get('info',{}).get('metadata',{}).get('enforcement_level','NONE'))
+"
+```
+
+See [AI.md Section 12](AI.md#12-design-first-ai-enforcement-layer) and [ROO-CODE-LITELLM.md Section 7](ROO-CODE-LITELLM.md#7-design-first-ai-enforcement) for full details.
+
 ### Task: Check What's Running
 
 ```bash

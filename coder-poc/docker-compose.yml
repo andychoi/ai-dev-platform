@@ -366,10 +366,13 @@ services:
       - AWS_REGION=${AWS_REGION:-us-east-1}
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-poc-litellm-master-key-change-in-production}
       - DATABASE_URL=${LITELLM_DATABASE_URL:-postgresql://litellm:litellm@postgres:5432/litellm}
+      - DEFAULT_ENFORCEMENT_LEVEL=${DEFAULT_ENFORCEMENT_LEVEL:-standard}
     ports:
       - "4000:4000"
     volumes:
       - ./litellm/config.yaml:/app/config.yaml:ro
+      - ./litellm/enforcement_hook.py:/app/enforcement_hook.py:ro
+      - ./litellm/prompts:/app/prompts:ro
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     networks:
       - coder-network

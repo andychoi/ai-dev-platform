@@ -15,6 +15,7 @@ This document describes how AI capabilities are integrated into the Coder WebIDE
 9. [Configuration Reference](#9-configuration-reference)
 10. [Troubleshooting](#10-troubleshooting)
 11. [LiteLLM Gateway Benefits](#11-litellm-gateway-benefits)
+12. [Design-First AI Enforcement Layer](#12-design-first-ai-enforcement-layer)
 
 ---
 
@@ -968,6 +969,93 @@ Platform administrators have access to comprehensive AI usage data through multi
 
 ---
 
+## 12. Design-First AI Enforcement Layer
+
+### 12.1 Overview
+
+The enforcement layer controls how AI agents approach development tasks. It replicates the qualities that make Claude Code CLI effective — opinionated system prompts, forced design-before-code loops, and tool discipline — and applies them server-side through LiteLLM.
+
+### 12.2 Enforcement Levels
+
+| Level | System Prompt Injected | Design Proposal Required | Code in First Response | Use Case |
+|-------|----------------------|--------------------------|----------------------|----------|
+| `unrestricted` | No | No | Allowed | Quick tasks, experienced devs |
+| `standard` | Lightweight reasoning | No (encouraged) | Allowed | Daily development (default) |
+| `design-first` | Full architect mode | Yes (mandatory) | Blocked | Complex features, new contractors |
+
+### 12.3 How It Works
+
+**Server-side (tamper-proof):** A LiteLLM `CustomLogger` callback reads `enforcement_level` from the virtual key's metadata and prepends the appropriate system prompt to every chat completion request. Users cannot bypass this — it's enforced at the proxy layer.
+
+**Client-side (UX reinforcement):** The workspace startup script also configures enforcement instructions directly in Roo Code (`customInstructions`) and OpenCode (`instructions` file). This gives the AI agent upfront context in addition to the server-side prompt.
+
+```
+┌─────────────────────────────────────────────────────┐
+│  Workspace Template Parameter                        │
+│  ai_enforcement_level: standard | design-first |     │
+│                        unrestricted                  │
+└────────────────┬────────────────────┬────────────────┘
+                 │                    │
+    ┌────────────▼──────────┐  ┌─────▼──────────────────┐
+    │  Key Provisioner      │  │  Startup Script         │
+    │  stores level in      │  │  writes client configs  │
+    │  key metadata         │  │  with matching prompts  │
+    └────────────┬──────────┘  └─────┬──────────────────┘
+                 │                    │
+    ┌────────────▼──────────┐  ┌─────▼──────────────────┐
+    │  LiteLLM Hook         │  │  Roo Code settings.json │
+    │  (SERVER-SIDE)        │  │  OpenCode enforcement.md│
+    │  reads key metadata   │  │  (CLIENT-SIDE)          │
+    │  injects prompt       │  │  advisory reinforcement │
+    │  TAMPER-PROOF         │  │                         │
+    └───────────────────────┘  └─────────────────────────┘
+```
+
+### 12.4 Configuration
+
+Users select their enforcement level when creating or updating a workspace:
+
+- **AI Behavior Mode** parameter in the workspace template
+- Default: `standard`
+- Mutable: Yes (can be changed without recreating workspace, but server-side level on existing keys persists — see note below)
+
+**Key files:**
+
+| File | Purpose |
+|------|---------|
+| `litellm/enforcement_hook.py` | LiteLLM callback — reads metadata, injects prompt |
+| `litellm/prompts/unrestricted.md` | Empty (no injection) |
+| `litellm/prompts/standard.md` | Lightweight reasoning prompt |
+| `litellm/prompts/design-first.md` | Full architect-mode prompt |
+| `key-provisioner/app.py` | Stores enforcement_level in key metadata |
+| `templates/contractor-workspace/main.tf` | Template parameter + client configs |
+
+### 12.5 Prompt Editing
+
+Prompts are loaded from `/app/prompts/*.md` inside the LiteLLM container (bind-mounted from `coder-poc/litellm/prompts/`). They are cached by file modification time — edit the files on the host and changes take effect on the next API call without restarting LiteLLM.
+
+### 12.6 Idempotency Note
+
+When a workspace key already exists (workspace restart), the enforcement level from the original key creation is used. Changing the template parameter alone won't update server-side enforcement for existing keys — the key must be rotated. This is a security benefit (prevents downgrade attacks) and is acceptable for PoC.
+
+### 12.7 Verification
+
+```bash
+# Run the enforcement layer test suite
+./scripts/test-enforcement.sh
+
+# Check LiteLLM logs for enforcement hook loading
+docker logs litellm 2>&1 | grep enforcement
+
+# Test enforcement injection manually
+curl -s http://localhost:4000/v1/chat/completions \
+  -H "Authorization: Bearer <workspace-key>" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":"hello"}],"max_tokens":10}'
+```
+
+---
+
 ## Document History
 
 | Version | Date | Author | Changes |
@@ -977,3 +1065,4 @@ Platform administrators have access to comprehensive AI usage data through multi
 | 1.2 | 2026-02-05 | Platform Team | Disable Copilot/Cody/AI Bridge; document three-layer lockdown |
 | 1.3 | 2026-02-06 | Platform Team | Add OpenCode CLI, key-provisioner service, auto-provisioning |
 | 1.4 | 2026-02-06 | Platform Team | Add Section 11: LiteLLM Gateway Benefits (analytics, coaching, admin capabilities) |
+| 1.5 | 2026-02-06 | Platform Team | Add Section 12: Design-First AI Enforcement Layer |

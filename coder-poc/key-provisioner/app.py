@@ -163,6 +163,9 @@ def create_workspace_key():
     workspace_id = body.get("workspace_id", "").strip()
     username = body.get("username", "").strip()
     workspace_name = body.get("workspace_name", "")
+    enforcement_level = body.get("enforcement_level", "standard").strip()
+    if enforcement_level not in ("unrestricted", "standard", "design-first"):
+        enforcement_level = "standard"
 
     if not workspace_id or not username:
         return jsonify({"error": "workspace_id and username are required"}), 400
@@ -185,6 +188,7 @@ def create_workspace_key():
         "workspace_owner": username,
         "workspace_name": workspace_name,
         "purpose": "auto-provisioned workspace key",
+        "enforcement_level": enforcement_level,
     }
 
     key, err = _generate_key(
@@ -197,7 +201,8 @@ def create_workspace_key():
     if not key:
         return jsonify({"error": f"Failed to generate key: {err}"}), 502
 
-    log.info("Generated workspace key for workspace=%s user=%s", workspace_id, username)
+    log.info("Generated workspace key for workspace=%s user=%s enforcement=%s",
+             workspace_id, username, enforcement_level)
     return jsonify({"key": key, "reused": False}), 201
 
 

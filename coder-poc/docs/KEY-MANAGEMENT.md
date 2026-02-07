@@ -81,6 +81,7 @@ Every virtual key created through the provisioner carries structured metadata st
   "workspace_name": "contractor-alice",
   "coder_user": "alice",
   "coder_user_id": "usr-def456",
+  "enforcement_level": "standard",
   "expires_at": "2026-02-06T22:00:00Z",
   "budget_usd": 5.0,
   "rpm_limit": 30,
@@ -103,6 +104,7 @@ Fields:
 | `expires_at`     | ISO 8601 | Key expiration time (null for non-expiring)          |
 | `budget_usd`     | float    | Maximum spend allowed                                |
 | `rpm_limit`      | int      | Requests per minute                                  |
+| `enforcement_level` | string | AI enforcement policy: `unrestricted`, `standard` (default), or `design-first`. Set at key creation time from the Coder template parameter. Read by the LiteLLM enforcement hook to inject appropriate system prompts. Changing this value requires key rotation. |
 | `models`         | string[] | Allowed model names matching LiteLLM config          |
 
 ---
@@ -113,7 +115,7 @@ When a workspace starts, the following sequence runs automatically via the start
 
 1. **Workspace starts** — Coder agent executes the template startup script.
 2. **Startup script checks for existing key** — if `LITELLM_API_KEY` is already set and valid, skip provisioning.
-3. **Script calls the provisioner** — sends a POST request to the key provisioner:
+3. **Script calls the provisioner** — sends a POST request to the key provisioner, including the `enforcement_level` from the Coder template parameter (defaults to `standard` if not specified):
    ```bash
    curl -s -X POST http://localhost:8100/api/v1/keys/workspace \
      -H "Content-Type: application/json" \
@@ -122,7 +124,8 @@ When a workspace starts, the following sequence runs automatically via the start
        "workspace_id": "'${CODER_WORKSPACE_ID}'",
        "workspace_name": "'${CODER_WORKSPACE_NAME}'",
        "coder_user": "'${CODER_USERNAME}'",
-       "coder_user_id": "'${CODER_USER_ID}'"
+       "coder_user_id": "'${CODER_USER_ID}'",
+       "enforcement_level": "'${ENFORCEMENT_LEVEL:-standard}'"
      }'
    ```
 4. **Provisioner validates** — checks the provisioner secret, verifies the workspace identity, and applies scope rules for `workspace` type keys.
@@ -143,7 +146,8 @@ if [ -z "${LITELLM_API_KEY}" ]; then
       \"workspace_id\": \"${CODER_WORKSPACE_ID}\",
       \"workspace_name\": \"${CODER_WORKSPACE_NAME}\",
       \"coder_user\": \"${CODER_USERNAME}\",
-      \"coder_user_id\": \"${CODER_USER_ID}\"
+      \"coder_user_id\": \"${CODER_USER_ID}\",
+      \"enforcement_level\": \"${ENFORCEMENT_LEVEL:-standard}\"
     }")
 
   LITELLM_API_KEY=$(echo "$RESPONSE" | jq -r '.key')
@@ -319,7 +323,8 @@ curl -X POST http://localhost:8100/api/v1/keys/workspace \
     "workspace_id": "ws-abc123",
     "workspace_name": "contractor-alice",
     "coder_user": "alice",
-    "coder_user_id": "usr-def456"
+    "coder_user_id": "usr-def456",
+    "enforcement_level": "standard"
   }'
 ```
 
@@ -337,7 +342,8 @@ curl -X POST http://localhost:8100/api/v1/keys/workspace \
     "workspace_id": "ws-abc123",
     "workspace_name": "contractor-alice",
     "coder_user": "alice",
-    "coder_user_id": "usr-def456"
+    "coder_user_id": "usr-def456",
+    "enforcement_level": "standard"
   }
 }
 ```
