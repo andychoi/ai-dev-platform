@@ -470,6 +470,99 @@ For a 6-month project adding 200 contractors:
 
 ---
 
+## Operating Model: Roles & Responsibilities
+
+### Linux Containers Still Need Patching — But the Model is Fundamentally Different
+
+A common objection: "You still need to patch Linux." True — but the effort is O(1), not O(n):
+
+| Aspect | Windows VDI (per-VM patching) | Linux Container (image-based patching) |
+|--------|------------------------------|---------------------------------------|
+| **What gets patched** | Each individual VM (300 VMs = 300 patch jobs) | The **base Docker image** (1 image = all workspaces) |
+| **How** | SCCM/Intune push → test → stage → deploy → reboot scheduling → compliance verify per VM | `apt-get upgrade` in Dockerfile → `docker build` → push template |
+| **Downtime per dev** | Reboot window per VM, staggered rollout (1-2 hrs/VM over days) | Zero — new workspaces get the new image; existing pick it up on next restart |
+| **Patch Tuesday effort** | 2-3 days for 300 VMs (test, stage, deploy, verify, handle failures) | 2-4 hours total (rebuild image, test, push template) |
+| **Rollback** | Manual per-VM; risky | Revert Dockerfile commit; instant rollback to prior image |
+| **Compliance verification** | Per-VM scan (Qualys/Rapid7/Nessus); remediation tracking per VM | Scan the image once; all workspaces inherit the result |
+| **Security agent updates** | EDR, Zscaler, DLP agent upgrades per VM (quarterly, with conflicts) | No agents — nothing to upgrade |
+| **Who does it** | CDM team + Windows admin (per-VM work) | Platform team (one-time image build) |
+| **Effort at 300 devs** | 300 VMs × patch/verify/reboot = 1-2 FTE continuous | 1 Dockerfile change = same effort as 10 devs |
+
+> **Key distinction:** "Zero patching" means zero **per-container** patching, not zero patching overall. The platform team patches the Dockerfile (base image) once per cycle — one change propagates to all workspaces. This is the same model used by every container-based platform in production (Kubernetes, ECS, etc.).
+
+### Team Responsibility Matrix
+
+Four teams interact with this platform. The table below defines clear ownership:
+
+| Responsibility | CDM Team | Infra / Network | Platform Team (Coder) | AWS Cloud Team |
+|---------------|----------|-----------------|----------------------|----------------|
+| **VDI provisioning** | Current owner → **eliminated** for Coder workspaces | — | — | — |
+| **Container image patching** | — | — | **Own**: Rebuild Dockerfile, test, push template (monthly + CVE) | — |
+| **Container security scanning** | — | — | **Own**: Trivy/Grype scan on image build; fix before push | — |
+| **Coder server operation** | — | — | **Own**: Upgrades, config, monitoring, template management | — |
+| **Template creation / maintenance** | — | — | **Own**: Dockerfile + Terraform per role; test + publish | — |
+| **SSO / identity (Authentik)** | User lifecycle (onboard/offboard from HR system) | — | **Own**: Authentik config, OIDC groups, RBAC mapping | — |
+| **AI gateway (LiteLLM)** | — | — | **Own**: Model config, budgets, guardrails, key management | — |
+| **Kubernetes / EKS cluster** | — | — | Workload deployment, pod sizing, namespace config | **Own**: Cluster lifecycle, node groups, auto-scaling, upgrades |
+| **Networking / egress** | — | **Own**: Firewall rules, VPN, DNS, egress whitelisting | Request changes as needed | VPC, subnet, security group config |
+| **AWS infrastructure** | — | — | Define resource requirements (EKS node sizes, EFS, RDS) | **Own**: Provision EKS, RDS, EFS, IAM roles, cost optimization |
+| **Security compliance** | Endpoint compliance → **shifts to platform-level** | Network security policy | **Own**: Container security, guardrail policy, audit logs | Cloud security posture (GuardDuty, Config, CloudTrail) |
+| **User onboarding** | Identity lifecycle (HR-driven) | — | **Minimal** — self-service via SSO; template auto-provisions | — |
+| **User offboarding** | Trigger from HR system | — | Revoke SSO → workspaces auto-deactivate | — |
+| **Incident response** | — | Network incidents | Platform / workspace incidents; AI guardrail alerts | AWS infrastructure incidents |
+| **Cost management** | — | — | LiteLLM budget monitoring; workspace auto-stop tuning | AWS cost allocation tags; Reserved Instance planning |
+
+### What Changes for Each Team
+
+**CDM Team — Freed from per-developer provisioning:**
+- **Before:** Receives ticket → provisions VDI → installs tools → deploys security agents → configures AD/GPO → runs compliance check → assigns user. Repeat for every developer. 0.5-3 FTE depending on scale.
+- **After:** No longer provisions dev environments. Retains identity lifecycle management (onboard/offboard from HR system) and non-dev infrastructure. CDM staff can be redeployed to other infrastructure work.
+
+**Platform Team (NEW ROLE) — Owns the Coder platform:**
+- Small team (0.5-1 FTE at 300 devs) responsible for: template maintenance, image patching, Coder server operation, SSO config, AI gateway management, monitoring.
+- This is **not an additional headcount** — it replaces the VDI admin + security admin + CDM provisioning roles (4.5-9 FTE at 300 devs). Net reduction: 4-8 FTE.
+- Skills required: Docker/Kubernetes, Terraform, Linux administration, SSO/OIDC concepts. No Windows admin skills needed.
+
+**Infra / Network Team — Unchanged scope:**
+- Continues to own network security, firewall rules, DNS, VPN. No new responsibilities.
+- May receive egress whitelist requests from the platform team (e.g., allow containers to reach specific Git servers or package registries).
+
+**AWS Cloud Team — Infrastructure provider:**
+- Provisions and manages EKS cluster, RDS (Coder database), EFS (shared storage), IAM roles.
+- Does **not** touch workspaces, templates, or developer tools.
+- Existing cloud team skills apply directly — EKS is standard Kubernetes.
+
+### Transition: CDM Team Impact
+
+```
+                        VDI Model (Current)              Coder Model (Target)
+ ─────────────────────────────────────────────────────────────────────────────
+ CDM Team               0.5-3 FTE                        0 FTE (provisioning
+   (provisioning)        (scales with headcount)           eliminated by
+                                                          self-service)
+
+ Windows Admin           1-2 FTE                          0 FTE (no Windows)
+   (patching/AD/GPO)
+
+ Security Admin           0.5-1.5 FTE                     0 FTE (no per-VM
+   (agent lifecycle)       (EDR/Zscaler/DLP per VM)        agents)
+
+ VDI Support              0.5-1 FTE                       0 FTE (no VDI)
+   (broker/session mgmt)
+
+ Platform Team            0 FTE                           0.5-1 FTE (new role)
+   (Coder/K8s/templates)
+
+ ─────────────────────────────────────────────────────────────────────────────
+ TOTAL at 300 devs       4.5-9 FTE                       0.5-1 FTE
+ Net change                                              -4 to -8 FTE
+                                                         (80-90% reduction)
+```
+
+> **CDM team members are not eliminated — they are redeployed.** Their Windows admin, security agent, and provisioning skills are freed up for other infrastructure modernization work. The platform team role requires different skills (containers, Kubernetes, IaC) and may be staffed from existing DevOps or SRE teams.
+
+---
+
 ## Why This Matters Now
 
 1. **The security stack costs more than the platform** — EDR + Zscaler + DLP licenses alone ($24-58/user/mo) exceed the entire cost of a container-based platform including Coder Enterprise ($64-112/user/mo vs $199-399 for VDI). Linux containers eliminate 100% of per-endpoint security licensing.
@@ -532,3 +625,4 @@ For a 6-month project adding 200 contractors:
 | 1.1 | 2026-02-08 | Platform Team | Add Windows endpoint security stack analysis (EDR/Zscaler/DLP), admin labor costs, FTE impact |
 | 1.2 | 2026-02-08 | Platform Team | Break out Microsoft licensing (VDA, M365 E1, RDS CAL, Windows Server); offshore contractor context |
 | 1.3 | 2026-02-08 | Platform Team | Add scaling comparison (100/200/300 devs); Coder Enterprise license; CDM team vs self-service provisioning; project ramp-up economics |
+| 1.4 | 2026-02-08 | Platform Team | Add Operating Model: R&R matrix (CDM/Infra/Platform/AWS), Linux patching clarification, CDM team transition impact |
