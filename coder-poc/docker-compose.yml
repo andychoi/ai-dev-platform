@@ -240,6 +240,8 @@ services:
       MINIO_URL: http://minio:9002
       AI_GATEWAY_URL: http://litellm:4000
       AUTHENTIK_URL: http://authentik-server:9000
+      # Authentik API token (for team group membership lookups)
+      AUTHENTIK_API_TOKEN: ${AUTHENTIK_API_TOKEN:-}
       # LiteLLM admin API (for AI Keys management)
       LITELLM_URL: http://litellm:4000
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-}

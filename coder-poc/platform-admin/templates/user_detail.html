@@ -1,0 +1,296 @@
+{% extends "base.html" %}
+{% set active_page = "users" %}
+
+{% block title %}{{ user.username }} - Platform Admin{% endblock %}
+
+{% block extra_css %}
+        .back-link {
+            display: inline-block;
+            margin-bottom: 20px;
+            color: #667eea;
+            text-decoration: none;
+            font-size: 0.95em;
+        }
+        .back-link:hover { text-decoration: underline; }
+
+        /* Identity Card */
+        .identity-card {
+            background: white;
+            border-radius: 12px;
+            padding: 24px 28px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            margin-bottom: 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+        .identity-main h2 { font-size: 1.6em; font-weight: 700; margin-bottom: 4px; }
+        .identity-meta { color: #666; font-size: 0.9em; line-height: 1.8; }
+        .identity-badges { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+        /* Summary Cards */
+        .summary-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+        .card-value { font-size: 2em; font-weight: 700; color: #667eea; }
+        .card-label { color: #666; font-size: 0.85em; margin-top: 5px; }
+        .card.success .card-value { color: #27ae60; }
+        .card.warning .card-value { color: #e67e22; }
+
+        /* Tables */
+        .table-container {
+            background: white; border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08); overflow: hidden;
+            margin-bottom: 24px;
+        }
+        .table-header {
+            padding: 15px 20px; background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .table-header h2 { font-size: 1.1em; font-weight: 600; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 12px 20px; text-align: left; border-bottom: 1px solid #f0f0f0; }
+        th {
+            background: #f8f9fa; font-weight: 600;
+            font-size: 0.8em; text-transform: uppercase; color: #666;
+        }
+        tr:hover { background: #f8f9fa; }
+
+        /* Badges */
+        .badge { padding: 3px 10px; border-radius: 10px; font-size: 0.75em; font-weight: 500; }
+        .badge-active { background: #e8f5e9; color: #2e7d32; }
+        .badge-inactive { background: #f5f5f5; color: #757575; }
+        .badge-running { background: #e3f2fd; color: #1565c0; }
+        .badge-stopped { background: #f5f5f5; color: #757575; }
+        .badge-failed { background: #fce4ec; color: #c62828; }
+
+        .badge-enforcement {
+            padding: 3px 10px; border-radius: 10px; font-size: 0.75em; font-weight: 500;
+        }
+        .enforcement-unrestricted { background: #fff3cd; color: #856404; }
+        .enforcement-standard { background: #cce5ff; color: #004085; }
+        .enforcement-design-first { background: #d4edda; color: #155724; }
+
+        /* Progress bar */
+        .progress-bar-container {
+            background: #e9ecef; border-radius: 4px; height: 8px;
+            width: 100%; margin-top: 4px; overflow: hidden;
+        }
+        .progress-bar {
+            height: 100%; border-radius: 4px; transition: width 0.3s;
+        }
+        .progress-green { background: #27ae60; }
+        .progress-yellow { background: #f39c12; }
+        .progress-red { background: #e74c3c; }
+
+        .empty-state { text-align: center; padding: 40px 20px; color: #999; font-size: 0.9em; }
+
+        @media (max-width: 768px) {
+            .identity-card { flex-direction: column; }
+            table { font-size: 0.85em; }
+            th, td { padding: 8px 10px; }
+        }
+{% endblock %}
+
+{% block content %}
+        <a href="{{ url_for('users') }}" class="back-link">&larr; Back to Users</a>
+
+        <!-- Identity Card -->
+        <div class="identity-card">
+            <div class="identity-main">
+                <h2>{{ user.username }}</h2>
+                <div class="identity-meta">
+                    {% if user.name %}{{ user.name }}<br>{% endif %}
+                    {% if user.email %}{{ user.email }}<br>{% endif %}
+                    {% if user.created_at %}Member since {{ user.created_at[:10] }}{% endif %}
+                    {% if user.last_seen_at %} &middot; Last seen {{ user.last_seen_at[:10] }}{% endif %}
+                </div>
+            </div>
+            <div class="identity-badges">
+                {% if user.status == 'active' %}
+                <span class="badge badge-active">Active</span>
+                {% else %}
+                <span class="badge badge-inactive">{{ user.status|capitalize }}</span>
+                {% endif %}
+
+                {% if user.enforcement_level == 'unrestricted' %}
+                <span class="badge-enforcement enforcement-unrestricted">Unrestricted</span>
+                {% elif user.enforcement_level == 'standard' %}
+                <span class="badge-enforcement enforcement-standard">Standard</span>
+                {% elif user.enforcement_level == 'design-first' %}
+                <span class="badge-enforcement enforcement-design-first">Design-First</span>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Summary Cards -->
+        <div class="summary-cards">
+            <div class="card">
+                <div class="card-value">{{ user.workspace_count }}</div>
+                <div class="card-label">
+                    Workspaces
+                    {% if user.running_count > 0 %}
+                    <span class="badge badge-running">{{ user.running_count }} running</span>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="card success">
+                <div class="card-value">{{ "{:,}".format(user.ai_today.requests) }}</div>
+                <div class="card-label">AI Requests Today</div>
+            </div>
+            <div class="card warning">
+                <div class="card-value">${{ "%.2f"|format(user.ai_week.spend) }}</div>
+                <div class="card-label">AI Spend This Week</div>
+            </div>
+            <div class="card">
+                {% if user.total_budget > 0 %}
+                    {% set pct = (user.total_spend / user.total_budget * 100) %}
+                    <div class="card-value">{{ "%.0f"|format(pct) }}%</div>
+                    <div class="card-label">Budget Used</div>
+                    <div class="progress-bar-container" style="margin-top: 8px;">
+                        <div class="progress-bar {% if pct < 60 %}progress-green{% elif pct < 85 %}progress-yellow{% else %}progress-red{% endif %}"
+                             style="width: {{ [pct, 100]|min }}%;"></div>
+                    </div>
+                {% else %}
+                    <div class="card-value">${{ "%.2f"|format(user.total_spend) }}</div>
+                    <div class="card-label">Total Spend (no budget)</div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Workspaces Table -->
+        <div class="table-container">
+            <div class="table-header">
+                <h2>Workspaces</h2>
+                <span style="color: #666; font-size: 0.9em;">{{ user.workspaces|length }} total</span>
+            </div>
+            {% if user.workspaces %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Template</th>
+                        <th>Status</th>
+                        <th>Last Used</th>
+                        <th>Created</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for ws in user.workspaces %}
+                    <tr>
+                        <td><strong>{{ ws.name }}</strong></td>
+                        <td>{{ ws.template }}</td>
+                        <td>
+                            {% if ws.status == 'running' %}
+                            <span class="badge badge-running">Running</span>
+                            {% elif ws.status == 'stopped' %}
+                            <span class="badge badge-stopped">Stopped</span>
+                            {% elif ws.status == 'failed' %}
+                            <span class="badge badge-failed">Failed</span>
+                            {% else %}
+                            <span class="badge badge-inactive">{{ ws.status|capitalize }}</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ ws.last_used_at[:16]|replace('T', ' ') if ws.last_used_at else '-' }}</td>
+                        <td>{{ ws.created_at[:10] if ws.created_at else '-' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty-state">No workspaces</div>
+            {% endif %}
+        </div>
+
+        <!-- Recent AI Requests -->
+        <div class="table-container">
+            <div class="table-header">
+                <h2>Recent AI Requests</h2>
+                <span style="color: #666; font-size: 0.9em;">Last 20</span>
+            </div>
+            {% if user.recent_requests %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Model</th>
+                        <th>Tokens In</th>
+                        <th>Tokens Out</th>
+                        <th>Spend</th>
+                        <th>Latency</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for req in user.recent_requests %}
+                    <tr>
+                        <td>{{ req.timestamp.strftime('%Y-%m-%d %H:%M:%S') if req.timestamp else '-' }}</td>
+                        <td>{{ req.model }}</td>
+                        <td>{{ "{:,}".format(req.tokens_in) }}</td>
+                        <td>{{ "{:,}".format(req.tokens_out) }}</td>
+                        <td>${{ "%.4f"|format(req.spend) }}</td>
+                        <td>
+                            {% if req.latency_ms is not none %}
+                            {{ "%.0f"|format(req.latency_ms) }} ms
+                            {% else %}
+                            -
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty-state">No AI requests recorded</div>
+            {% endif %}
+        </div>
+
+        <!-- 7-Day AI Summary -->
+        <div class="table-container">
+            <div class="table-header">
+                <h2>7-Day AI Summary</h2>
+            </div>
+            {% if user.daily_breakdown %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Requests</th>
+                        <th>Tokens</th>
+                        <th>Spend</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for day in user.daily_breakdown %}
+                    <tr>
+                        <td>{{ day.date }}</td>
+                        <td>{{ "{:,}".format(day.requests) }}</td>
+                        <td>{{ "{:,}".format(day.tokens_in + day.tokens_out) }}</td>
+                        <td>${{ "%.4f"|format(day.spend) }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty-state">No activity in the last 7 days</div>
+            {% endif %}
+        </div>
+{% endblock %}
+
+{% block footer %}
+        <div class="footer">
+            <p>Platform Admin - Coder WebIDE Platform</p>
+            <p><a href="/api/users/{{ user.username }}">User API</a></p>
+        </div>
+{% endblock %}

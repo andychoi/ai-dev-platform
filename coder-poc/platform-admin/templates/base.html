@@ -107,6 +107,9 @@
                     <a href="{{ url_for('dashboard') }}"{% if active_page == 'dashboard' %} class="active"{% endif %}>Databases</a>
                     <a href="{{ url_for('ai_usage') }}"{% if active_page == 'ai_usage' %} class="active"{% endif %}>AI Usage</a>
                     <a href="{{ url_for('ai_keys') }}"{% if active_page == 'ai_keys' %} class="active"{% endif %}>AI Keys</a>
+                    {% if user_is_admin or user_is_template_admin %}
+                    <a href="{{ url_for('activity') }}"{% if active_page == 'activity' %} class="active"{% endif %}>Activity</a>
+                    {% endif %}
                     <a href="{{ url_for('users') }}"{% if active_page == 'users' %} class="active"{% endif %}>Users</a>
                     <a href="{{ url_for('workspaces') }}"{% if active_page == 'workspaces' %} class="active"{% endif %}>Workspaces</a>
                     <a href="{{ url_for('storage') }}"{% if active_page == 'storage' %} class="active"{% endif %}>Storage</a>

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
-{% set active_page = "users" %}
+{% set active_page = "activity" %}
 
-{% block title %}Users - Platform Admin{% endblock %}
+{% block title %}Contractor Activity - Platform Admin{% endblock %}
 
 {% block extra_css %}
         .user-link { color: #333; text-decoration: none; }
@@ -91,6 +91,38 @@
 
         .empty-state { text-align: center; padding: 60px 20px; color: #666; }
 
+        /* -- Activity-specific styles -- */
+        .trend-up { color: #27ae60; font-weight: 600; }
+        .trend-down { color: #e74c3c; font-weight: 600; }
+        .trend-stable { color: #95a5a6; }
+
+        .progress-bar-container {
+            background: #e9ecef; border-radius: 4px; height: 8px;
+            width: 100%; margin-top: 4px; overflow: hidden;
+        }
+        .progress-bar {
+            height: 100%; border-radius: 4px; transition: width 0.3s;
+        }
+        .progress-green { background: #27ae60; }
+        .progress-yellow { background: #f39c12; }
+        .progress-red { background: #e74c3c; }
+
+        .badge-enforcement {
+            padding: 3px 10px; border-radius: 10px; font-size: 0.75em; font-weight: 500;
+        }
+        .enforcement-unrestricted { background: #fff3cd; color: #856404; }
+        .enforcement-standard { background: #cce5ff; color: #004085; }
+        .enforcement-design-first { background: #d4edda; color: #155724; }
+
+        .token-count { color: #999; font-size: 0.85em; }
+        .spend-text { font-size: 0.9em; }
+
+        .scope-banner {
+            background: #e3f2fd; color: #1565c0; padding: 10px 16px;
+            border-radius: 8px; margin-bottom: 20px; font-size: 0.9em;
+            border: 1px solid #bbdefb;
+        }
+
         @media (max-width: 768px) {
             .filters { flex-direction: column; }
             .search-box { max-width: none; }
@@ -100,30 +132,36 @@
 {% endblock %}
 
 {% block content %}
+        {% if is_scoped %}
+        <div class="scope-banner">
+            Showing activity for your team's contractors only. Contact a platform admin for full access.
+        </div>
+        {% endif %}
+
         <!-- Summary Cards -->
         <div class="summary-cards">
             <div class="card">
-                <div class="card-value">{{ total_users }}</div>
-                <div class="card-label">Total Users</div>
+                <div class="card-value">{{ active_contractors }}</div>
+                <div class="card-label">Active Contractors</div>
             </div>
             <div class="card success">
-                <div class="card-value">{{ active_users }}</div>
-                <div class="card-label">Active Users</div>
-            </div>
-            <div class="card">
-                <div class="card-value">{{ users_with_workspaces }}</div>
-                <div class="card-label">With Workspaces</div>
+                <div class="card-value">{{ "{:,}".format(total_ai_requests_today) }}</div>
+                <div class="card-label">AI Requests Today</div>
             </div>
             <div class="card warning">
-                <div class="card-value">{{ total_users - active_users }}</div>
-                <div class="card-label">Inactive Users</div>
+                <div class="card-value">${{ "%.2f"|format(week_spend) }}</div>
+                <div class="card-label">AI Spend This Week</div>
+            </div>
+            <div class="card">
+                <div class="card-value">{{ "%.0f"|format(avg_budget_used) }}%</div>
+                <div class="card-label">Avg Budget Used</div>
             </div>
         </div>
 
         <!-- Filters -->
         <form method="GET" class="filters">
             <div class="search-box">
-                <input type="text" name="search" placeholder="Search by username, email, or name..." value="{{ search }}">
+                <input type="text" name="search" placeholder="Search by username or email..." value="{{ search }}">
             </div>
             <select name="status" class="filter-select">
                 <option value="">All Status</option>
@@ -131,18 +169,24 @@
                 <option value="inactive" {% if status_filter == 'inactive' %}selected{% endif %}>Inactive</option>
                 <option value="running" {% if status_filter == 'running' %}selected{% endif %}>Has Running Workspace</option>
             </select>
+            <select name="enforcement" class="filter-select">
+                <option value="">All Enforcement</option>
+                <option value="unrestricted" {% if enforcement_filter == 'unrestricted' %}selected{% endif %}>Unrestricted</option>
+                <option value="standard" {% if enforcement_filter == 'standard' %}selected{% endif %}>Standard</option>
+                <option value="design-first" {% if enforcement_filter == 'design-first' %}selected{% endif %}>Design-First</option>
+            </select>
             <button type="submit" class="filter-btn">Filter</button>
-            {% if search or status_filter %}
-            <a href="{{ url_for('users') }}" style="color: #667eea;">Clear</a>
+            {% if search or status_filter or enforcement_filter %}
+            <a href="{{ url_for('activity') }}" style="color: #667eea;">Clear</a>
             {% endif %}
         </form>
 
-        <!-- Users Table -->
+        <!-- Activity Table -->
         <div class="table-container">
             <div class="table-header">
-                <h2>Users</h2>
+                <h2>Contractor Activity</h2>
                 <span style="color: #666; font-size: 0.9em;">
-                    Showing {{ pagination.items|length }} of {{ pagination.total }} users
+                    Showing {{ pagination.items|length }} of {{ pagination.total }} contractors
                 </span>
             </div>
 
@@ -150,27 +194,27 @@
             <table>
                 <thead>
                     <tr>
-                        <th>User</th>
+                        <th>Contractor</th>
                         <th>Status</th>
                         <th>Workspaces</th>
-                        <th>Running</th>
-                        <th>AI Requests</th>
-                        <th>AI Tokens</th>
-                        <th>Last Activity</th>
+                        <th>AI Today</th>
+                        <th>AI This Week</th>
+                        <th>Spend / Budget</th>
+                        <th>Enforcement</th>
+                        <th>Last Active</th>
                     </tr>
                 </thead>
                 <tbody>
-                    {% for user in pagination.items %}
+                    {% for c in pagination.items %}
                     <tr>
                         <td>
-                            <a href="{{ url_for('user_detail', username=user.username) }}" class="user-link">
-                                <strong>{{ user.username }}</strong>
+                            <a href="{{ url_for('user_detail', username=c.username) }}" class="user-link">
+                                <strong>{{ c.username }}</strong>
                             </a>
-                            {% if user.name %}<br><small style="color: #666;">{{ user.name }}</small>{% endif %}
-                            {% if user.email %}<br><small style="color: #999;">{{ user.email }}</small>{% endif %}
+                            {% if c.email %}<br><small style="color: #999;">{{ c.email }}</small>{% endif %}
                         </td>
                         <td>
-                            {% if user.is_active %}
+                            {% if c.status == 'active' %}
                             <span class="status-dot active"></span>
                             <span class="badge badge-active">Active</span>
                             {% else %}
@@ -179,34 +223,62 @@
                             {% endif %}
                         </td>
                         <td>
-                            <strong>{{ user.workspace_count }}</strong>
+                            <strong>{{ c.workspace_count }}</strong>
+                            {% if c.running_count > 0 %}
+                            <span class="badge badge-running">{{ c.running_count }} running</span>
+                            {% endif %}
                         </td>
                         <td>
-                            {% if user.running_workspaces > 0 %}
-                            <span class="badge badge-running">{{ user.running_workspaces }} running</span>
+                            {% if c.ai_requests_today > 0 %}
+                            {{ "{:,}".format(c.ai_requests_today) }}
+                            {% if c.trend == 'up' %}
+                            <span class="trend-up" title="Above 30-day average">&#9650;</span>
+                            {% elif c.trend == 'down' %}
+                            <span class="trend-down" title="Below 30-day average">&#9660;</span>
+                            {% else %}
+                            <span class="trend-stable" title="Near 30-day average">&#9644;</span>
+                            {% endif %}
                             {% else %}
                             <span style="color: #999;">0</span>
                             {% endif %}
                         </td>
                         <td>
-                            {% if user.ai_requests %}
-                            {{ "{:,}".format(user.ai_requests) }}
+                            {% if c.ai_requests_week > 0 %}
+                            {{ "{:,}".format(c.ai_requests_week) }}
+                            <br><span class="token-count">{{ "{:,}".format(c.tokens_in + c.tokens_out) }} tokens</span>
                             {% else %}
                             <span style="color: #999;">0</span>
                             {% endif %}
                         </td>
                         <td>
-                            {% if user.ai_tokens %}
-                            {{ "{:,}".format(user.ai_tokens) }}
+                            {% if c.max_budget > 0 %}
+                                {% set pct = (c.spend_total / c.max_budget * 100) if c.max_budget > 0 else 0 %}
+                                <span class="spend-text">${{ "%.2f"|format(c.spend_total) }} / ${{ "%.2f"|format(c.max_budget) }}</span>
+                                <div class="progress-bar-container">
+                                    <div class="progress-bar {% if pct < 60 %}progress-green{% elif pct < 85 %}progress-yellow{% else %}progress-red{% endif %}"
+                                         style="width: {{ [pct, 100]|min }}%;"></div>
+                                </div>
+                            {% elif c.spend_total > 0 %}
+                                <span class="spend-text">${{ "%.2f"|format(c.spend_total) }}</span>
+                                <br><span class="token-count">No budget set</span>
                             {% else %}
-                            <span style="color: #999;">0</span>
+                                <span style="color: #999;">$0.00</span>
                             {% endif %}
                         </td>
                         <td>
-                            {% if user.last_workspace_used %}
-                            {{ user.last_workspace_used.strftime('%Y-%m-%d %H:%M') }}
-                            {% elif user.last_seen_at %}
-                            {{ user.last_seen_at[:10] if user.last_seen_at else '-' }}
+                            {% if c.enforcement_level == 'unrestricted' %}
+                            <span class="badge-enforcement enforcement-unrestricted">Unrestricted</span>
+                            {% elif c.enforcement_level == 'standard' %}
+                            <span class="badge-enforcement enforcement-standard">Standard</span>
+                            {% elif c.enforcement_level == 'design-first' %}
+                            <span class="badge-enforcement enforcement-design-first">Design-First</span>
+                            {% else %}
+                            <span style="color: #999;">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if c.last_active %}
+                            {{ c.last_active.strftime('%Y-%m-%d %H:%M') }}
                             {% else %}
                             <span style="color: #999;">Never</span>
                             {% endif %}
@@ -220,7 +292,7 @@
             {% if pagination.pages > 1 %}
             <div class="pagination">
                 {% if pagination.has_prev %}
-                <a href="{{ url_for('users', page=pagination.prev_num, per_page=pagination.per_page, search=search, status=status_filter) }}">&laquo; Prev</a>
+                <a href="{{ url_for('activity', page=pagination.prev_num, per_page=pagination.per_page, search=search, status=status_filter, enforcement=enforcement_filter) }}">&laquo; Prev</a>
                 {% else %}
                 <span class="disabled">&laquo; Prev</span>
                 {% endif %}
@@ -230,7 +302,7 @@
                         {% if page_num == pagination.page %}
                         <span class="active">{{ page_num }}</span>
                         {% else %}
-                        <a href="{{ url_for('users', page=page_num, per_page=pagination.per_page, search=search, status=status_filter) }}">{{ page_num }}</a>
+                        <a href="{{ url_for('activity', page=page_num, per_page=pagination.per_page, search=search, status=status_filter, enforcement=enforcement_filter) }}">{{ page_num }}</a>
                         {% endif %}
                     {% else %}
                     <span class="ellipsis">...</span>
@@ -238,14 +310,14 @@
                 {% endfor %}
 
                 {% if pagination.has_next %}
-                <a href="{{ url_for('users', page=pagination.next_num, per_page=pagination.per_page, search=search, status=status_filter) }}">Next &raquo;</a>
+                <a href="{{ url_for('activity', page=pagination.next_num, per_page=pagination.per_page, search=search, status=status_filter, enforcement=enforcement_filter) }}">Next &raquo;</a>
                 {% else %}
                 <span class="disabled">Next &raquo;</span>
                 {% endif %}
 
                 <div class="per-page">
                     <span>Per page:</span>
-                    <select onchange="window.location.href='{{ url_for('users', search=search, status=status_filter) }}&per_page=' + this.value">
+                    <select onchange="window.location.href='{{ url_for('activity', page=1, search=search, status=status_filter, enforcement=enforcement_filter) }}&per_page=' + this.value">
                         <option value="25" {% if pagination.per_page == 25 %}selected{% endif %}>25</option>
                         <option value="50" {% if pagination.per_page == 50 %}selected{% endif %}>50</option>
                         <option value="100" {% if pagination.per_page == 100 %}selected{% endif %}>100</option>
@@ -256,8 +328,8 @@
 
             {% else %}
             <div class="empty-state">
-                <h3>No users found</h3>
-                <p>{% if search or status_filter %}Try adjusting your filters{% else %}No users in the system yet{% endif %}</p>
+                <h3>No contractors found</h3>
+                <p>{% if search or status_filter or enforcement_filter %}Try adjusting your filters{% else %}No contractors in the system yet{% endif %}</p>
             </div>
             {% endif %}
         </div>
@@ -266,6 +338,6 @@
 {% block footer %}
         <div class="footer">
             <p>Platform Admin - Coder WebIDE Platform</p>
-            <p><a href="/api/users">Users API</a></p>
+            <p><a href="/api/activity">Activity API</a></p>
         </div>
 {% endblock %}

@@ -253,6 +253,56 @@ for username, email, password, name in test_users:
             log_error "$line"
         fi
     done
+
+    # Assign users to RBAC and team groups
+    log_info "Assigning users to Authentik groups..."
+
+    docker exec authentik-server ak shell -c "
+from authentik.core.models import User, Group
+
+# Group assignments: username -> list of group names
+# RBAC groups control Coder roles (via OIDC group-to-role mapping)
+# Team groups (team-*) control Activity page scoping (manager sees their contractors)
+assignments = {
+    'appmanager':   ['coder-template-admins', 'team-appmanager'],
+    'contractor1':  ['coder-members', 'team-appmanager'],
+    'contractor2':  ['coder-members', 'team-appmanager'],
+    'contractor3':  ['coder-members'],
+    'readonly':     ['coder-auditors'],
+}
+
+for username, group_names in assignments.items():
+    try:
+        user = User.objects.get(username=username)
+    except User.DoesNotExist:
+        print(f'Skip: {username} (user not found)')
+        continue
+
+    for group_name in group_names:
+        try:
+            group = Group.objects.get(name=group_name)
+            if group.users.filter(pk=user.pk).exists():
+                print(f'Already: {username} in {group_name}')
+            else:
+                group.users.add(user)
+                print(f'Added: {username} to {group_name}')
+        except Group.DoesNotExist:
+            print(f'NoGroup: {group_name} (run setup-authentik-rbac.sh first)')
+        except Exception as e:
+            print(f'Error: {username} -> {group_name}: {e}')
+" 2>&1 | while read -r line; do
+        if echo "$line" | grep -q "^Added:"; then
+            log_success "$(echo "$line" | sed 's/Added:/Assigned/')"
+        elif echo "$line" | grep -q "^Already:"; then
+            log_warn "$(echo "$line" | sed 's/Already:/Already assigned:/')"
+        elif echo "$line" | grep -q "^Skip:"; then
+            log_warn "$line"
+        elif echo "$line" | grep -q "^NoGroup:"; then
+            log_error "$(echo "$line" | sed 's/NoGroup:/Group not found:/')"
+        elif echo "$line" | grep -q "^Error"; then
+            log_error "$line"
+        fi
+    done
 }
 
 # =============================================================================
@@ -340,6 +390,22 @@ for username in $TEST_USERNAMES; do
     printf "│ %-11s │ %-23s │ %-14s │ %-11s │ %-13s │\n" "$username" "${username}@example.com" "$TEST_PASSWORD" "$GITEA_PASSWORD" "$AUTHENTIK_PASSWORD"
 done
 echo "└─────────────┴─────────────────────────┴────────────────┴─────────────┴───────────────┘"
+echo ""
+echo "Group Assignments (Authentik):"
+echo "┌─────────────┬──────────────────────────┬───────────────────┐"
+echo "│ Username    │ RBAC Group               │ Team Group        │"
+echo "├─────────────┼──────────────────────────┼───────────────────┤"
+echo "│ appmanager  │ coder-template-admins    │ team-appmanager   │"
+echo "│ contractor1 │ coder-members            │ team-appmanager   │"
+echo "│ contractor2 │ coder-members            │ team-appmanager   │"
+echo "│ contractor3 │ coder-members            │ (none)            │"
+echo "│ readonly    │ coder-auditors           │ (none)            │"
+echo "└─────────────┴──────────────────────────┴───────────────────┘"
+echo ""
+echo "Activity Page Visibility:"
+echo "  - admin       → sees ALL contractors (platform admin)"
+echo "  - appmanager  → sees contractor1, contractor2 (team-appmanager)"
+echo "  - contractor3 → not in appmanager's team (different manager)"
 echo ""
 echo "Access URLs:"
 echo "  - Coder:     ${CODER_URL}"

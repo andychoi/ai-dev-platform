@@ -88,7 +88,7 @@ api_call() {
 
 # ─── Step 3: Create Groups ───────────────────────────────────────────────────
 
-echo -e "${BLUE}[3/5] Creating RBAC groups...${NC}"
+echo -e "${BLUE}[3/7] Creating RBAC groups...${NC}"
 
 # Group definitions (bash 3.2 compatible — no associative arrays on macOS)
 GROUP_NAMES="coder-admins coder-template-admins coder-auditors coder-members"
@@ -119,9 +119,44 @@ print(results[0]['pk'] if results else '')
     fi
 done
 
+# ─── Step 3b: Create Team Groups ─────────────────────────────────────────────
+# Team groups define the manager-contractor relationship for the Activity page.
+# Convention: team-<manager_username>
+# Both the manager AND their contractors are members of the same team group.
+
+echo ""
+echo -e "${BLUE}[3b/7] Creating team groups (manager-contractor scoping)...${NC}"
+
+TEAM_GROUP_NAMES="team-appmanager"
+
+for group_name in $TEAM_GROUP_NAMES; do
+
+    EXISTING=$(api_call GET "/core/groups/?name=${group_name}" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+results = data.get('results', [])
+print(results[0]['pk'] if results else '')
+" 2>/dev/null)
+
+    if [ -n "$EXISTING" ]; then
+        echo -e "  ${YELLOW}⊘${NC} Team group '${group_name}' already exists (pk: ${EXISTING})"
+    else
+        RESULT=$(api_call POST "/core/groups/" "{
+            \"name\": \"${group_name}\",
+            \"is_superuser\": false
+        }")
+        PK=$(echo "$RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('pk',''))" 2>/dev/null)
+        if [ -n "$PK" ]; then
+            echo -e "  ${GREEN}✓${NC} Created team group '${group_name}' (pk: ${PK})"
+        else
+            echo -e "  ${RED}✗${NC} Failed to create team group '${group_name}': $RESULT"
+        fi
+    fi
+done
+
 # ─── Step 4: Create Custom Property Mapping (groups claim) ──────────────────
 
-echo -e "${BLUE}[4/5] Creating OIDC 'groups' property mapping...${NC}"
+echo -e "${BLUE}[4/7] Creating OIDC 'groups' property mapping...${NC}"
 
 MAPPING_NAME="Coder Groups Claim"
 
@@ -154,7 +189,7 @@ fi
 
 # ─── Step 5: Add mapping to the Coder OIDC provider ─────────────────────────
 
-echo -e "${BLUE}[5/5] Adding groups mapping to Coder OIDC provider...${NC}"
+echo -e "${BLUE}[5/7] Adding groups mapping to Coder OIDC provider...${NC}"
 
 # Find the Coder provider (search by client_id which is always 'coder')
 CODER_PROVIDER=$(api_call GET "/providers/oauth2/?search=coder" | python3 -c "
@@ -209,6 +244,101 @@ print(json.dumps(current))
     fi
 fi
 
+# ─── Step 6: Add groups mapping to Platform Admin OIDC provider ──────────────
+
+echo -e "${BLUE}[6/7] Adding groups mapping to Platform Admin OIDC provider...${NC}"
+
+PLATFORM_ADMIN_PROVIDER=$(api_call GET "/providers/oauth2/?search=platform-admin" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for p in data.get('results', []):
+    if p.get('client_id') == 'platform-admin':
+        print(p['pk']); break
+" 2>/dev/null)
+
+if [ -z "$PLATFORM_ADMIN_PROVIDER" ]; then
+    echo -e "  ${YELLOW}⊘${NC} Platform Admin OIDC provider not found (optional — needed for team scoping via SSO)"
+else
+    PA_MAPPINGS=$(api_call GET "/providers/oauth2/${PLATFORM_ADMIN_PROVIDER}/" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+mappings = data.get('property_mappings', [])
+pks = []
+for m in mappings:
+    if isinstance(m, dict):
+        pks.append(m.get('pk', ''))
+    else:
+        pks.append(str(m))
+print(json.dumps(pks))
+" 2>/dev/null)
+
+    if echo "$PA_MAPPINGS" | grep -q "$MAPPING_PK"; then
+        echo -e "  ${YELLOW}⊘${NC} Groups mapping already assigned to Platform Admin provider"
+    else
+        PA_NEW_MAPPINGS=$(echo "$PA_MAPPINGS" | python3 -c "
+import sys, json
+current = json.load(sys.stdin)
+current.append('${MAPPING_PK}')
+print(json.dumps(current))
+" 2>/dev/null)
+
+        PA_UPDATE=$(api_call PATCH "/providers/oauth2/${PLATFORM_ADMIN_PROVIDER}/" "{
+            \"property_mappings\": ${PA_NEW_MAPPINGS}
+        }")
+
+        if echo "$PA_UPDATE" | python3 -c "import sys,json; d=json.load(sys.stdin); exit(0 if 'pk' in d else 1)" 2>/dev/null; then
+            echo -e "  ${GREEN}✓${NC} Added groups mapping to Platform Admin OIDC provider"
+        else
+            echo -e "  ${RED}✗${NC} Failed to update Platform Admin provider: $PA_UPDATE"
+        fi
+    fi
+fi
+
+# ─── Step 7: Create API token for Platform Admin service ─────────────────────
+# The Platform Admin dashboard queries Authentik API at runtime to resolve
+# team-* group memberships for the Activity page scoping.
+
+echo -e "${BLUE}[7/7] Creating Authentik API token for Platform Admin...${NC}"
+
+PA_API_TOKEN=$(docker exec authentik-server ak shell -c "
+from authentik.core.models import Token, User
+user = User.objects.get(username='akadmin')
+token, created = Token.objects.get_or_create(
+    identifier='platform-admin-api-token',
+    defaults={'user': user, 'intent': 'api', 'expiring': False}
+)
+print(f'TOKEN:{token.key}')
+" 2>&1 | grep "^TOKEN:" | cut -d: -f2)
+
+if [ -n "$PA_API_TOKEN" ]; then
+    echo -e "  ${GREEN}✓${NC} API token ready (identifier: platform-admin-api-token)"
+
+    # Write to .env if not already set
+    ENV_FILE="${PROJECT_DIR}/.env"
+    if [ -f "$ENV_FILE" ]; then
+        if grep -q "^AUTHENTIK_API_TOKEN=" "$ENV_FILE" 2>/dev/null; then
+            # Update existing line
+            if grep -q "^AUTHENTIK_API_TOKEN=$" "$ENV_FILE" 2>/dev/null; then
+                sed -i.bak "s|^AUTHENTIK_API_TOKEN=.*|AUTHENTIK_API_TOKEN=${PA_API_TOKEN}|" "$ENV_FILE"
+                rm -f "${ENV_FILE}.bak"
+                echo -e "  ${GREEN}✓${NC} Updated AUTHENTIK_API_TOKEN in .env"
+            else
+                echo -e "  ${YELLOW}⊘${NC} AUTHENTIK_API_TOKEN already set in .env (not overwriting)"
+            fi
+        else
+            echo "" >> "$ENV_FILE"
+            echo "# Authentik API token for Platform Admin team group lookups" >> "$ENV_FILE"
+            echo "AUTHENTIK_API_TOKEN=${PA_API_TOKEN}" >> "$ENV_FILE"
+            echo -e "  ${GREEN}✓${NC} Added AUTHENTIK_API_TOKEN to .env"
+        fi
+    else
+        echo -e "  ${YELLOW}⊘${NC} No .env file found — set manually:"
+        echo "     AUTHENTIK_API_TOKEN=${PA_API_TOKEN}"
+    fi
+else
+    echo -e "  ${RED}✗${NC} Failed to create API token"
+fi
+
 # ─── Summary ─────────────────────────────────────────────────────────────────
 
 echo ""
@@ -220,19 +350,18 @@ echo "  coder-template-admins → Coder Template Admin role"
 echo "  coder-auditors        → Coder Auditor role"
 echo "  coder-members         → Coder Member role (default)"
 echo ""
-echo "OIDC 'groups' claim added to Coder provider."
+echo "Team groups created (for Activity page scoping):"
+echo "  team-appmanager       → App Manager's contractor team"
+echo ""
+echo "OIDC 'groups' claim added to Coder + Platform Admin providers."
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
-echo "  1. Assign users to groups in Authentik Admin:"
-echo "     ${AUTHENTIK_URL}/if/admin/#/identity/groups"
+echo "  1. Assign users to groups — run:"
+echo "     ./scripts/setup-test-users.sh"
+echo "     (auto-assigns users to RBAC + team groups)"
 echo ""
-echo "     Example:"
-echo "       admin       → coder-admins"
-echo "       app-manager → coder-template-admins"
-echo "       contractor1 → coder-members (or no group = default Member)"
-echo ""
-echo "  2. Reload Coder to pick up OIDC config changes:"
-echo "     docker compose up -d coder-server"
+echo "  2. Reload services to pick up changes:"
+echo "     docker compose up -d coder-server platform-admin"
 echo ""
 echo "  3. Users get roles automatically on next SSO login."
 echo "     Existing manually-assigned roles are preserved."

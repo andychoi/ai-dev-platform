@@ -42,7 +42,7 @@ if OIDC_ENABLED and OIDC_CLIENT_SECRET:
         client_secret=OIDC_CLIENT_SECRET,
         server_metadata_url=f'{OIDC_ISSUER_URL}.well-known/openid-configuration',
         client_kwargs={
-            'scope': 'openid profile email'
+            'scope': 'openid profile email groups'
         }
     )
 
@@ -175,6 +175,13 @@ LOCAL_AUTH_ENABLED = os.environ.get('LOCAL_AUTH_ENABLED', 'true').lower() == 'tr
 KEY_PROVISIONER_URL = os.environ.get('KEY_PROVISIONER_URL', 'http://key-provisioner:8100')
 PROVISIONER_SECRET = os.environ.get('PROVISIONER_SECRET', '')
 
+# Authentik API (for team group membership lookups)
+AUTHENTIK_API_URL = os.environ.get('AUTHENTIK_URL', 'http://authentik-server:9000')
+AUTHENTIK_API_TOKEN = os.environ.get('AUTHENTIK_API_TOKEN', '')
+
+# Team group prefix — groups matching this prefix define manager-contractor teams
+TEAM_GROUP_PREFIX = 'team-'
+
 # MinIO configuration
 MINIO_ENDPOINT = os.environ.get('MINIO_ENDPOINT', 'minio:9002')
 MINIO_ACCESS_KEY = os.environ.get('MINIO_ROOT_USER', 'minioadmin')
@@ -275,6 +282,85 @@ def get_minio_stats():
     except Exception as e:
         app.logger.error(f"MinIO error: {e}")
         return {'status': 'error', 'error': str(e)}
+
+
+def get_authentik_team_groups():
+    """Query Authentik API for team-* groups and return membership mapping.
+
+    Returns:
+        dict: {username: [team_group_names]} for all users in team-* groups.
+        Empty dict if Authentik API is unavailable or unconfigured.
+    """
+    if not AUTHENTIK_API_TOKEN:
+        app.logger.debug("AUTHENTIK_API_TOKEN not set — team group scoping disabled")
+        return {}
+
+    try:
+        resp = requests.get(
+            f"{AUTHENTIK_API_URL}/api/v3/core/groups/",
+            headers={"Authorization": f"Bearer {AUTHENTIK_API_TOKEN}"},
+            params={"search": TEAM_GROUP_PREFIX, "page_size": 100},
+            timeout=5,
+        )
+        if not resp.ok:
+            app.logger.warning(f"Authentik groups API returned {resp.status_code}")
+            return {}
+
+        data = resp.json()
+        groups = data.get('results', [])
+
+        # Build username -> [team_group_names] mapping
+        user_teams = {}
+        for group in groups:
+            group_name = group.get('name', '')
+            if not group_name.startswith(TEAM_GROUP_PREFIX):
+                continue
+            # users_obj contains full user objects; fall back to fetching by PK
+            users_obj = group.get('users_obj', [])
+            for user_obj in users_obj:
+                username = user_obj.get('username', '')
+                if username:
+                    user_teams.setdefault(username, []).append(group_name)
+
+        return user_teams
+    except Exception as e:
+        app.logger.warning(f"Failed to query Authentik team groups: {e}")
+        return {}
+
+
+def get_team_members_for_user(user_teams, username, user_groups):
+    """Get the set of contractor usernames visible to a given manager.
+
+    Args:
+        user_teams: dict from get_authentik_team_groups()
+        username: the logged-in user's username
+        user_groups: the logged-in user's OIDC groups from session
+
+    Returns:
+        set of usernames in shared team-* groups, or None if user is admin (sees all).
+    """
+    # Find which team-* groups this user belongs to
+    my_teams = set()
+
+    # From Authentik API data (authoritative)
+    if username in user_teams:
+        my_teams.update(user_teams[username])
+
+    # Also check OIDC session groups (in case Authentik API is slow/unavailable)
+    for g in (user_groups or []):
+        if g.startswith(TEAM_GROUP_PREFIX):
+            my_teams.add(g)
+
+    if not my_teams:
+        return set()  # No team groups → sees nobody
+
+    # Collect all usernames in those teams
+    team_members = set()
+    for uname, teams in user_teams.items():
+        if my_teams & set(teams):
+            team_members.add(uname)
+
+    return team_members
 
 
 def format_bytes(size):
@@ -452,6 +538,191 @@ def enrich_users_with_activity(users, workspaces, ai_usage_by_user):
     return enriched
 
 
+def get_contractor_activity_data():
+    """Gather per-contractor activity metrics from Coder API + LiteLLM DB.
+
+    Returns a list of dicts, one per contractor, with workspace status,
+    AI usage (today / this week), spend, budget, enforcement level, and trend.
+    """
+    # -- Coder data --
+    coder_users = get_coder_users()
+    workspaces = get_coder_workspaces_detailed()
+
+    # Build workspace counts per user
+    user_workspaces = {}
+    for ws in workspaces:
+        owner = ws.get('owner_name', ws.get('owner', {}).get('username', 'unknown'))
+        if owner not in user_workspaces:
+            user_workspaces[owner] = {'total': 0, 'running': 0, 'last_used': None}
+        user_workspaces[owner]['total'] += 1
+        status = ws.get('latest_build', {}).get('status', 'unknown')
+        if status == 'running':
+            user_workspaces[owner]['running'] += 1
+        last_used = ws.get('last_used_at')
+        if last_used:
+            try:
+                dt = datetime.fromisoformat(last_used.replace('Z', '+00:00'))
+                if not user_workspaces[owner]['last_used'] or dt > user_workspaces[owner]['last_used']:
+                    user_workspaces[owner]['last_used'] = dt
+            except Exception:
+                pass
+
+    # -- LiteLLM data (graceful degradation) --
+    ai_today = {}       # username -> {requests, spend}
+    ai_week = {}        # username -> {requests, spend, tokens_in, tokens_out}
+    ai_30d_avg = {}     # username -> avg daily requests
+    key_info = {}       # username -> {enforcement_level, spend_total, max_budget}
+
+    try:
+        conn = get_litellm_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+        # Per-user AI requests + spend TODAY
+        cur.execute("""
+            SELECT
+                COALESCE("user", 'anonymous') as user_id,
+                COUNT(*) as requests,
+                COALESCE(SUM(spend), 0) as spend
+            FROM "LiteLLM_SpendLogs"
+            WHERE "startTime" >= CURRENT_DATE
+            GROUP BY "user"
+        """)
+        for row in cur.fetchall():
+            ai_today[row['user_id']] = {
+                'requests': row['requests'],
+                'spend': float(row['spend']),
+            }
+
+        # Per-user AI requests + spend + tokens THIS WEEK
+        cur.execute("""
+            SELECT
+                COALESCE("user", 'anonymous') as user_id,
+                COUNT(*) as requests,
+                COALESCE(SUM(spend), 0) as spend,
+                COALESCE(SUM(prompt_tokens), 0) as tokens_in,
+                COALESCE(SUM(completion_tokens), 0) as tokens_out
+            FROM "LiteLLM_SpendLogs"
+            WHERE "startTime" >= DATE_TRUNC('week', CURRENT_TIMESTAMP)
+            GROUP BY "user"
+        """)
+        for row in cur.fetchall():
+            ai_week[row['user_id']] = {
+                'requests': row['requests'],
+                'spend': float(row['spend']),
+                'tokens_in': int(row['tokens_in']),
+                'tokens_out': int(row['tokens_out']),
+            }
+
+        # Per-user 30-day daily average requests (for trend)
+        cur.execute("""
+            SELECT
+                COALESCE("user", 'anonymous') as user_id,
+                COUNT(*)::float / GREATEST(1,
+                    EXTRACT(DAY FROM (CURRENT_DATE - MIN(DATE("startTime"))))::int + 1
+                ) as avg_daily
+            FROM "LiteLLM_SpendLogs"
+            WHERE "startTime" >= CURRENT_DATE - INTERVAL '30 days'
+              AND "startTime" < CURRENT_DATE
+            GROUP BY "user"
+        """)
+        for row in cur.fetchall():
+            ai_30d_avg[row['user_id']] = float(row['avg_daily'])
+
+        # Per-user enforcement level + budget from verification tokens
+        cur.execute("""
+            SELECT
+                token, key_alias, spend, max_budget, metadata
+            FROM "LiteLLM_VerificationToken"
+        """)
+        for row in cur.fetchall():
+            meta = row.get('metadata') or {}
+            if isinstance(meta, str):
+                try:
+                    meta = json.loads(meta)
+                except Exception:
+                    meta = {}
+            # Determine the owner username from metadata
+            owner = (meta.get('workspace_owner')
+                     or meta.get('username')
+                     or meta.get('workspace_user')
+                     or '')
+            if not owner:
+                continue
+            if owner not in key_info:
+                key_info[owner] = {
+                    'enforcement_level': meta.get('enforcement_level', ''),
+                    'spend_total': 0.0,
+                    'max_budget': 0.0,
+                }
+            key_info[owner]['spend_total'] += float(row.get('spend') or 0)
+            if row.get('max_budget'):
+                key_info[owner]['max_budget'] += float(row['max_budget'])
+            # Take the most restrictive enforcement level if multiple keys
+            level = meta.get('enforcement_level', '')
+            if level:
+                key_info[owner]['enforcement_level'] = level
+
+        conn.close()
+    except Exception as e:
+        app.logger.warning(f"Could not fetch LiteLLM activity data: {e}")
+
+    # -- Merge into per-contractor dicts --
+    contractors = []
+    for user in coder_users:
+        username = user.get('username', 'unknown')
+        email = user.get('email', '')
+        ws_info = user_workspaces.get(username, {'total': 0, 'running': 0, 'last_used': None})
+
+        today = ai_today.get(username, {'requests': 0, 'spend': 0.0})
+        week = ai_week.get(username, {'requests': 0, 'spend': 0.0, 'tokens_in': 0, 'tokens_out': 0})
+        ki = key_info.get(username, {'enforcement_level': '', 'spend_total': 0.0, 'max_budget': 0.0})
+        avg_daily = ai_30d_avg.get(username, 0.0)
+
+        # Trend: up if today > 1.5x avg, down if < 0.5x avg
+        requests_today = today['requests']
+        if avg_daily > 0:
+            if requests_today > avg_daily * 1.5:
+                trend = 'up'
+            elif requests_today < avg_daily * 0.5:
+                trend = 'down'
+            else:
+                trend = 'stable'
+        else:
+            trend = 'up' if requests_today > 0 else 'stable'
+
+        # Activity status
+        has_running = ws_info['running'] > 0
+        last_activity = ws_info['last_used']
+        is_active = has_running
+        if not is_active and last_activity:
+            try:
+                days_since = (datetime.now(last_activity.tzinfo) - last_activity).days
+                is_active = days_since <= 7
+            except Exception:
+                pass
+
+        contractors.append({
+            'username': username,
+            'email': email,
+            'status': 'active' if is_active else 'inactive',
+            'workspace_count': ws_info['total'],
+            'running_count': ws_info['running'],
+            'ai_requests_today': requests_today,
+            'ai_requests_week': week['requests'],
+            'tokens_in': week['tokens_in'],
+            'tokens_out': week['tokens_out'],
+            'spend_today': today['spend'],
+            'spend_week': week['spend'],
+            'spend_total': ki['spend_total'],
+            'max_budget': ki['max_budget'],
+            'enforcement_level': ki['enforcement_level'],
+            'trend': trend,
+            'last_active': last_activity,
+        })
+
+    return contractors
+
+
 def enrich_workspaces_with_metrics(workspaces, ai_usage_by_workspace):
     """Enrich workspace data with resource metrics"""
     enriched = []
@@ -548,6 +819,19 @@ def is_admin():
     return False
 
 
+# Authentik groups that grant template-admin (app manager) access
+TEMPLATE_ADMIN_GROUPS = {'coder-template-admins'}
+
+
+def is_template_admin():
+    """Check if the current user is a template-admin (app manager)."""
+    user = get_current_user()
+    if not user:
+        return False
+    groups = set(user.get('groups', []))
+    return bool(groups & TEMPLATE_ADMIN_GROUPS)
+
+
 # =============================================================================
 # Authentication Routes
 # =============================================================================
@@ -612,11 +896,24 @@ def auth_callback():
             # Try to fetch userinfo separately
             userinfo = oauth.authentik.userinfo()
 
+        # Groups may be in userinfo or in the ID token claims
+        groups = userinfo.get('groups', [])
+        if not groups and token.get('id_token'):
+            # Fallback: decode ID token for groups claim
+            import base64
+            try:
+                payload = token['id_token'].split('.')[1]
+                payload += '=' * (4 - len(payload) % 4)
+                id_claims = json.loads(base64.urlsafe_b64decode(payload))
+                groups = id_claims.get('groups', [])
+            except Exception:
+                pass
+
         session['user'] = {
             'username': userinfo.get('preferred_username', userinfo.get('sub', 'unknown')),
             'email': userinfo.get('email', ''),
             'name': userinfo.get('name', userinfo.get('preferred_username', '')),
-            'groups': userinfo.get('groups', []),
+            'groups': groups,
             'auth_type': 'oidc'
         }
         flash('Logged in via SSO successfully', 'success')
@@ -648,8 +945,12 @@ def logout():
 
 @app.context_processor
 def inject_user():
-    """Inject current user into all templates"""
-    return {'current_user': get_current_user()}
+    """Inject current user and role helpers into all templates"""
+    return {
+        'current_user': get_current_user(),
+        'user_is_admin': is_admin(),
+        'user_is_template_admin': is_template_admin(),
+    }
 
 
 @app.route('/databases')
@@ -1392,6 +1693,407 @@ def api_users():
             user['last_workspace_used'] = user['last_workspace_used'].isoformat()
 
     return jsonify(enriched)
+
+
+# =============================================================================
+# Contractor Activity
+# =============================================================================
+
+def _get_visible_contractors(contractors):
+    """Filter contractor list based on the current user's role and team groups.
+
+    - Admins (Owner): see all contractors
+    - Template-admins (App Managers): see only contractors in shared team-* groups
+    - Others: empty list (access denied handled by caller)
+
+    Returns (filtered_list, is_scoped) where is_scoped is True when results
+    are limited to a team subset.
+    """
+    if is_admin():
+        return contractors, False
+
+    current = get_current_user()
+    username = current.get('username', '')
+    user_groups = current.get('groups', [])
+
+    # Query Authentik for team group memberships
+    user_teams = get_authentik_team_groups()
+    if not user_teams:
+        # Team scoping unavailable (no API token) — show all rather than none
+        return contractors, False
+
+    team_members = get_team_members_for_user(user_teams, username, user_groups)
+
+    if not team_members:
+        return [], True
+
+    filtered = [c for c in contractors if c['username'] in team_members]
+    return filtered, True
+
+
+def _can_view_user(target_username):
+    """Check if the current user is allowed to view a given user's detail page.
+
+    - Admins: can view any user.
+    - Template-admins: can view users in their team-* groups.
+      Falls back to full access if team scoping is unavailable (no API token).
+    - Others: can only view themselves.
+
+    Returns True if allowed, False otherwise.
+    """
+    current = get_current_user()
+    my_username = current.get('username', '')
+
+    # Self-view is always allowed
+    if my_username == target_username:
+        return True
+
+    if is_admin():
+        return True
+
+    if is_template_admin():
+        user_teams = get_authentik_team_groups()
+        if not user_teams:
+            # Team scoping unavailable (no API token) — allow full access
+            # for template-admins rather than blocking them entirely
+            return True
+        team_members = get_team_members_for_user(user_teams, my_username, current.get('groups', []))
+        return target_username in team_members
+
+    return False
+
+
+def get_user_detail_data(username):
+    """Gather comprehensive detail data for a single user.
+
+    Returns a dict with user identity, workspaces, AI usage (today/week),
+    7-day daily breakdown, recent AI requests, and key/budget info.
+    Returns None if the user is not found in Coder.
+    """
+    # -- Coder data --
+    coder_users = get_coder_users()
+    target_user = None
+    for u in coder_users:
+        if u.get('username') == username:
+            target_user = u
+            break
+    if not target_user:
+        return None
+
+    workspaces = get_coder_workspaces_detailed()
+    user_workspaces = [
+        {
+            'name': ws.get('name', 'unknown'),
+            'template': ws.get('template_name', 'unknown'),
+            'status': ws.get('latest_build', {}).get('status', 'unknown'),
+            'last_used_at': ws.get('last_used_at'),
+            'created_at': ws.get('created_at'),
+        }
+        for ws in workspaces
+        if (ws.get('owner_name') or ws.get('owner', {}).get('username', '')) == username
+    ]
+
+    # -- LiteLLM data (graceful degradation) --
+    ai_today = {'requests': 0, 'spend': 0.0}
+    ai_week = {'requests': 0, 'spend': 0.0, 'tokens_in': 0, 'tokens_out': 0}
+    daily_breakdown = []
+    recent_requests = []
+    keys = []
+
+    try:
+        conn = get_litellm_db_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+        # AI usage today
+        cur.execute("""
+            SELECT COUNT(*) as requests, COALESCE(SUM(spend), 0) as spend
+            FROM "LiteLLM_SpendLogs"
+            WHERE "user" = %s AND "startTime" >= CURRENT_DATE
+        """, (username,))
+        row = cur.fetchone()
+        if row:
+            ai_today = {'requests': row['requests'], 'spend': float(row['spend'])}
+
+        # AI usage this week
+        cur.execute("""
+            SELECT
+                COUNT(*) as requests,
+                COALESCE(SUM(spend), 0) as spend,
+                COALESCE(SUM(prompt_tokens), 0) as tokens_in,
+                COALESCE(SUM(completion_tokens), 0) as tokens_out
+            FROM "LiteLLM_SpendLogs"
+            WHERE "user" = %s AND "startTime" >= DATE_TRUNC('week', CURRENT_TIMESTAMP)
+        """, (username,))
+        row = cur.fetchone()
+        if row:
+            ai_week = {
+                'requests': row['requests'],
+                'spend': float(row['spend']),
+                'tokens_in': int(row['tokens_in']),
+                'tokens_out': int(row['tokens_out']),
+            }
+
+        # 7-day daily breakdown
+        cur.execute("""
+            SELECT
+                DATE("startTime") as date,
+                COUNT(*) as requests,
+                COALESCE(SUM(prompt_tokens), 0) as tokens_in,
+                COALESCE(SUM(completion_tokens), 0) as tokens_out,
+                COALESCE(SUM(spend), 0) as spend
+            FROM "LiteLLM_SpendLogs"
+            WHERE "user" = %s AND "startTime" >= CURRENT_DATE - INTERVAL '7 days'
+            GROUP BY DATE("startTime")
+            ORDER BY date
+        """, (username,))
+        daily_breakdown = cur.fetchall()
+
+        # Recent AI requests (last 20)
+        cur.execute("""
+            SELECT
+                "startTime" as timestamp,
+                "endTime" as end_time,
+                COALESCE(model, 'unknown') as model,
+                COALESCE(prompt_tokens, 0) as tokens_in,
+                COALESCE(completion_tokens, 0) as tokens_out,
+                COALESCE(spend, 0) as spend,
+                CASE
+                    WHEN "endTime" IS NOT NULL AND "startTime" IS NOT NULL
+                    THEN EXTRACT(EPOCH FROM ("endTime" - "startTime")) * 1000
+                    ELSE NULL
+                END as latency_ms
+            FROM "LiteLLM_SpendLogs"
+            WHERE "user" = %s
+            ORDER BY "startTime" DESC
+            LIMIT 20
+        """, (username,))
+        recent_requests = cur.fetchall()
+
+        # User's verification tokens (keys)
+        cur.execute("""
+            SELECT token, key_alias, spend, max_budget, metadata
+            FROM "LiteLLM_VerificationToken"
+        """)
+        for row in cur.fetchall():
+            meta = row.get('metadata') or {}
+            if isinstance(meta, str):
+                try:
+                    meta = json.loads(meta)
+                except Exception:
+                    meta = {}
+            owner = (meta.get('workspace_owner')
+                     or meta.get('username')
+                     or meta.get('workspace_user')
+                     or '')
+            if owner == username:
+                keys.append({
+                    'alias': row.get('key_alias', ''),
+                    'spend': float(row.get('spend') or 0),
+                    'max_budget': float(row.get('max_budget') or 0),
+                    'enforcement_level': meta.get('enforcement_level', ''),
+                })
+
+        conn.close()
+    except Exception as e:
+        app.logger.warning(f"Could not fetch LiteLLM detail data for {username}: {e}")
+
+    # Aggregate budget info from keys
+    total_spend = sum(k['spend'] for k in keys)
+    total_budget = sum(k['max_budget'] for k in keys)
+    enforcement_level = ''
+    for k in keys:
+        if k['enforcement_level']:
+            enforcement_level = k['enforcement_level']
+
+    return {
+        'username': target_user.get('username', ''),
+        'email': target_user.get('email', ''),
+        'name': target_user.get('name', ''),
+        'status': target_user.get('status', 'active'),
+        'created_at': target_user.get('created_at'),
+        'last_seen_at': target_user.get('last_seen_at'),
+        'enforcement_level': enforcement_level,
+        'workspaces': user_workspaces,
+        'workspace_count': len(user_workspaces),
+        'running_count': sum(1 for ws in user_workspaces if ws['status'] == 'running'),
+        'ai_today': ai_today,
+        'ai_week': ai_week,
+        'daily_breakdown': daily_breakdown,
+        'recent_requests': recent_requests,
+        'keys': keys,
+        'total_spend': total_spend,
+        'total_budget': total_budget,
+    }
+
+
+@app.route('/activity')
+@require_auth
+def activity():
+    """Contractor activity page — Tier 1 performance metrics.
+
+    Access:
+    - Admins see all contractors.
+    - Template-admins (app managers) see only contractors in their team-* groups.
+    - Regular members are denied access.
+    """
+    if not is_admin() and not is_template_admin():
+        flash('Access denied: admin or app manager privileges required', 'error')
+        return redirect(url_for('services'))
+
+    page, per_page, search, status_filter = get_pagination_args()
+    enforcement_filter = request.args.get('enforcement', '')
+
+    contractors = get_contractor_activity_data()
+
+    # Scope to team (app managers see only their contractors)
+    contractors, is_scoped = _get_visible_contractors(contractors)
+
+    # Apply search filter
+    if search:
+        search_lower = search.lower()
+        contractors = [c for c in contractors
+            if search_lower in c['username'].lower()
+            or search_lower in c.get('email', '').lower()]
+
+    # Apply status filter
+    if status_filter == 'active':
+        contractors = [c for c in contractors if c['status'] == 'active']
+    elif status_filter == 'inactive':
+        contractors = [c for c in contractors if c['status'] == 'inactive']
+    elif status_filter == 'running':
+        contractors = [c for c in contractors if c['running_count'] > 0]
+
+    # Apply enforcement filter
+    if enforcement_filter:
+        contractors = [c for c in contractors if c['enforcement_level'] == enforcement_filter]
+
+    # Sort by today's activity (most active first)
+    contractors.sort(key=lambda c: (
+        -c['ai_requests_today'],
+        -c['running_count'],
+        -c['ai_requests_week'],
+    ))
+
+    # Summary stats (computed before pagination)
+    active_contractors = sum(1 for c in contractors if c['status'] == 'active')
+    total_ai_requests_today = sum(c['ai_requests_today'] for c in contractors)
+    week_spend = sum(c['spend_week'] for c in contractors)
+    budgeted = [c for c in contractors if c['max_budget'] > 0]
+    avg_budget_used = 0.0
+    if budgeted:
+        avg_budget_used = sum(
+            c['spend_total'] / c['max_budget'] * 100 for c in budgeted
+        ) / len(budgeted)
+
+    # Pagination
+    total = len(contractors)
+    start = (page - 1) * per_page
+    end = start + per_page
+    paginated = contractors[start:end]
+    pagination = Pagination(page, per_page, total, paginated)
+
+    return render_template('activity.html',
+        contractors=paginated,
+        pagination=pagination,
+        active_contractors=active_contractors,
+        total_ai_requests_today=total_ai_requests_today,
+        week_spend=week_spend,
+        avg_budget_used=avg_budget_used,
+        search=search,
+        status_filter=status_filter,
+        enforcement_filter=enforcement_filter,
+        is_scoped=is_scoped,
+    )
+
+
+@app.route('/api/activity')
+@require_auth
+def api_activity():
+    """API endpoint for contractor activity data.
+
+    Admins see all; template-admins see only their team's contractors.
+    """
+    if not is_admin() and not is_template_admin():
+        return jsonify({'error': 'Admin or app manager access required'}), 403
+
+    contractors = get_contractor_activity_data()
+    contractors, is_scoped = _get_visible_contractors(contractors)
+
+    # Serialize datetime objects
+    for c in contractors:
+        if c.get('last_active'):
+            c['last_active'] = c['last_active'].isoformat()
+
+    return jsonify({
+        'contractors': contractors,
+        'total': len(contractors),
+        'is_scoped': is_scoped,
+    })
+
+
+# =============================================================================
+# User Detail
+# =============================================================================
+
+@app.route('/users/<username>')
+@require_auth
+def user_detail(username):
+    """User detail page — comprehensive view of a single user's identity,
+    workspaces, AI usage, budget, and recent requests.
+
+    Access:
+    - Admins see any user.
+    - Template-admins see users in their team-* groups.
+    - Any user can view themselves.
+    """
+    if not _can_view_user(username):
+        flash('Access denied: you do not have permission to view this user', 'error')
+        return redirect(url_for('users'))
+
+    data = get_user_detail_data(username)
+    if data is None:
+        flash(f'User "{username}" not found', 'error')
+        return redirect(url_for('users'))
+
+    return render_template('user_detail.html', user=data)
+
+
+@app.route('/api/users/<username>')
+@require_auth
+def api_user_detail(username):
+    """API endpoint for single user detail data.
+
+    Same scoping as the HTML route.
+    """
+    if not _can_view_user(username):
+        return jsonify({'error': 'Access denied'}), 403
+
+    data = get_user_detail_data(username)
+    if data is None:
+        return jsonify({'error': 'User not found'}), 404
+
+    # Serialize datetime/date objects for JSON
+    for ws in data.get('workspaces', []):
+        for key in ('last_used_at', 'created_at'):
+            if ws.get(key) and hasattr(ws[key], 'isoformat'):
+                ws[key] = ws[key].isoformat()
+
+    for row in data.get('daily_breakdown', []):
+        if row.get('date') and hasattr(row['date'], 'isoformat'):
+            row['date'] = row['date'].isoformat()
+        if row.get('spend'):
+            row['spend'] = float(row['spend'])
+
+    for row in data.get('recent_requests', []):
+        for key in ('timestamp', 'end_time'):
+            if row.get(key) and hasattr(row[key], 'isoformat'):
+                row[key] = row[key].isoformat()
+        if row.get('spend'):
+            row['spend'] = float(row['spend'])
+        if row.get('latency_ms'):
+            row['latency_ms'] = float(row['latency_ms'])
+
+    return jsonify(data)
 
 
 # =============================================================================
