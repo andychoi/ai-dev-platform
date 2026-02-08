@@ -209,9 +209,15 @@ This platform takes the container-based approach proven by Skydio and J.B. Hunt 
  AI tools:              N/A                AI (LiteLLM):       $5-10
 
  ══════════════════════════                ═════════════════════════
- TOTAL:  $199-399/user/mo                  TOTAL:  $25-55/user/mo
+ TOTAL:  $199-399/user/mo                  TOTAL (OSS):  $25-55/user/mo
                                            ═══════════════════════
-                                           80-87% savings
+                                           80-87% savings (OSS)
+
+                                           Add Coder Enterprise
+                                           license: +$30-50/user
+                                           ─────────────────────
+                                           TOTAL (Ent): $55-105/user
+                                           72-74% savings (Enterprise)
 ```
 
 ### Microsoft Licensing Deep Dive
@@ -303,72 +309,158 @@ Every additional VDI developer requires a full Windows VM + security agents + Mi
 
 Container platforms scale differently. The platform infrastructure (Kubernetes cluster, Coder server, SSO, AI proxy) is shared — adding users adds containers, not VMs or agents. Compute scales with **concurrency** (how many developers work simultaneously), not **headcount**.
 
-```
-                        100 devs        200 devs        300 devs
-                        (baseline)      (+100 proj)     (+200 proj)
- ─────────────────────────────────────────────────────────────────
- Container compute      $1,500-3,500    $2,500-5,500    $3,500-7,500
-   (concurrency-based:
-    ~60% active at once)
- Shared storage (EFS)   $500-1,000      $800-1,500      $1,000-2,000
- Coder Enterprise       $3,000-5,000    $6,000-10,000   $9,000-15,000
-   license ($30-50/user)
- AI tools (LiteLLM)     $500-1,000      $1,000-2,000    $1,500-3,000
- Platform admin labor   $2,000-4,000    $2,500-5,000    $3,000-6,000
- ─────────────────────────────────────────────────────────────────
- TOTAL (monthly)        $7,500-14,500   $12,800-24,000  $18,000-33,500
- TOTAL (annual)         $90K-174K       $154K-288K      $216K-402K
- ─────────────────────────────────────────────────────────────────
- Platform admin FTE     0.25-0.5 FTE    0.5-0.75 FTE    0.5-1 FTE
- Provisioning team      0 (self-serve)  0 (self-serve)  0 (self-serve)
-```
-
 **Why compute scales sub-linearly:**
 - Not all 300 developers work at the same time — workspaces auto-stop after idle timeout
 - Kubernetes right-sizes pods based on actual resource usage, not allocated VM capacity
 - Adding 100 project contractors may only need 30-40% more compute (concurrency < headcount)
 - When the project ends, workspaces are deleted — compute drops immediately, zero decommissioning
 
+```
+ Platform admin FTE     0.25-0.5 FTE    0.5-0.75 FTE    0.5-1 FTE
+ Provisioning team      0 (self-serve)  0 (self-serve)  0 (self-serve)
+```
+
 ### Side-by-Side: Annual Cost at Scale
 
 ```
- Developers    VDI (annual)          Coder (annual)      Savings        Savings %
- ─────────────────────────────────────────────────────────────────────────────────
- 100           $248K - $481K         $90K - $174K        $158K-307K     62-64%
- 200           $497K - $958K         $154K - $288K       $343K-670K     69-70%
- 300           $745K - $1.44M        $216K - $402K       $529K-$1.04M   71-72%
+ Developers    VDI (annual)          Coder OSS          Coder Enterprise     Savings (OSS)
+ ─────────────────────────────────────────────────────────────────────────────────────────
+ 100           $248K - $481K         $54K - $114K       $90K - $174K         76-77%
+ 200           $497K - $958K         $82K - $168K       $154K - $288K        83-82%
+ 300           $745K - $1.44M        $108K - $222K      $216K - $402K        85-85%
 ```
 
-> **Key insight:** Savings percentage *increases* with scale. VDI costs grow linearly (every seat adds compute + licenses + security + admin). Container costs grow sub-linearly (shared platform, concurrency-based compute, zero per-endpoint licensing). At 300 developers, VDI admin alone (3-6 FTE) costs more than the entire container platform.
+> **Key insight:** Savings percentage *increases* with scale. VDI costs grow linearly (every seat adds compute + licenses + security + admin). Container costs grow sub-linearly (shared platform, concurrency-based compute, zero per-endpoint licensing). At 300 developers, VDI admin alone (3-6 FTE) costs more than the entire container platform. OSS vs Enterprise is an operational decision (HA, audit, support), not a security decision — see detailed analysis below.
 
-### Coder Enterprise: Platform Investment
+### Coder OSS vs Enterprise: Do You Need the Commercial License?
 
-The cost comparison above includes **Coder Enterprise** (not OSS) to reflect production-grade deployment with:
+Coder's open-source (Community) edition is fully functional for running workspaces. The commercial license (Premium) adds governance and operational features. The critical question: **which features actually matter for your security model?**
 
-| Coder Enterprise Feature | Value |
-|--------------------------|-------|
-| **Template RBAC** | Per-template visibility — show only relevant templates to each team |
-| **High availability** | Multi-replica Coder server with automatic failover |
-| **Audit logging** | Detailed workspace lifecycle events for compliance |
-| **Quotas** | Per-user and per-group resource quotas |
-| **Premium support** | Vendor SLA, direct engineering support |
-| **Appearance customization** | Branded login page, custom messaging |
+#### Feature Comparison
 
-**Estimated license:** $30-50/user/month (varies by contract size; volume discounts at 200+ seats). Contact [coder.com/pricing](https://coder.com/pricing) for exact quotes.
+| Capability | Coder OSS (Free) | Coder Premium (Paid) | Do You Need It? |
+|---|---|---|---|
+| **Unlimited workspaces & templates** | Yes | Yes | — |
+| **SSO / OIDC login** | Yes | Yes | — |
+| **Template creation & management** | Yes | Yes | — |
+| **Desktop & web IDEs** | Yes | Yes | — |
+| **Template RBAC** (per-template visibility) | No — all users see all templates | Yes | **See analysis below** |
+| **OIDC group sync** → Coder groups | No | Yes | Useful for auto-role assignment |
+| **Custom roles** | No | Yes (v2.16.0+) | Useful for fine-grained admin delegation |
+| **Resource quotas** (per-user/group) | No | Yes | Can substitute with K8s resource quotas |
+| **Audit logging** (workspace lifecycle) | Basic | Detailed + exportable | Important for compliance at scale |
+| **High availability** (multi-replica) | No — single instance | Yes | Important at 200+ devs |
+| **Workspace proxies** (geo-distributed) | No | Yes | Needed for multi-region teams |
+| **Multi-organization** | No — single org | Yes | Needed if multiple business units share the platform |
+| **Premium support** (vendor SLA) | Community (GitHub/Discord) | Vendor SLA, direct engineering | Important for production |
+| **Appearance customization** | No | Yes | Nice-to-have |
 
-**Platform admin effort for Coder:**
+#### Template RBAC: Security Requirement or UX Preference?
 
-| Task | Effort | Frequency |
-|------|--------|-----------|
-| Template maintenance (Dockerfile + Terraform) | 2-4 hrs/template | Monthly or on-demand |
-| Coder server upgrades | 1-2 hrs | Quarterly |
-| SSO / identity management (Authentik) | 1-2 hrs | On-demand |
-| LiteLLM model config + budget review | 1-2 hrs | Monthly |
-| Monitoring / alerting review | 1-2 hrs | Weekly |
-| User support (mostly self-serve) | 2-4 hrs | Weekly |
-| **Total** | **~0.25-0.5 FTE at 100 devs; ~0.5-1 FTE at 300 devs** | |
+This is the most commonly cited reason for Enterprise. But the reality:
 
-Compared to VDI's 4.5-9 combined FTE at 300 developers (3-6 admin + 1.5-3 CDM provisioning), Coder requires 0.5-1 FTE total — a **80-90% reduction in operational headcount**.
+**Workspaces are personal.** Each contractor creates their own workspace and can only access their own. A template is a toolbox definition (Dockerfile + Terraform) — it does not grant access to code, data, or other users' environments.
+
+**The real security layers are elsewhere:**
+
+```
+ Security Layer          Controls                        Where Enforced
+ ─────────────────────────────────────────────────────────────────────
+ 1. SSO (OIDC)           Who can log in at all            Corporate IdP
+ 2. Git permissions       Who can access which code       GitLab groups/projects
+ 3. AI guardrails         PII masking, budget caps        LiteLLM (server-side)
+ 4. Network egress        What services containers reach  Platform firewall
+ 5. Template visibility   Who sees which toolbox          Coder (layer 5 of 5)
+```
+
+**What happens if a contractor picks the "wrong" template?**
+
+| Scenario | Risk | Mitigation Without Enterprise |
+|----------|------|-------------------------------|
+| Contractor uses ML template (GPU, 32 GB) when they need frontend (4 CPU, 8 GB) | **Cost waste** — not security | K8s resource quotas; workspace auto-stop; review usage |
+| Contractor sees template names revealing internal project names | **Low info leak** — template names are metadata, not code | Use generic names: "backend-java", not "project-phoenix-ml" |
+| Contractor picks template with higher AI budget | **Budget waste** | AI budgets enforced per-key in LiteLLM, not per-template |
+| Contractor accesses unauthorized source code | **Not possible** — Git controls this, not templates | GitLab group/project permissions are the real gate |
+
+**Terraform-level guardrail (OSS workaround):**
+
+Templates can include a soft or hard access check without Enterprise:
+
+```hcl
+data "coder_workspace_owner" "me" {}
+
+locals {
+  allowed_users = ["alice", "bob", "charlie"]
+}
+
+# Hard block: prevents workspace creation
+resource "null_resource" "access_check" {
+  count = contains(local.allowed_users,
+    data.coder_workspace_owner.me.name) ? 0 : 1
+  provisioner "local-exec" {
+    command = "echo 'This template is restricted. Contact your team lead.' && exit 1"
+  }
+}
+```
+
+**Limitation:** The template is still visible in the UI but creation fails with a clear error message. Not ideal UX, but functionally equivalent for access control.
+
+#### When Enterprise IS Justified
+
+| Scenario | Why Enterprise Matters |
+|----------|----------------------|
+| **200+ developers** | HA (multi-replica Coder server) prevents single point of failure |
+| **Compliance-heavy environment** | Detailed audit logging for SOC2, ISO 27001 evidence |
+| **Multi-region teams** | Workspace proxies reduce latency for developers far from the cluster |
+| **Multiple business units** | Multi-org isolation keeps teams in separate admin domains |
+| **No in-house K8s expertise** | Premium support SLA for production incidents |
+
+#### Recommendation: Start OSS, Graduate to Enterprise
+
+| Phase | License | When |
+|-------|---------|------|
+| **PoC / Pilot (1-50 devs)** | OSS | Now — validate the platform, prove the business case |
+| **Production (50-150 devs)** | OSS + Terraform guardrails | Git permissions + LiteLLM budgets handle security; K8s quotas handle resources |
+| **Scale (150+ devs)** | Enterprise | HA, audit logging, and vendor support justify the cost at this scale |
+
+### Cost at Scale: OSS vs Enterprise
+
+```
+                        100 devs        200 devs        300 devs
+                        (baseline)      (+100 proj)     (+200 proj)
+ ═══════════════════════════════════════════════════════════════════
+
+ CODER OSS (no license fee)
+ ─────────────────────────────────────────────────────────────────
+ Container compute      $1,500-3,500    $2,500-5,500    $3,500-7,500
+ Shared storage (EFS)   $500-1,000      $800-1,500      $1,000-2,000
+ Coder license          $0              $0              $0
+ AI tools (LiteLLM)     $500-1,000      $1,000-2,000    $1,500-3,000
+ Platform admin labor   $2,000-4,000    $2,500-5,000    $3,000-6,000
+ ─────────────────────────────────────────────────────────────────
+ TOTAL (monthly)        $4,500-9,500    $6,800-14,000   $9,000-18,500
+ TOTAL (annual)         $54K-114K       $82K-168K       $108K-222K
+ vs VDI savings         76-77%          83-82%          85-85%
+
+ CODER ENTERPRISE ($30-50/user/mo)
+ ─────────────────────────────────────────────────────────────────
+ Container compute      $1,500-3,500    $2,500-5,500    $3,500-7,500
+ Shared storage (EFS)   $500-1,000      $800-1,500      $1,000-2,000
+ Coder license          $3,000-5,000    $6,000-10,000   $9,000-15,000
+ AI tools (LiteLLM)     $500-1,000      $1,000-2,000    $1,500-3,000
+ Platform admin labor   $2,000-4,000    $2,500-5,000    $3,000-6,000
+ ─────────────────────────────────────────────────────────────────
+ TOTAL (monthly)        $7,500-14,500   $12,800-24,000  $18,000-33,500
+ TOTAL (annual)         $90K-174K       $154K-288K      $216K-402K
+ vs VDI savings         62-64%          69-70%          71-72%
+
+ VDI (for comparison)
+ ─────────────────────────────────────────────────────────────────
+ TOTAL (annual)         $248K-481K      $497K-958K      $745K-$1.44M
+ ═══════════════════════════════════════════════════════════════════
+```
+
+> **Key takeaway:** Even with Coder Enterprise, savings are 62-72%. With OSS, savings reach 76-85%. The decision to go Enterprise should be driven by **operational needs** (HA, audit, support) at scale — not by template RBAC, which is a UX preference when Git permissions are the real security boundary.
 
 ---
 
@@ -459,11 +551,12 @@ For a 6-month project adding 200 contractors:
                                     + compliance audit
                                     = $15K-30K
 
- Per-developer monthly run          $199-399/user            $64-112/user
-   (incl. Enterprise license)                                (with Coder Enterprise)
+ Per-developer monthly run          $199-399/user            $25-55/user (OSS)
+                                                             $55-105/user (Enterprise)
  ────────────────────────────────────────────────────────────────
- 6-month project total (200 devs)   $314K-$544K              $77K-134K
-   (run cost only, excl. ramp)      + $3M-4M ramp delay      + $0 ramp delay
+ 6-month project total (200 devs)   $314K-$544K              $30K-66K (OSS)
+   (run cost only, excl. ramp)      + $3M-4M ramp delay      $66K-126K (Enterprise)
+                                                             + $0 ramp delay
 ```
 
 > **The ramp-up delay cost alone ($2.9M-3.8M in delayed billable hours) dwarfs the entire 6-month platform cost.** Self-service provisioning isn't just a convenience — it's the difference between a project starting on time and starting 6 weeks late.
@@ -565,17 +658,19 @@ Four teams interact with this platform. The table below defines clear ownership:
 
 ## Why This Matters Now
 
-1. **The security stack costs more than the platform** — EDR + Zscaler + DLP licenses alone ($24-58/user/mo) exceed the entire cost of a container-based platform including Coder Enterprise ($64-112/user/mo vs $199-399 for VDI). Linux containers eliminate 100% of per-endpoint security licensing.
+1. **The security stack costs more than the platform** — EDR + Zscaler + DLP licenses alone ($24-58/user/mo) exceed the entire cost of a Coder OSS platform ($30-62/user/mo). Even with Coder Enterprise ($64-112/user/mo), it's cheaper than VDI ($199-399/user/mo). Linux containers eliminate 100% of per-endpoint security licensing.
 
 2. **Admin labor doesn't scale** — Every Windows VDI added means more patching, more agent troubleshooting, more AD management. At 300 developers, VDI needs 4.5-9 FTE for admin + provisioning; Coder needs 0.5-1 FTE. Containers are immutable — update the image once, all workspaces inherit the change.
 
 3. **CDM provisioning is the hidden bottleneck** — Adding 200 project contractors takes 6-8 weeks via CDM team (5 VMs/day). Self-service provisioning with Coder: same day. The ramp-up delay cost ($2.9M-3.8M in lost billable hours) dwarfs the entire platform investment.
 
-4. **AI agents are here** — Roo Code, OpenCode, Claude Code CLI are production-ready. VDI has no governed way to deploy them. Container-based platforms provide AI with built-in budgets, enforcement, and audit.
+4. **Template RBAC is not a security gate** — Workspaces are personal. Templates are toolbox definitions, not access grants. GitLab group/project permissions control code access. Coder Enterprise template RBAC is a UX optimization (reduce clutter), not a security requirement. Start with OSS; graduate to Enterprise when HA and audit logging justify the cost.
 
-5. **Cost savings increase with scale** — At 100 developers: 62-64% savings. At 300 developers: 71-72% savings. VDI scales linearly; containers scale sub-linearly (shared platform, concurrency-based compute).
+5. **AI agents are here** — Roo Code, OpenCode, Claude Code CLI are production-ready. VDI has no governed way to deploy them. Container-based platforms provide AI with built-in budgets, enforcement, and audit.
 
-6. **Contractor security is stronger, not weaker** — Browser-only access with container isolation + server-side guardrails replaces DLP agents that contractors can circumvent. No data ever reaches a local device.
+6. **Cost savings increase with scale** — At 100 developers: 76-77% savings (OSS). At 300 developers: 85% savings (OSS). Even with Enterprise: 62-72%. VDI scales linearly; containers scale sub-linearly.
+
+7. **Contractor security is stronger, not weaker** — Browser-only access with container isolation + server-side guardrails replaces DLP agents that contractors can circumvent. No data ever reaches a local device.
 
 ---
 
@@ -586,7 +681,8 @@ Four teams interact with this platform. The table below defines clear ownership:
 │                                                                  │
 │   FROM WINDOWS VDI TO LINUX CONTAINERS: PROVEN AT SCALE         │
 │                                                                  │
-│   62-72%  total cost reduction (incl. Coder Enterprise license) │
+│   76-85%  cost reduction with Coder OSS (free license)          │
+│   62-72%  cost reduction with Coder Enterprise (HA, audit)      │
 │   100%    endpoint security licensing eliminated                │
 │           (no EDR, no Zscaler, no DLP agents)                   │
 │   80-90%  admin headcount reduction (0.5-1 FTE vs 4.5-9 FTE)   │
@@ -596,13 +692,13 @@ Four teams interact with this platform. The table below defines clear ownership:
 │   3       AI agents with server-side governance                 │
 │                                                                  │
 │   At 300 developers:                                             │
-│     VDI:   $745K - $1.44M/yr + 4.5-9 FTE                       │
-│     Coder: $216K - $402K/yr  + 0.5-1 FTE                       │
+│     VDI:        $745K - $1.44M/yr + 4.5-9 FTE                  │
+│     Coder OSS:  $108K - $222K/yr  + 0.5-1 FTE                  │
+│     Coder Ent:  $216K - $402K/yr  + 0.5-1 FTE                  │
 │                                                                  │
-│   Self-service provisioning eliminates CDM bottleneck —         │
-│   DevOps/project managers provision directly.                    │
-│   Ramp delay cost ($2.9M-3.8M for 200 contractors)              │
-│   dwarfs the entire platform investment.                         │
+│   Template RBAC is a UX preference, not a security gate.        │
+│   Git permissions (GitLab) control code access.                  │
+│   Start OSS → graduate to Enterprise at 150+ devs for HA.      │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -626,3 +722,4 @@ Four teams interact with this platform. The table below defines clear ownership:
 | 1.2 | 2026-02-08 | Platform Team | Break out Microsoft licensing (VDA, M365 E1, RDS CAL, Windows Server); offshore contractor context |
 | 1.3 | 2026-02-08 | Platform Team | Add scaling comparison (100/200/300 devs); Coder Enterprise license; CDM team vs self-service provisioning; project ramp-up economics |
 | 1.4 | 2026-02-08 | Platform Team | Add Operating Model: R&R matrix (CDM/Infra/Platform/AWS), Linux patching clarification, CDM team transition impact |
+| 1.5 | 2026-02-08 | Platform Team | Add Coder OSS vs Enterprise analysis; template RBAC is UX not security; dual cost tiers (OSS 76-85% / Enterprise 62-72% savings); Terraform guardrail workaround; phased adoption recommendation |
