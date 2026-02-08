@@ -27,7 +27,7 @@ Core components:
 - MinIO
 - PostgreSQL / Redis
 - LiteLLM (AI proxy) + Key Provisioner (key management) + Enforcement Hook (design-first AI controls)
-- Roo Code (AI agent, VS Code) + OpenCode (AI agent, CLI)
+- Roo Code (AI agent, VS Code) + OpenCode (AI agent, CLI) + Claude Code (AI agent, CLI, Anthropic native)
 
 ---
 

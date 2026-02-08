@@ -50,6 +50,10 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 # Release: https://github.com/coder/code-server/releases
 RUN curl -fsSL https://code-server.dev/install.sh | sh -s -- --version 4.108.2
 
+# Claude Code CLI - terminal-based AI agent (Anthropic native)
+# Installed as root so binary lands in /usr/bin/claude (system PATH)
+RUN npm install -g @anthropic-ai/claude-code
+
 # NOTE: Coder CLI intentionally NOT installed (484 MB) — agent is injected at runtime
 
 # Install database tools
@@ -153,6 +157,9 @@ RUN mkdir -p /home/coder/.config/opencode \
     && cd /home/coder/.config/opencode \
     && npm init -y \
     && npm install @ai-sdk/openai-compatible
+
+# Pre-create Claude Code CLI config directory
+RUN mkdir -p /home/coder/.claude
 
 # Explicitly remove Copilot/Cody if present
 RUN code-server --uninstall-extension github.copilot 2>/dev/null || true \
