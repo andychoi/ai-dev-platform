@@ -17,7 +17,8 @@ Transform the Docker Compose PoC into a production AWS deployment. The core stra
 - **Dual-path access:** Coder tunnel (management plane) + direct ALB→code-server (data plane) coexist
 - **Coder OSS (single-instance):** AWS-native HA (ECS auto-restart, dual-path) substitutes for Enterprise multi-replica
 - **Three AI agents:** Roo Code (VS Code), OpenCode (CLI), Claude Code (Anthropic native CLI)
-- **Corporate IdP ready:** Authentik deployed for PoC parity; production swaps to Okta/Azure AD via OIDC config change
+- **Azure AD (Entra ID) direct OIDC:** No Authentik in production — Azure AD authenticates Coder + ALB directly
+- **Platform Admin App:** Extended Key Provisioner with team management, AI policy, and hiring manager self-service UI
 
 ### PoC → AWS Service Mapping
 
@@ -31,7 +32,8 @@ Transform the Docker Compose PoC into a production AWS deployment. The core stra
 | HashiCorp Vault | **AWS Secrets Manager** | Native IAM integration, auto-rotation |
 | Loki + Prometheus + Grafana | **CloudWatch** + Managed Grafana | Reduce ops; optional Prometheus via AMP |
 | Docker Compose | **Amazon ECS (Fargate)** | Serverless compute, per-task ENI isolation, no node management |
-| Authentik (container) | **Authentik on ECS** (or corporate IdP) | Keep for PoC parity; swap for Okta/Azure AD in enterprise |
+| Authentik (container) | **Azure AD (Entra ID)** direct OIDC | Eliminates self-hosted IdP; Azure AD handles auth for Coder + ALB |
+| Manual key management | **Platform Admin App** (extended Key Provisioner) | Team management, AI policy, hiring manager self-service UI |
 | LiteLLM (container) | **LiteLLM on ECS** (AI gateway) | Routes to Bedrock (primary, IAM) + Anthropic API (fallback) |
 | Docker-in-Docker workspaces | **ECS Fargate tasks** (per-user) | Each workspace = isolated task with own ENI + security group |
 | EBS PVCs (workspace storage) | **Amazon EFS** | Shared filesystem, per-workspace access points, multi-AZ |
@@ -224,8 +226,8 @@ These findings confirm the production approach (ACM + Internal ALB) will work wi
 | Service | Discovery Name | Port |
 |---------|---------------|------|
 | Coder Server | `coder.coder.internal` | 7080 |
-| Authentik | `authentik.coder.internal` | 9000 |
 | LiteLLM | `litellm.coder.internal` | 4000 |
+| Key Provisioner / Admin | `key-provisioner.coder.internal` | 8100 |
 
 **Advantages over EKS:**
 - No node management, no AMI patching, no kubelet
@@ -264,7 +266,7 @@ These findings confirm the production approach (ACM + Internal ALB) will work wi
 | Node Type | cache.r6g.large |
 | Cluster Mode | Disabled (single shard, 1 primary + 1 replica) |
 | Encryption | At rest (KMS) + in transit (TLS) |
-| Purpose | Authentik sessions, Coder pub/sub |
+| Purpose | Coder pub/sub, session cache |
 
 #### Amazon S3
 
@@ -303,10 +305,13 @@ These findings confirm the production approach (ACM + Internal ALB) will work wi
 | Secret Path | Contents |
 |-------------|----------|
 | `prod/coder/database` | RDS connection string |
-| `prod/coder/oidc` | OIDC client ID + secret |
-| `prod/authentik/secret-key` | Authentik secret key |
+| `prod/coder/oidc` | Azure AD OIDC client ID + secret (for Coder login) |
+| `prod/alb/oidc` | Azure AD OIDC client ID + secret (for ALB direct-path auth) |
 | `prod/litellm/master-key` | LiteLLM admin key |
 | `prod/litellm/anthropic-api-key` | Anthropic direct API key (optional fallback) |
+| `prod/key-provisioner/secret` | Provisioner secret (workspace↔key-provisioner auth) |
+
+> **Note:** No `prod/authentik/*` secrets — Azure AD is external (Microsoft-managed). Two separate OIDC app registrations: one for Coder, one for ALB direct path. Both use the same Azure AD tenant.
 
 #### IAM Roles (ECS Task Roles)
 
@@ -314,7 +319,7 @@ These findings confirm the production approach (ACM + Internal ALB) will work wi
 |----------------|----------|-------------|
 | `coder-server` | `coder-task-role` | Secrets Manager (read own), S3 (template state), ECS (RunTask for workspaces) |
 | `litellm` | `litellm-task-role` | Bedrock (InvokeModel), Secrets Manager (read own) |
-| `authentik` | `authentik-task-role` | Secrets Manager (read own), SES (email) |
+| `key-provisioner` | `key-provisioner-task-role` | Secrets Manager (read own), RDS (team tables) |
 | `workspace` | `workspace-task-role` | Minimal (LiteLLM accessed via network, no direct AWS API access) |
 | All tasks (shared) | `ecs-task-execution-role` | ECR (pull images), Secrets Manager (inject secrets), CloudWatch Logs (write) |
 
@@ -439,8 +444,9 @@ resource "aws_lb_listener_rule" "authentik" {
         { "name": "CODER_MAX_SESSION_EXPIRY", "value": "28800" },
         { "name": "CODER_RATE_LIMIT_DISABLE_ALL", "value": "false" },
         { "name": "CODER_TELEMETRY", "value": "false" },
-        { "name": "CODER_OIDC_ISSUER_URL", "value": "https://auth.internal.company.com/application/o/coder/" },
+        { "name": "CODER_OIDC_ISSUER_URL", "value": "https://login.microsoftonline.com/{tenant-id}/v2.0" },
         { "name": "CODER_OIDC_ALLOW_SIGNUPS", "value": "true" },
+        { "name": "CODER_OIDC_SCOPES", "value": "openid,profile,email" },
         { "name": "CODER_OAUTH2_GITHUB_DEFAULT_PROVIDER_ENABLE", "value": "false" }
       ],
       "secrets": [
@@ -511,44 +517,136 @@ aws ecs wait services-stable \
 
 ### 2.3 Supporting Services on ECS
 
-#### Authentik (Identity Provider)
+#### Azure AD (Entra ID) — Identity Provider
 
-Deploy as ECS Fargate service. Connects to RDS (shared instance, separate database) and ElastiCache.
+**No self-hosted IdP in production.** Azure AD handles all OIDC authentication directly — no Authentik deployment needed.
 
-```hcl
-resource "aws_ecs_service" "authentik" {
-  name            = "authentik"
-  cluster         = aws_ecs_cluster.main.id
-  task_definition = aws_ecs_task_definition.authentik.arn
-  desired_count   = 2
-  launch_type     = "FARGATE"
+**Azure AD App Registrations (2 required):**
 
-  network_configuration {
-    subnets          = module.vpc.private_subnet_ids
-    security_groups  = [aws_security_group.ecs_services.id]
-    assign_public_ip = false
-  }
+| App Registration | Purpose | Redirect URI |
+|-----------------|---------|-------------|
+| `coder-webide` | Coder login (Path 1) | `https://coder.internal.company.com/api/v2/users/oidc/callback` |
+| `coder-ide-direct` | ALB direct access (Path 2) | `https://*.ide.internal.company.com/oauth2/idpresponse` |
 
-  service_registries {
-    registry_arn = aws_service_discovery_service.authentik.arn
-  }
-}
+**OIDC Configuration:**
+
+```
+Issuer URL:     https://login.microsoftonline.com/{tenant-id}/v2.0
+Token endpoint: https://login.microsoftonline.com/{tenant-id}/oauth2/v2.0/token
+Auth endpoint:  https://login.microsoftonline.com/{tenant-id}/oauth2/v2.0/authorize
+UserInfo:       https://graph.microsoft.com/oidc/userinfo
 ```
 
-**Corporate IdP Integration (Recommended for Production):**
+**Coder OIDC env vars:**
+```bash
+CODER_OIDC_ISSUER_URL=https://login.microsoftonline.com/{tenant-id}/v2.0
+CODER_OIDC_CLIENT_ID=<from Secrets Manager: prod/coder/oidc>
+CODER_OIDC_CLIENT_SECRET=<from Secrets Manager: prod/coder/oidc>
+CODER_OIDC_ALLOW_SIGNUPS=true
+CODER_OIDC_SCOPES=openid,profile,email
+```
 
-Authentik is deployed for PoC parity but should be replaced with the organization's existing IdP in production:
+> **Note:** AWS IAM (infrastructure auth) and Azure AD OIDC (application SSO) serve **different layers** — they are not duplicates. IAM controls who can manage AWS resources; Azure AD controls who can log into Coder/workspaces.
 
-| IdP | OIDC Issuer URL Example | Notes |
-|-----|------------------------|-------|
-| **Okta** | `https://company.okta.com/oauth2/default` | Most common enterprise IdP |
-| **Azure AD** | `https://login.microsoftonline.com/{tenant}/v2.0` | If org uses M365 |
-| **AWS IAM Identity Center** | `https://identitystore.{region}.amazonaws.com` | If AWS-native |
-| **Authentik (keep)** | `https://auth.internal.company.com/application/o/coder/` | Only if no corporate IdP |
+**Why no Authentik in production:**
+- Azure AD provides OIDC authentication directly — one fewer service to operate
+- Azure AD provides MFA, conditional access, and password policy — enterprise grade
+- Team/group management for AI policy is handled by the Platform Admin App (not an IdP concern)
+- Eliminates: 2 ECS tasks, PostgreSQL database, Redis dependency, ElastiCache cost share
 
-To swap: update `CODER_OIDC_ISSUER_URL`, `CODER_OIDC_CLIENT_ID`, `CODER_OIDC_CLIENT_SECRET` in Secrets Manager + ALB OIDC auth action config. No workspace changes needed.
+#### Platform Admin App (Extended Key Provisioner)
 
-> **Note:** AWS IAM (infrastructure auth) and OIDC IdP (application SSO) serve **different layers** — they are not duplicates. IAM controls who can manage AWS resources; OIDC controls who can log into Coder/workspaces.
+The Key Provisioner is extended with **team management** and a **hiring manager web UI**. This replaces the role that Authentik's group management would have played, without requiring a separate IdP.
+
+**Architecture:**
+```
+Hiring Manager → admin.internal.company.com → ALB (OIDC: Azure AD) → Platform Admin App
+                                                                           │
+                                                                    ┌──────┴──────┐
+                                                                    │ PostgreSQL  │
+                                                                    │ (teams,     │
+                                                                    │  policies)  │
+                                                                    └──────┬──────┘
+                                                                           │
+                                                              Key Provisioner API
+                                                                    │
+                                                              LiteLLM (virtual keys
+                                                               with team policy)
+```
+
+**New API Endpoints (extend Key Provisioner):**
+
+| Method | Endpoint | Auth | Purpose |
+|--------|----------|------|---------|
+| `GET` | `/api/v1/teams` | ALB OIDC (Azure AD) | List teams (hiring manager sees own teams) |
+| `POST` | `/api/v1/teams` | ALB OIDC (admin) | Create team |
+| `GET` | `/api/v1/teams/{id}/members` | ALB OIDC | List team members |
+| `POST` | `/api/v1/teams/{id}/members` | ALB OIDC | Add member to team |
+| `DELETE` | `/api/v1/teams/{id}/members/{user}` | ALB OIDC | Remove member |
+| `GET` | `/api/v1/teams/{id}/policy` | ALB OIDC | Get team AI policy |
+| `PUT` | `/api/v1/teams/{id}/policy` | ALB OIDC | Update team AI policy |
+| `GET` | `/api/v1/teams/{id}/usage` | ALB OIDC | Team AI spend/usage report |
+| `GET` | `/admin` | ALB OIDC | Hiring manager web UI |
+
+**Database Schema (new tables in existing RDS):**
+
+```sql
+-- Teams managed by hiring managers
+CREATE TABLE teams (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name        VARCHAR(100) NOT NULL UNIQUE,
+    manager_email VARCHAR(255) NOT NULL,  -- Azure AD email (hiring manager)
+    created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Team membership (user → team mapping)
+CREATE TABLE team_members (
+    team_id     UUID REFERENCES teams(id) ON DELETE CASCADE,
+    username    VARCHAR(100) NOT NULL,    -- Coder username (matches Azure AD)
+    email       VARCHAR(255),
+    added_by    VARCHAR(255) NOT NULL,    -- Who added this member
+    added_at    TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (team_id, username)
+);
+
+-- AI policy per team (enforcement, budget, guardrails)
+CREATE TABLE team_policies (
+    team_id           UUID PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
+    enforcement_level VARCHAR(20) DEFAULT 'standard',   -- unrestricted|standard|design-first
+    guardrail_action  VARCHAR(10) DEFAULT 'block',      -- block|mask
+    budget_per_user   DECIMAL(10,2) DEFAULT 10.00,      -- USD per budget_duration
+    budget_duration   VARCHAR(10) DEFAULT '1d',          -- 1d|7d|30d
+    rpm_limit         INT DEFAULT 60,
+    tpm_limit         INT DEFAULT 100000,
+    allowed_models    TEXT[] DEFAULT ARRAY['claude-sonnet-4-5','claude-haiku-4-5'],
+    updated_at        TIMESTAMPTZ DEFAULT NOW(),
+    updated_by        VARCHAR(255)
+);
+```
+
+**Key creation flow (team-aware):**
+```
+1. Workspace starts → startup script calls POST /api/v1/keys/workspace { username: "alice" }
+2. Key Provisioner looks up: alice → team "project-alpha"
+3. Team policy: enforcement=design-first, budget=$50/day, guardrail=mask
+4. Creates LiteLLM virtual key with team policy baked into metadata
+5. Returns key to workspace → configures Roo Code, OpenCode, Claude Code
+```
+
+**Hiring manager self-service:**
+```
+Add contractor    → POST /api/v1/teams/{id}/members → next workspace start gets team policy
+Remove contractor → DELETE /api/v1/teams/{id}/members/{user} → existing key revoked
+Change policy     → PUT /api/v1/teams/{id}/policy → new keys get updated policy (existing keys require rotation)
+View usage        → GET /api/v1/teams/{id}/usage → per-user AI spend from LiteLLM
+```
+
+**ECS Deployment:** The Platform Admin App runs as part of the Key Provisioner ECS task (same container, same port 8100). The `/admin` UI is served alongside the existing API endpoints. No additional ECS service needed.
+
+**Deliverables:**
+- Extended `shared/key-provisioner/app.py` — team CRUD, policy endpoints, admin UI
+- Database migration: `teams`, `team_members`, `team_policies` tables
+- ALB listener rule: `admin.internal.company.com` → Key Provisioner (port 8100) with OIDC auth
 
 #### LiteLLM (AI Gateway)
 
@@ -1171,8 +1269,9 @@ aws-production/
 | Day | Tasks |
 |-----|-------|
 | 1-2 | Coder ECS service deployment + ALB routing |
-| 3-4 | Authentik ECS deployment + OIDC config |
+| 3-4 | Azure AD App Registration + OIDC config (Coder + ALB) |
 | 5-6 | LiteLLM ECS deployment + Bedrock integration |
+| 7-8 | Key Provisioner + Platform Admin App (team mgmt, admin UI) |
 | 9-10 | Workspace template (ECS Fargate) + ECR image |
 
 ### Week 5-6: Security Hardening
@@ -1206,7 +1305,7 @@ aws-production/
 
 | Resource | Specification | Monthly Cost |
 |----------|---------------|--------------|
-| ECS Fargate — Platform | Coder (1x 1vCPU/4GB, OSS), Authentik (2x 0.5vCPU/2GB), LiteLLM (2x 0.5vCPU/2GB) | $145 |
+| ECS Fargate — Platform | Coder (1x 1vCPU/4GB, OSS), LiteLLM (2x 0.5vCPU/2GB), Key Provisioner+Admin (1x 0.25vCPU/512MB) | $105 |
 | ECS Fargate — Workspaces | 20 concurrent x 2vCPU x 4GB (Spot) | $450 |
 | RDS PostgreSQL | db.r6g.large Single-AZ | $175 |
 | ElastiCache Redis | cache.r6g.large | $200 |
@@ -1218,16 +1317,16 @@ aws-production/
 | NAT Gateway | 1 (single AZ) | $35 |
 | Bedrock (Claude) | ~$5/user/month avg | $250 |
 | GitLab Runner | t3.large (shared) | $60 |
-| **Total (OSS)** | | **~$1,470/month** |
+| **Total (OSS)** | | **~$1,430/month** |
 | + Coder Enterprise | $66/user/month x 50 users | +$3,300/month |
 
-> **Note:** Coder OSS is $0 license cost. Enterprise adds template RBAC, audit log streaming, and multi-replica HA but costs $66/user/month. For 50 users, Enterprise more than doubles the total. OSS + dual-path is recommended at this scale.
+> **Note:** No Authentik cost — Azure AD is the organization's existing IdP (already paid for). Platform Admin App runs in the existing Key Provisioner task (no additional ECS cost). Coder OSS + dual-path recommended at this scale.
 
 ### Medium (200 users, 50 concurrent workspaces) — Coder OSS
 
 | Resource | Specification | Monthly Cost |
 |----------|---------------|--------------|
-| ECS Fargate — Platform | Coder (1x 2vCPU/8GB, OSS), Authentik (2x 1vCPU/4GB), LiteLLM (2x 1vCPU/4GB) | $330 |
+| ECS Fargate — Platform | Coder (1x 2vCPU/8GB, OSS), LiteLLM (2x 1vCPU/4GB), Key Provisioner+Admin (1x 0.5vCPU/1GB) | $250 |
 | ECS Fargate — Workspaces | 50 concurrent x 2vCPU x 4GB (Spot) | $1,120 |
 | RDS PostgreSQL | db.r6g.xlarge Single-AZ | $350 |
 | ElastiCache Redis | cache.r6g.xlarge | $400 |
@@ -1240,10 +1339,10 @@ aws-production/
 | NAT Gateway | 1 (single AZ) | $35 |
 | GitLab Runner | t3.xlarge (shared) | $120 |
 | Bedrock (Claude) | ~$5/user/month avg | $1,000 |
-| **Total (OSS)** | | **~$3,700/month** |
+| **Total (OSS)** | | **~$3,620/month** |
 | + Coder Enterprise | $66/user/month x 200 users | +$13,200/month |
 
-> **Evaluate Enterprise at 200+ users** if template RBAC (restrict template visibility by group) or audit log streaming (compliance) is required. At 200 users, Enterprise adds $13.2K/month — a 3.5x increase.
+> **Evaluate Enterprise at 200+ users** if template RBAC or audit log streaming is needed. Savings from removing Authentik (~$80/mo) offset by nothing — Azure AD is already paid for. Platform Admin App adds $0 incremental cost (runs in Key Provisioner task).
 
 ### Cost Optimization
 
@@ -1288,7 +1387,8 @@ aws-production/
 - [ ] Workspace creation < 2 minutes (including Fargate cold start)
 - [ ] Roo Code + OpenCode + Claude Code + LiteLLM + Bedrock working end-to-end
 - [ ] Claude Code CLI using Anthropic pass-through (`/anthropic/v1/messages`)
-- [ ] OIDC login working (Authentik or corporate IdP)
+- [ ] OIDC login working (Azure AD / Entra ID)
+- [ ] Platform Admin App: team CRUD, AI policy, hiring manager UI
 - [ ] Dual-path access verified (Coder tunnel + direct ALB)
 - [ ] Direct path continues working during Coder server restart
 - [ ] Git clone/push working (existing GitLab with Azure AD SSO)
@@ -1303,7 +1403,8 @@ aws-production/
 | Fargate cold start time (~30-60s) | High | Low | Acceptable for dev workspaces; keep platform services always-on |
 | Bedrock model availability / quotas | Medium | High | Request quota increases early; keep Anthropic API as fallback |
 | Fargate Spot interruption | Medium | Low | 2-min notice; workspace state on EFS survives interruption; auto-restart |
-| Authentik → corporate IdP migration | Medium | Medium | Abstract OIDC config; test with target IdP early; ALB OIDC auth action also needs IdP update |
+| Azure AD App Registration config | Low | Medium | Test OIDC redirect URIs early; two app registrations (Coder + ALB direct) |
+| Platform Admin App development | Medium | Medium | ~500-800 lines Python; extend existing Key Provisioner; PoC validates with Authentik as Azure AD stand-in |
 | Cost overrun on Bedrock | Medium | Medium | LiteLLM budget caps + CloudWatch billing alarms |
 | Coder OSS single-instance restart | Medium | Low | Dual-path: direct ALB path is unaffected; ECS restarts in 30-60s; only management operations (workspace create/stop) are briefly interrupted |
 | Template migration (Docker → ECS Fargate) | High | Medium | Parallel testing; keep Docker template for PoC fallback |
@@ -1327,7 +1428,8 @@ aws-production/
 | Secrets | Secrets Manager | Native IAM, direct ECS integration for secret injection | Vault (more ops), SSM Parameter Store (less features) |
 | TLS | ACM + Internal ALB | Free, auto-renewal, no cert management | Let's Encrypt (more ops), self-signed (PoC pattern) |
 | Monitoring | CloudWatch + Managed Grafana | Less ops than self-hosted Prometheus stack | AMP+AMG (more cost), self-hosted (more ops) |
-| **Identity** | **Authentik on ECS → Corporate IdP** | Authentik for PoC parity; production should swap to org's existing IdP (Okta/Azure AD) — just change OIDC issuer URL + client credentials. ALB OIDC auth for direct path uses same IdP | Cognito (less flexible), keep Authentik long-term (unnecessary ops) |
+| **Identity** | **Azure AD (Entra ID) direct OIDC** | No self-hosted IdP — Azure AD authenticates Coder + ALB directly (one OIDC hop, not two). Eliminates Authentik ECS service, PostgreSQL DB, Redis dependency. PoC uses Authentik as Azure AD stand-in | Authentik as federation hub (extra hop, extra ops), Cognito (less flexible), Okta (if not M365 org) |
+| **Team/Key Management** | **Platform Admin App (extended Key Provisioner)** | Hiring manager self-service for team CRUD, AI policy (enforcement, budget, guardrails), usage dashboards. Runs in existing Key Provisioner task — no new ECS service. Direct DB lookup replaces OIDC claim encoding | Authentik groups + scope mappings (requires second IdP), custom standalone app (more infra) |
 | Git | Existing GitLab (Azure AD SSO) | Use org's existing Git platform; no additional infrastructure needed | Gitea on ECS (PoC pattern), CodeCommit (limited) |
 | Service Discovery | AWS Cloud Map | Native ECS integration, private DNS namespace | Route 53 resolver (more manual), consul (more ops) |
 

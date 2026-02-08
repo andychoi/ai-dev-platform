@@ -60,7 +60,7 @@ resource "aws_ecs_task_definition" "coder" {
         { name = "CODER_WILDCARD_ACCESS_URL", value = "*.${var.domain_name}" },
         { name = "CODER_HTTP_ADDRESS", value = "0.0.0.0:7080" },
         { name = "CODER_SECURE_AUTH_COOKIE", value = "true" },
-        { name = "CODER_OIDC_ISSUER_URL", value = "https://auth.${var.domain_name}/application/o/coder/" },
+        { name = "CODER_OIDC_ISSUER_URL", value = var.oidc_issuer_url },
         { name = "CODER_OAUTH2_GITHUB_DEFAULT_PROVIDER_ENABLE", value = "false" },
         { name = "CODER_TELEMETRY", value = "false" },
         { name = "CODER_MAX_SESSION_EXPIRY", value = "28800" },
@@ -362,11 +362,18 @@ resource "aws_ecs_service" "key_provisioner" {
     assign_public_ip = false
   }
 
+  # Platform Admin App: admin.domain → ALB → key-provisioner (port 8100)
+  load_balancer {
+    target_group_arn = module.alb.target_group_arns["key_provisioner"]
+    container_name   = "key-provisioner"
+    container_port   = 8100
+  }
+
   service_registries {
     registry_arn = aws_service_discovery_service.key_provisioner.arn
   }
 
-  depends_on = [aws_ecs_service.litellm]
+  depends_on = [module.alb, aws_ecs_service.litellm]
 
   tags = var.tags
 }
@@ -725,124 +732,10 @@ resource "aws_ecs_service" "langfuse_worker" {
 }
 
 # =============================================================================
-# AUTHENTIK
+# AUTHENTIK — REMOVED (Option E: Azure AD direct OIDC)
 # =============================================================================
-
-resource "aws_cloudwatch_log_group" "authentik" {
-  name              = "/ecs/${local.name_prefix}/authentik"
-  retention_in_days = 30
-
-  tags = var.tags
-}
-
-resource "aws_service_discovery_service" "authentik" {
-  name = "authentik"
-
-  dns_config {
-    namespace_id = module.ecs.service_discovery_namespace_id
-
-    dns_records {
-      ttl  = 10
-      type = "A"
-    }
-
-    routing_policy = "MULTIVALUE"
-  }
-
-  health_check_custom_config {
-    failure_threshold = 1
-  }
-}
-
-resource "aws_ecs_task_definition" "authentik" {
-  family                   = "${local.name_prefix}-authentik"
-  requires_compatibilities = ["FARGATE"]
-  network_mode             = "awsvpc"
-  cpu                      = 512
-  memory                   = 2048
-  execution_role_arn       = module.iam.task_execution_role_arn
-  task_role_arn            = module.iam.authentik_task_role_arn
-
-  container_definitions = jsonencode([
-    {
-      name      = "authentik"
-      image     = "ghcr.io/goauthentik/server:latest"
-      essential = true
-      command   = ["server"]
-
-      portMappings = [
-        {
-          containerPort = 9000
-          protocol      = "tcp"
-        }
-      ]
-
-      secrets = [
-        {
-          name      = "AUTHENTIK_POSTGRESQL__HOST"
-          valueFrom = "${module.secrets.authentik_database_secret_arn}:host::"
-        },
-        {
-          name      = "AUTHENTIK_POSTGRESQL__USER"
-          valueFrom = "${module.secrets.authentik_database_secret_arn}:username::"
-        },
-        {
-          name      = "AUTHENTIK_POSTGRESQL__PASSWORD"
-          valueFrom = "${module.secrets.authentik_database_secret_arn}:password::"
-        },
-        {
-          name      = "AUTHENTIK_POSTGRESQL__NAME"
-          valueFrom = "${module.secrets.authentik_database_secret_arn}:database::"
-        },
-        {
-          name      = "AUTHENTIK_SECRET_KEY"
-          valueFrom = module.secrets.authentik_secret_key_secret_arn
-        },
-        {
-          name      = "AUTHENTIK_REDIS__HOST"
-          valueFrom = module.secrets.authentik_redis_host_secret_arn
-        },
-      ]
-
-      logConfiguration = {
-        logDriver = "awslogs"
-        options = {
-          "awslogs-group"         = aws_cloudwatch_log_group.authentik.name
-          "awslogs-region"        = var.aws_region
-          "awslogs-stream-prefix" = "authentik"
-        }
-      }
-    }
-  ])
-
-  tags = var.tags
-}
-
-resource "aws_ecs_service" "authentik" {
-  name            = "${local.name_prefix}-authentik"
-  cluster         = module.ecs.cluster_arn
-  task_definition = aws_ecs_task_definition.authentik.arn
-  desired_count   = 2
-  launch_type     = "FARGATE"
-
-  network_configuration {
-    subnets          = module.vpc.private_app_subnet_ids
-    security_groups  = [aws_security_group.ecs_services.id]
-    assign_public_ip = false
-  }
-
-  load_balancer {
-    target_group_arn = module.alb.target_group_arns["authentik"]
-    container_name   = "authentik"
-    container_port   = 9000
-  }
-
-  service_registries {
-    registry_arn = aws_service_discovery_service.authentik.arn
-  }
-
-  depends_on = [module.alb]
-
-  tags = var.tags
-}
+# Production uses Azure AD (Entra ID) for OIDC authentication.
+# No self-hosted IdP needed. PoC uses Authentik as Azure AD stand-in.
+# Team/group management handled by Platform Admin App (Key Provisioner extension).
+# =============================================================================
 

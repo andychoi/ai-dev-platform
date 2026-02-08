@@ -30,9 +30,10 @@ output "listener_arn" {
 output "target_group_arns" {
   description = "Map of service name to target group ARN."
   value = {
-    coder     = aws_lb_target_group.services["coder"].arn
-    authentik = aws_lb_target_group.services["authentik"].arn
-    litellm   = aws_lb_target_group.services["litellm"].arn
+    coder           = aws_lb_target_group.services["coder"].arn
+    litellm         = aws_lb_target_group.services["litellm"].arn
+    key_provisioner = aws_lb_target_group.services["key_provisioner"].arn
+    langfuse        = aws_lb_target_group.services["langfuse"].arn
   }
 }
 

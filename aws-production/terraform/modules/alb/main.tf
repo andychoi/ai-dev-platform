@@ -95,13 +95,17 @@ locals {
       port        = 7080
       health_path = "/api/v2/buildinfo"
     }
-    authentik = {
-      port        = 9000
-      health_path = "/-/health/live/"
-    }
     litellm = {
       port        = 4000
       health_path = "/health/readiness"
+    }
+    key_provisioner = {
+      port        = 8100
+      health_path = "/health"
+    }
+    langfuse = {
+      port        = 3000
+      health_path = "/api/public/health"
     }
   }
 }
@@ -184,22 +188,62 @@ resource "aws_lb_listener_rule" "coder" {
   tags = merge(var.tags, { Service = "coder" })
 }
 
-resource "aws_lb_listener_rule" "authentik" {
+# Platform Admin App (extended Key Provisioner) — OIDC-authenticated
+# Hiring manager UI for team management, AI policy, usage dashboards
+resource "aws_lb_listener_rule" "admin" {
+  count = var.enable_workspace_direct_access && var.oidc_issuer_url != "" ? 1 : 0
+
   listener_arn = aws_lb_listener.https.arn
   priority     = 200
 
   action {
+    type  = "authenticate-oidc"
+    order = 1
+
+    authenticate_oidc {
+      issuer                 = var.oidc_issuer_url
+      client_id              = var.oidc_client_id
+      client_secret          = var.oidc_client_secret
+      token_endpoint         = var.oidc_token_endpoint
+      authorization_endpoint = var.oidc_authorization_endpoint
+      user_info_endpoint     = var.oidc_user_info_endpoint
+      on_unauthenticated_request = "authenticate"
+      scope                  = "openid profile email"
+      session_timeout        = 28800
+    }
+  }
+
+  action {
     type             = "forward"
-    target_group_arn = aws_lb_target_group.services["authentik"].arn
+    order            = 2
+    target_group_arn = aws_lb_target_group.services["key_provisioner"].arn
   }
 
   condition {
     host_header {
-      values = ["auth.${var.domain_name}"]
+      values = ["admin.${var.domain_name}"]
     }
   }
 
-  tags = merge(var.tags, { Service = "authentik" })
+  tags = merge(var.tags, { Service = "admin" })
+}
+
+resource "aws_lb_listener_rule" "langfuse" {
+  listener_arn = aws_lb_listener.https.arn
+  priority     = 300
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.services["langfuse"].arn
+  }
+
+  condition {
+    host_header {
+      values = ["langfuse.${var.domain_name}"]
+    }
+  }
+
+  tags = merge(var.tags, { Service = "langfuse" })
 }
 
 resource "aws_lb_listener_rule" "litellm" {

@@ -52,6 +52,12 @@ variable "workspace_image" {
   default     = "contractor-workspace:latest"
 }
 
+variable "key_provisioner_image" {
+  description = "Docker image for Key Provisioner / Platform Admin App"
+  type        = string
+  default     = "key-provisioner:latest"
+}
+
 # -----------------------------------------------------------------------------
 # RDS
 # -----------------------------------------------------------------------------
@@ -111,7 +117,7 @@ variable "enable_workspace_direct_access" {
 }
 
 variable "oidc_issuer_url" {
-  description = "OIDC issuer URL for ALB authentication (e.g., Authentik, Okta, Azure AD)"
+  description = "OIDC issuer URL — Azure AD (Entra ID): https://login.microsoftonline.com/{tenant-id}/v2.0"
   type        = string
   default     = ""
 }
