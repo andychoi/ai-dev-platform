@@ -59,20 +59,53 @@ The guardrail system is a **server-side, tamper-proof** content filter that runs
 
 ---
 
-## 2. Guardrail Levels
+## 2. Guardrail Levels & Actions
 
-Each LiteLLM virtual key has a `guardrail_level` in its metadata. The level determines how aggressively patterns are enforced.
+Each LiteLLM virtual key has two guardrail settings in its metadata:
+
+### Guardrail Level (`guardrail_level`)
+
+Determines **which patterns** trigger action.
 
 | Level | High Severity | Medium Severity | Use Case |
 |-------|--------------|-----------------|----------|
 | `off` | Pass through | Pass through | Trusted/admin users, testing |
-| `standard` | **Block** | Warn (log only) | Default for contractor workspaces |
-| `strict` | **Block** | **Block** | Financial/healthcare workloads |
+| `standard` | **Block/Mask** | Warn (log only) | Default for contractor workspaces |
+| `strict` | **Block/Mask** | **Block/Mask** | Financial/healthcare workloads |
+
+### Guardrail Action (`guardrail_action`)
+
+Determines **what happens** when a pattern triggers.
+
+| Action | Behavior | Request Outcome | Use Case |
+|--------|----------|-----------------|----------|
+| `block` | Reject with HTTP 400 error | Request fails — user must remove sensitive data | Strict compliance environments |
+| `mask` | Replace matches with `[REDACTED:<label>]` and proceed | Request succeeds with redacted content | Recommended default — less disruptive |
 
 - **Block** = Request rejected with HTTP 400 and descriptive error message
-- **Warn** = Request allowed through; pattern logged at WARNING level
+- **Mask** = Sensitive values replaced in-place with `[REDACTED:<label>]`; request proceeds normally
+- **Warn** = Request allowed through unchanged; pattern logged at WARNING level
 
-Default level is controlled by `DEFAULT_GUARDRAIL_LEVEL` env var (defaults to `standard`).
+### Masking Example
+
+When `guardrail_action=mask`, a prompt like:
+```
+My SSN is 078-05-1120 and my card is 4532-0150-0000-1234
+```
+becomes:
+```
+My SSN is [REDACTED:US Social Security Number] and my card is [REDACTED:Visa credit card number]
+```
+The AI receives the redacted version — the original values never reach the model provider.
+
+### Configuration Defaults
+
+| Setting | Default | Env Var |
+|---------|---------|---------|
+| Level | `standard` | `DEFAULT_GUARDRAIL_LEVEL` |
+| Action | `block` | `DEFAULT_GUARDRAIL_ACTION` |
+
+The **template parameter** defaults to `mask` for new workspaces (recommended for better UX).
 
 ---
 
@@ -174,6 +207,7 @@ Custom patterns **override** built-in patterns with the same name.
 |----------|---------|-------------|
 | `GUARDRAILS_ENABLED` | `true` | Master switch — set to `false` to disable all scanning |
 | `DEFAULT_GUARDRAIL_LEVEL` | `standard` | Default level for keys without `guardrail_level` metadata |
+| `DEFAULT_GUARDRAIL_ACTION` | `block` | Default action: `block` (reject) or `mask` (redact in-place) |
 | `GUARDRAILS_DIR` | `/app/guardrails` | Directory containing `patterns.json` |
 
 ### Files
@@ -217,7 +251,7 @@ curl -X POST http://localhost:8100/api/v1/keys/workspace \
     "workspace_id": "abc-123",
     "username": "contractor1",
     "enforcement_level": "design-first",
-    "guardrail_level": "strict"
+    "guardrail_action": "mask"
   }'
 ```
 
@@ -232,19 +266,21 @@ curl -X POST http://localhost:4000/key/generate \
     "max_budget": 10.0,
     "metadata": {
       "guardrail_level": "strict",
+      "guardrail_action": "mask",
       "enforcement_level": "standard"
     }
   }'
 ```
 
-### Guardrail Level by Workspace Type
+### Recommended Settings by Workspace Type
 
-| Workspace Type | Recommended Guardrail | Rationale |
-|----------------|----------------------|-----------|
-| General development | `standard` | Blocks high-severity; warns on medium |
-| Financial/healthcare | `strict` | Blocks all detected patterns |
-| Admin/testing | `off` | No scanning (trusted users) |
-| CI/CD pipelines | `standard` | Prevents accidental secret exposure |
+| Workspace Type | Level | Action | Rationale |
+|----------------|-------|--------|-----------|
+| General development | `standard` | `mask` | Redacts high-severity; warns on medium — least disruptive |
+| Financial/healthcare | `strict` | `block` | Rejects all detected patterns — maximum compliance |
+| Claude Code CLI | `standard` | `mask` | Masking preferred — Claude Code handles context well |
+| Admin/testing | `off` | — | No scanning (trusted users) |
+| CI/CD pipelines | `standard` | `block` | Prevents accidental secret exposure in automation |
 
 ---
 
@@ -410,7 +446,7 @@ curl -s -H "Authorization: Bearer $MASTER_KEY" \
 
 ### Blocked Request Error Format
 
-When a request is blocked, the response looks like:
+When `guardrail_action=block`, the response looks like:
 
 ```json
 {
@@ -421,3 +457,13 @@ When a request is blocked, the response looks like:
   }
 }
 ```
+
+### Masked Request Behavior
+
+When `guardrail_action=mask`, the request **proceeds normally** with sensitive values replaced:
+
+- Original prompt: `My SSN is 078-05-1120`
+- What the AI receives: `My SSN is [REDACTED:US Social Security Number]`
+- LiteLLM logs: `Guardrail MASKED 1 occurrence(s) in request: US Social Security Number`
+
+The user gets a normal AI response — no error. The AI may note that a value was redacted and ask the user to provide the information through a secure channel instead.
