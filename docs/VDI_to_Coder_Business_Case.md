@@ -147,7 +147,8 @@ This platform takes the container-based approach proven by Skydio and J.B. Hunt 
 | Cost vs VDI | Baseline | **90% reduction** | **90% reduction** |
 | Configuration drift | Per-VM | Template-based | Template-based |
 | Desktop streaming | Yes (high bandwidth) | No (text only) | No (text only) |
-| OS licensing | Windows per-VM | None (Linux) | None (Linux) |
+| Windows VDA + RDS CAL | $12-20/user/mo | None (Linux) | None (Linux) |
+| M365 E1 (offshore web-only) | $8/user/mo | N/A | Decoupled — email/Teams only |
 | EDR agent | Per-VM ($5-15/mo) | None | None |
 | Zscaler / ZTNA | Per-user ($8-20/mo) | None | Platform egress firewall |
 | DLP agent | Per-VM ($8-15/mo) | None | Server-side guardrails |
@@ -164,7 +165,7 @@ This platform takes the container-based approach proven by Skydio and J.B. Hunt 
 
 ## Cost Comparison
 
-### Per-Developer Monthly Cost (50 users)
+### Per-Developer Monthly Cost (50 offshore contractors)
 
 ```
  Windows VDI (Full Stack)                  Linux Containers (Coder)
@@ -172,9 +173,19 @@ This platform takes the container-based approach proven by Skydio and J.B. Hunt 
 
  COMPUTE & INFRASTRUCTURE                  COMPUTE & INFRASTRUCTURE
  VM compute:          $80-150              Container:         $10-25
- Windows license:      $15-25              OS license:            $0
  Storage:              $20-40              Shared EFS:         $5-10
- VDI broker:           $10-20              Coder:          $0 (OSS)
+ VDI broker (Citrix/   $10-20              Coder:          $0 (OSS)
+   Horizon/AVD):
+
+ MICROSOFT & OS LICENSING                  OS & PRODUCTIVITY
+ Windows VDA license:   $4-7              Linux:                 $0
+ M365 E1 (web-only,   $8/user             (no Windows = no VDA,
+   download prohib.)                        no RDS CAL, no M365
+ RDS CAL:              $5-8                for dev environment)
+ Windows Server:       $3-5
+   (per-user share)
+                      ────────
+ Subtotal:           $20-28
 
  ENDPOINT SECURITY STACK                   ENDPOINT SECURITY
  EDR (CrowdStrike):    $5-15              (not needed):          $0
@@ -198,23 +209,42 @@ This platform takes the container-based approach proven by Skydio and J.B. Hunt 
  AI tools:              N/A                AI (LiteLLM):       $5-10
 
  ══════════════════════════                ═════════════════════════
- TOTAL:  $184-368/user/mo                  TOTAL:  $25-55/user/mo
+ TOTAL:  $199-399/user/mo                  TOTAL:  $25-55/user/mo
                                            ═══════════════════════
-                                           80-85% savings
+                                           80-87% savings
 ```
+
+### Microsoft Licensing Deep Dive
+
+For offshore contractors on Windows VDI, the Microsoft licensing stack alone is significant:
+
+| License | Cost/user/mo | Required For | Eliminated by Linux? |
+|---------|-------------|-------------|---------------------|
+| **Windows VDA** | $4-7 | Right to run Windows in virtual environment (required for non-SA devices) | **Yes** — Linux containers, no Windows OS |
+| **M365 E1** (web-only) | $8 | Email, Teams, SharePoint (download prohibited for offshore) | **Partially** — still needed for email/Teams if used, but NOT a VDI dependency |
+| **RDS CAL** | $5-8 | Remote Desktop Services per-user access | **Yes** — browser-based access, no RDP |
+| **Windows Server** (per-user share) | $3-5 | Server OS for VDI host | **Yes** — Linux host + containers |
+
+**Key distinction:** M365 E1 is a productivity license (email, Teams), not a VDI license. With Linux containers:
+- **Windows VDA + RDS CAL + Windows Server = eliminated** ($12-20/user/mo saved)
+- **M365 E1 = still needed** if contractors use Outlook/Teams, but it's decoupled from the dev environment
+- **Total Microsoft savings** from VDI migration: $12-20/user/mo (VDA + RDS + Server), with E1 continuing only for email/collaboration
+
+> *For 50 offshore contractors: **$600-1,000/mo in Microsoft licensing eliminated** from the dev environment alone — before counting compute, security, or admin savings.*
 
 ### What Makes the Difference
 
 | Cost Category | Windows VDI | Linux Container | Savings |
 |---------------|-------------|-----------------|---------|
 | Compute + storage | $110-210 | $15-35 | ~80% (containers share resources, on-demand) |
+| Microsoft licensing (VDA/RDS/Server) | $12-20 | $0 | **100%** (no Windows in dev environment) |
+| M365 E1 | $8 | $8 (if email/Teams still used) | 0% (productivity, not dev infra) |
 | Endpoint security licenses | $24-58 | $0 | **100%** (no Windows = no per-endpoint agents) |
 | Admin labor (per-user share) | $35-75 | $5-10 | **85-90%** (templates replace per-VM ops) |
-| OS licensing | $15-25 | $0 | **100%** |
 | AI tools | N/A | $5-10 | AI is additive, not a cost increase |
 
-> *At 50 developers: **$9,200-$18,400/mo (VDI)** vs **$1,250-$2,750/mo (Coder)***
-> *The security stack alone costs more than the entire Coder platform.*
+> *At 50 offshore contractors: **$9,950-$19,950/mo (VDI)** vs **$1,250-$2,750/mo (Coder)***
+> *Microsoft licensing + security stack together ($36-78/user) costs more than the entire Coder platform ($25-55/user).*
 
 ### Admin Labor: The Invisible Multiplier
 
@@ -227,7 +257,7 @@ Windows VDI requires dedicated staff for operations that simply don't exist with
 | **AD / Group Policy** | Domain join, GPO updates, certificate rotation, SCCM compliance scans | OIDC SSO — one identity provider, no domain |
 | **Incident triage** | EDR alerts per VM; DLP policy violations; Zscaler tunnel failures | Platform-level alerts only; no per-container noise |
 | **Vulnerability remediation** | Per-VM scanning (Qualys/Rapid7/Nessus), manual remediation tracking | `apt-get upgrade` in Dockerfile; push to all |
-| **License tracking** | Windows, VDI broker, EDR, Zscaler, DLP — per-seat true-ups annually | OSS Coder; Linux; no per-seat licensing |
+| **License tracking** | Windows VDA, RDS CAL, M365 E1, VDI broker, EDR, Zscaler, DLP — per-seat true-ups annually; offshore contractors require download-prohibited E1 | OSS Coder; Linux; no per-seat licensing |
 | **User onboarding** | AD account → VDI pool assignment → agent deployment → compliance check → 1-2 weeks | SSO login → workspace auto-provisions → 1 hour |
 | **User offboarding** | AD disable → VDI cleanup → license deallocation → compliance audit | Delete workspace → revoke SSO → done in minutes |
 
@@ -291,3 +321,4 @@ Windows VDI requires dedicated staff for operations that simply don't exist with
 |---------|------|--------|---------|
 | 1.0 | 2026-02-08 | Platform Team | Initial version — VDI to Coder business case with Skydio/J.B. Hunt references |
 | 1.1 | 2026-02-08 | Platform Team | Add Windows endpoint security stack analysis (EDR/Zscaler/DLP), admin labor costs, FTE impact |
+| 1.2 | 2026-02-08 | Platform Team | Break out Microsoft licensing (VDA, M365 E1, RDS CAL, Windows Server); offshore contractor context |
