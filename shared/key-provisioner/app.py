@@ -206,6 +206,9 @@ def create_workspace_key():
     enforcement_level = body.get("enforcement_level", "standard").strip()
     if enforcement_level not in ("unrestricted", "standard", "design-first"):
         enforcement_level = "standard"
+    guardrail_action = body.get("guardrail_action", "block").strip()
+    if guardrail_action not in ("block", "mask"):
+        guardrail_action = "block"
 
     if not workspace_id or not username:
         return jsonify({"error": "workspace_id and username are required"}), 400
@@ -229,6 +232,7 @@ def create_workspace_key():
         "workspace_name": workspace_name,
         "purpose": "auto-provisioned workspace key",
         "enforcement_level": enforcement_level,
+        "guardrail_action": guardrail_action,
     }
 
     key, err = _generate_key(
@@ -244,8 +248,8 @@ def create_workspace_key():
     if not key:
         return jsonify({"error": f"Failed to generate key: {err}"}), 502
 
-    log.info("Generated workspace key for workspace=%s user=%s enforcement=%s",
-             workspace_id, username, enforcement_level)
+    log.info("Generated workspace key for workspace=%s user=%s enforcement=%s guardrail_action=%s",
+             workspace_id, username, enforcement_level, guardrail_action)
     return jsonify({"key": key, "reused": False}), 201
 
 

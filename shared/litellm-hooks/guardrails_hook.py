@@ -7,8 +7,12 @@ the request reaches the upstream model provider.
 
 Guardrail levels (stored in key metadata.guardrail_level):
   off        — no scanning (default for unrestricted enforcement)
-  standard   — block high-confidence PII/secrets, warn on medium
-  strict     — block all detected patterns including medium-confidence
+  standard   — block/mask high-confidence PII/secrets, warn on medium
+  strict     — block/mask all detected patterns including medium-confidence
+
+Guardrail action (stored in key metadata.guardrail_action):
+  block      — reject request with 400 (default)
+  mask       — replace detected patterns with [REDACTED:<label>] and proceed
 
 Patterns are loaded from /app/guardrails/patterns.json (editable without restart).
 """
@@ -26,8 +30,10 @@ log = logging.getLogger("litellm.guardrails")
 
 GUARDRAILS_DIR = Path(os.environ.get("GUARDRAILS_DIR", "/app/guardrails"))
 DEFAULT_GUARDRAIL_LEVEL = os.environ.get("DEFAULT_GUARDRAIL_LEVEL", "standard")
+DEFAULT_GUARDRAIL_ACTION = os.environ.get("DEFAULT_GUARDRAIL_ACTION", "block")
 GUARDRAILS_ENABLED = os.environ.get("GUARDRAILS_ENABLED", "true").lower() == "true"
 VALID_LEVELS = {"off", "standard", "strict"}
+VALID_ACTIONS = {"block", "mask"}
 
 # File mtime cache: path -> (mtime, content)
 _file_cache: dict[str, tuple[float, object]] = {}
@@ -305,6 +311,80 @@ def _extract_text(data: dict) -> str:
     return "\n".join(parts)
 
 
+def _mask_message_content(content, patterns_to_mask: list[dict]) -> tuple:
+    """
+    Replace detected patterns in message content with [REDACTED:<label>] placeholders.
+    Returns (masked_content, mask_count).
+
+    Works with both string content and multi-modal content arrays.
+    """
+    mask_count = 0
+
+    if isinstance(content, str):
+        masked = content
+        for p in patterns_to_mask:
+            try:
+                tag = f"[REDACTED:{p['label']}]"
+                masked, n = re.subn(p["pattern"], tag, masked, flags=re.IGNORECASE)
+                mask_count += n
+            except re.error:
+                pass
+        return masked, mask_count
+
+    if isinstance(content, list):
+        masked_list = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text":
+                text = item.get("text", "")
+                for p in patterns_to_mask:
+                    try:
+                        tag = f"[REDACTED:{p['label']}]"
+                        text, n = re.subn(p["pattern"], tag, text, flags=re.IGNORECASE)
+                        mask_count += n
+                    except re.error:
+                        pass
+                masked_list.append({**item, "text": text})
+            else:
+                masked_list.append(item)
+        return masked_list, mask_count
+
+    return content, 0
+
+
+def _apply_masking(data: dict, findings: list[dict]) -> int:
+    """
+    Mask all blocked findings in the request messages in-place.
+    Returns total number of masked occurrences.
+    """
+    # Build list of patterns to mask (only blockable findings)
+    blocks = [f for f in findings if f["action"] == "block"]
+    if not blocks:
+        return 0
+
+    # Deduplicate by pattern name and collect their regexes
+    seen = set()
+    patterns_to_mask = []
+    all_patterns = _get_all_patterns()
+    for finding in blocks:
+        name = finding["pattern_name"]
+        if name not in seen and name in all_patterns:
+            seen.add(name)
+            patterns_to_mask.append({
+                "pattern": all_patterns[name]["pattern"],
+                "label": finding["label"],
+            })
+
+    total_masked = 0
+    for msg in data.get("messages", []):
+        content = msg.get("content")
+        if content is not None:
+            masked, count = _mask_message_content(content, patterns_to_mask)
+            msg["content"] = masked
+            total_masked += count
+
+    return total_masked
+
+
 class GuardrailsHook(CustomLogger):
     """LiteLLM callback that scans requests for PII, financial data, and secrets."""
 
@@ -317,13 +397,17 @@ class GuardrailsHook(CustomLogger):
         if not GUARDRAILS_ENABLED:
             return data
 
-        # Read guardrail_level from key metadata
+        # Read guardrail_level and guardrail_action from key metadata
         meta = getattr(user_api_key_dict, "metadata", {}) or {}
         level = meta.get("guardrail_level", DEFAULT_GUARDRAIL_LEVEL)
-        log.info("Guardrails: level=%s meta_keys=%s", level, list(meta.keys()))
+        action = meta.get("guardrail_action", DEFAULT_GUARDRAIL_ACTION)
+        log.info("Guardrails: level=%s action=%s meta_keys=%s", level, action, list(meta.keys()))
         if level not in VALID_LEVELS:
             log.warning("Invalid guardrail_level=%s, using default=%s", level, DEFAULT_GUARDRAIL_LEVEL)
             level = DEFAULT_GUARDRAIL_LEVEL
+        if action not in VALID_ACTIONS:
+            log.warning("Invalid guardrail_action=%s, using default=%s", action, DEFAULT_GUARDRAIL_ACTION)
+            action = DEFAULT_GUARDRAIL_ACTION
 
         # off = no scanning
         if level == "off":
@@ -342,31 +426,41 @@ class GuardrailsHook(CustomLogger):
         blocks = [f for f in findings if f["action"] == "block"]
         warnings = [f for f in findings if f["action"] == "warn"]
 
-        # Log warnings (don't block)
+        # Log warnings (don't block or mask)
         for w in warnings:
             log.warning(
                 "Guardrail warning: %s (%s) detected [%s] — match: %s",
                 w["label"], w["category"], w["severity"], w["match"],
             )
 
-        # Block if any blocking findings
+        # Handle blockable findings based on guardrail_action
         if blocks:
             blocked_labels = ", ".join(sorted(set(b["label"] for b in blocks)))
             blocked_categories = ", ".join(sorted(set(b["category"] for b in blocks)))
-            log.warning(
-                "Guardrail BLOCKED request: %d pattern(s) detected — %s",
-                len(blocks), blocked_labels,
-            )
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Request blocked by content guardrails. "
-                    f"Detected sensitive data: {blocked_labels}. "
-                    f"Categories: {blocked_categories}. "
-                    f"Remove sensitive information before sending to AI. "
-                    f"Guardrail level: {level}"
-                ),
-            )
+
+            if action == "mask":
+                # Mask: replace sensitive patterns in-place and let the request proceed
+                mask_count = _apply_masking(data, blocks)
+                log.warning(
+                    "Guardrail MASKED %d occurrence(s) in request: %s",
+                    mask_count, blocked_labels,
+                )
+            else:
+                # Block: reject the request
+                log.warning(
+                    "Guardrail BLOCKED request: %d pattern(s) detected — %s",
+                    len(blocks), blocked_labels,
+                )
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Request blocked by content guardrails. "
+                        f"Detected sensitive data: {blocked_labels}. "
+                        f"Categories: {blocked_categories}. "
+                        f"Remove sensitive information before sending to AI. "
+                        f"Guardrail level: {level}"
+                    ),
+                )
 
         return data
 

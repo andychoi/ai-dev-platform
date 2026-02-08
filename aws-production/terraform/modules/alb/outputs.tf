@@ -30,8 +30,30 @@ output "listener_arn" {
 output "target_group_arns" {
   description = "Map of service name to target group ARN."
   value = {
-    coder    = aws_lb_target_group.services["coder"].arn
-    authentik = aws_lb_target_group.services["authentik"].arn
-    litellm  = aws_lb_target_group.services["litellm"].arn
+    coder           = aws_lb_target_group.services["coder"].arn
+    litellm         = aws_lb_target_group.services["litellm"].arn
+    key_provisioner = aws_lb_target_group.services["key_provisioner"].arn
+    langfuse        = aws_lb_target_group.services["langfuse"].arn
   }
+}
+
+output "workspace_direct_access_enabled" {
+  description = "Whether the direct workspace access path (Path 2) is enabled."
+  value       = var.enable_workspace_direct_access
+}
+
+output "workspace_direct_access_config" {
+  description = "OIDC configuration for per-workspace ALB listener rules (used by workspace template)."
+  value = var.enable_workspace_direct_access ? {
+    listener_arn            = aws_lb_listener.https.arn
+    vpc_id                  = var.vpc_id
+    oidc_issuer_url         = var.oidc_issuer_url
+    oidc_client_id          = var.oidc_client_id
+    oidc_client_secret      = var.oidc_client_secret
+    oidc_token_endpoint     = var.oidc_token_endpoint
+    oidc_authorization_endpoint = var.oidc_authorization_endpoint
+    oidc_user_info_endpoint = var.oidc_user_info_endpoint
+    domain_name             = var.domain_name
+  } : null
+  sensitive = true
 }

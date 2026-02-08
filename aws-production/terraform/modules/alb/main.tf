@@ -95,13 +95,17 @@ locals {
       port        = 7080
       health_path = "/api/v2/buildinfo"
     }
-    authentik = {
-      port        = 9000
-      health_path = "/-/health/live/"
-    }
     litellm = {
       port        = 4000
       health_path = "/health/readiness"
+    }
+    key_provisioner = {
+      port        = 8100
+      health_path = "/health"
+    }
+    langfuse = {
+      port        = 3000
+      health_path = "/api/public/health"
     }
   }
 }
@@ -184,22 +188,62 @@ resource "aws_lb_listener_rule" "coder" {
   tags = merge(var.tags, { Service = "coder" })
 }
 
-resource "aws_lb_listener_rule" "authentik" {
+# Platform Admin App (extended Key Provisioner) — OIDC-authenticated
+# Hiring manager UI for team management, AI policy, usage dashboards
+resource "aws_lb_listener_rule" "admin" {
+  count = var.enable_workspace_direct_access && var.oidc_issuer_url != "" ? 1 : 0
+
   listener_arn = aws_lb_listener.https.arn
   priority     = 200
 
   action {
+    type  = "authenticate-oidc"
+    order = 1
+
+    authenticate_oidc {
+      issuer                 = var.oidc_issuer_url
+      client_id              = var.oidc_client_id
+      client_secret          = var.oidc_client_secret
+      token_endpoint         = var.oidc_token_endpoint
+      authorization_endpoint = var.oidc_authorization_endpoint
+      user_info_endpoint     = var.oidc_user_info_endpoint
+      on_unauthenticated_request = "authenticate"
+      scope                  = "openid profile email"
+      session_timeout        = 28800
+    }
+  }
+
+  action {
     type             = "forward"
-    target_group_arn = aws_lb_target_group.services["authentik"].arn
+    order            = 2
+    target_group_arn = aws_lb_target_group.services["key_provisioner"].arn
   }
 
   condition {
     host_header {
-      values = ["auth.${var.domain_name}"]
+      values = ["admin.${var.domain_name}"]
     }
   }
 
-  tags = merge(var.tags, { Service = "authentik" })
+  tags = merge(var.tags, { Service = "admin" })
+}
+
+resource "aws_lb_listener_rule" "langfuse" {
+  listener_arn = aws_lb_listener.https.arn
+  priority     = 300
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.services["langfuse"].arn
+  }
+
+  condition {
+    host_header {
+      values = ["langfuse.${var.domain_name}"]
+    }
+  }
+
+  tags = merge(var.tags, { Service = "langfuse" })
 }
 
 resource "aws_lb_listener_rule" "litellm" {
@@ -219,6 +263,30 @@ resource "aws_lb_listener_rule" "litellm" {
 
   tags = merge(var.tags, { Service = "litellm" })
 }
+
+###############################################################################
+# Direct Workspace Access — Path 2 (per-workspace ALB → code-server)
+#
+# Each workspace creates its OWN target group + listener rule via the
+# workspace Terraform template (templates/contractor-workspace/main.tf).
+# This ensures:
+#   1. User A cannot reach User B's workspace (unique hostname routing)
+#   2. ALB OIDC authentication validates identity before forwarding
+#   3. code-server --auth proxy validates the OIDC identity header
+#
+# The ALB module only exports the listener ARN and OIDC config — the
+# workspace template uses these to create per-workspace resources:
+#   - aws_lb_target_group.workspace (port 13337, single workspace IP)
+#   - aws_lb_listener_rule.workspace (OIDC auth + host-header match)
+#
+# DNS: Route 53 wildcard *.ide.{domain} → ALB (one record, all workspaces)
+# Hostname format: {owner}--{ws}.ide.{domain}
+# ALB listener rule quota: 100 default (request increase for >100 workspaces)
+###############################################################################
+
+###############################################################################
+# Coder Wildcard (Path 1 — tunnel access for workspace subdomain apps)
+###############################################################################
 
 resource "aws_lb_listener_rule" "coder_wildcard" {
   listener_arn = aws_lb_listener.https.arn

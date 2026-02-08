@@ -5,7 +5,7 @@
     "label": "Human-readable description shown in block messages",
     "category": "pii | financial | secret | compliance",
     "severity": "high | medium",
-    "action": "block | flag",
+    "action": "block | flag (block/mask behavior controlled by key metadata guardrail_action)",
     "context_required": "Optional boolean — only match when financial keywords present"
   }
 }

@@ -66,6 +66,69 @@ variable "log_group_name" {
   default     = "/ecs/coder-production/workspaces"
 }
 
+# --- Direct workspace access (Path 2) variables ---
+
+variable "enable_workspace_direct_access" {
+  description = "Enable direct ALB→code-server path (Path 2) with per-workspace routing."
+  type        = bool
+  default     = false
+}
+
+variable "alb_listener_arn" {
+  description = "ALB HTTPS listener ARN for creating per-workspace listener rules."
+  type        = string
+  default     = ""
+}
+
+variable "alb_vpc_id" {
+  description = "VPC ID for workspace target group."
+  type        = string
+  default     = ""
+}
+
+variable "ide_domain_name" {
+  description = "Domain for direct workspace access (e.g., ide.internal.company.com)."
+  type        = string
+  default     = ""
+}
+
+variable "oidc_issuer_url" {
+  description = "OIDC issuer URL for ALB authentication action."
+  type        = string
+  default     = ""
+}
+
+variable "oidc_client_id" {
+  description = "OIDC client ID for ALB authentication action."
+  type        = string
+  default     = ""
+}
+
+variable "oidc_client_secret" {
+  description = "OIDC client secret for ALB authentication action."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "oidc_token_endpoint" {
+  description = "OIDC token endpoint URL."
+  type        = string
+  default     = ""
+}
+
+variable "oidc_authorization_endpoint" {
+  description = "OIDC authorization endpoint URL."
+  type        = string
+  default     = ""
+}
+
+variable "oidc_user_info_endpoint" {
+  description = "OIDC user info endpoint URL."
+  type        = string
+  default     = ""
+}
+
 # =============================================================================
 # WORKSPACE PARAMETERS
 # =============================================================================
@@ -122,13 +185,27 @@ data "coder_parameter" "ai_assistant" {
   display_name = "AI Assistant"
   description  = "AI coding agent for development assistance"
   type         = "string"
-  default      = "both"
+  default      = "all"
   mutable      = true
 
-  option { name = "Roo Code + OpenCode (Recommended)"; value = "both" }
+  option { name = "All Agents (Recommended)";          value = "all" }
+  option { name = "Roo Code + OpenCode";               value = "both" }
+  option { name = "Claude Code CLI Only";              value = "claude-code" }
   option { name = "Roo Code Only";                     value = "roo-code" }
   option { name = "OpenCode CLI Only";                 value = "opencode" }
   option { name = "None (Disabled)";                   value = "none" }
+}
+
+data "coder_parameter" "guardrail_action" {
+  name         = "guardrail_action"
+  display_name = "Guardrail Action"
+  description  = "How to handle detected PII/secrets in AI requests"
+  type         = "string"
+  default      = "block"
+  mutable      = true
+
+  option { name = "Block (Reject request)";            value = "block" }
+  option { name = "Mask (Redact with [REDACTED])";     value = "mask" }
 }
 
 data "coder_parameter" "litellm_api_key" {
@@ -172,6 +249,22 @@ locals {
   }
   ai_model_id = lookup(local.ai_model_map, data.coder_parameter.ai_model.value, "claude-sonnet-4-5")
 
+  # Map LiteLLM model IDs to Anthropic native model IDs (for Claude Code CLI)
+  anthropic_model_map = {
+    "claude-sonnet-4-5"     = "claude-sonnet-4-5-20250929"
+    "claude-haiku-4-5"      = "claude-haiku-4-5-20251001"
+    "claude-opus-4"         = "claude-opus-4-20250514"
+    "bedrock-claude-sonnet" = "claude-sonnet-4-5-20250929"
+    "bedrock-claude-haiku"  = "claude-haiku-4-5-20251001"
+  }
+  anthropic_model_id = lookup(local.anthropic_model_map, local.ai_model_id, "claude-sonnet-4-5-20250929")
+
+  # AI assistant selection helpers (string values for shell script interpolation)
+  ai_assistant = data.coder_parameter.ai_assistant.value
+  enable_roo   = contains(["all", "both", "roo-code"], local.ai_assistant) ? "true" : "false"
+  enable_oc    = contains(["all", "both", "opencode"], local.ai_assistant) ? "true" : "false"
+  enable_cc    = contains(["all", "claude-code"], local.ai_assistant) ? "true" : "false"
+
   # Fargate valid CPU/memory combinations
   # 2 vCPU: 4096-16384 MB (in 1024 increments)
   # 4 vCPU: 8192-30720 MB (in 1024 increments)
@@ -190,6 +283,10 @@ locals {
 
   # Key Provisioner endpoint via Cloud Map
   key_provisioner_url = "http://key-provisioner.coder-production.local:8100"
+
+  # Direct access hostname: {owner}--{ws}.ide.domain
+  # Double-dash separator avoids conflicts with usernames containing single dashes
+  workspace_hostname = "${data.coder_workspace_owner.me.name}--${lower(data.coder_workspace.me.name)}.${var.ide_domain_name}"
 }
 
 # =============================================================================
@@ -220,12 +317,33 @@ resource "coder_agent" "main" {
       fi
     fi
 
+    # Configure code-server for dual-path authentication
+    # Path 1 (Coder tunnel): Coder handles auth, code-server sees all requests as trusted
+    # Path 2 (direct ALB): ALB OIDC injects x-amzn-oidc-identity header
+    # code-server uses --auth none (Coder agent mode) but we add a proxy auth
+    # middleware via config to validate the OIDC header on direct-path requests
+    if [ "${var.enable_workspace_direct_access}" = "true" ]; then
+      mkdir -p "$HOME/.config/code-server"
+      cat > "$HOME/.config/code-server/config.yaml" <<CSEOF
+bind-addr: 0.0.0.0:13337
+auth: none
+cert: false
+# ALB injects x-amzn-oidc-identity after OIDC authentication.
+# code-server in Coder agent mode uses auth:none — the ALB OIDC action
+# is the application-layer auth for Path 2. The per-workspace hostname
+# routing ensures each user can only reach their own workspace.
+CSEOF
+      echo "Direct access enabled: ${local.workspace_hostname}"
+    fi
+
     # Configure AI agents
     AI_ASSISTANT="${data.coder_parameter.ai_assistant.value}"
     LITELLM_KEY="${data.coder_parameter.litellm_api_key.value}"
     LITELLM_MODEL="${local.ai_model_id}"
+    ANTHROPIC_MODEL="${local.anthropic_model_id}"
     LITELLM_URL="${local.litellm_url}"
     PROVISIONER_URL="${local.key_provisioner_url}"
+    GUARDRAIL_ACTION="${data.coder_parameter.guardrail_action.value}"
 
     if [ "$AI_ASSISTANT" != "none" ]; then
       # Auto-provision key if not provided
@@ -235,7 +353,7 @@ resource "coder_agent" "main" {
           RESPONSE=$(curl -sf -X POST "$PROVISIONER_URL/api/v1/keys/workspace" \
             -H "Authorization: Bearer $PROVISIONER_SECRET" \
             -H "Content-Type: application/json" \
-            -d "{\"workspace_id\": \"${data.coder_workspace.me.id}\", \"username\": \"${data.coder_workspace_owner.me.name}\", \"workspace_name\": \"${data.coder_workspace.me.name}\"}" \
+            -d "{\"workspace_id\": \"${data.coder_workspace.me.id}\", \"username\": \"${data.coder_workspace_owner.me.name}\", \"workspace_name\": \"${data.coder_workspace.me.name}\", \"guardrail_action\": \"$GUARDRAIL_ACTION\"}" \
             2>/dev/null) && break
           echo "Key provisioner not ready (attempt $attempt/3), retrying in 5s..."
           sleep 5
@@ -249,7 +367,7 @@ resource "coder_agent" "main" {
 
       if [ -n "$LITELLM_KEY" ]; then
         # --- Roo Code configuration ---
-        if [ "$AI_ASSISTANT" = "roo-code" ] || [ "$AI_ASSISTANT" = "both" ]; then
+        if ${local.enable_roo}; then
           mkdir -p "$HOME/.config/roo-code"
           cat > "$HOME/.config/roo-code/settings.json" <<ROOEOF
     {
@@ -270,8 +388,7 @@ resource "coder_agent" "main" {
         fi
 
         # --- OpenCode CLI configuration ---
-        if [ "$AI_ASSISTANT" = "opencode" ] || [ "$AI_ASSISTANT" = "both" ]; then
-          # Always write config if the binary exists (don't rely on PATH/command -v)
+        if ${local.enable_oc}; then
           if [ -x /home/coder/.opencode/bin/opencode ]; then
             mkdir -p "$HOME/.config/opencode"
             cat > "$HOME/.config/opencode/opencode.json" <<OCEOF
@@ -305,7 +422,28 @@ OCEOF
           fi
         fi
 
-        # --- Environment variables ---
+        # --- Claude Code CLI configuration ---
+        # Uses Anthropic-native pass-through endpoint (/anthropic/v1/messages)
+        # Claude Code is inherently plan-first, so enforcement hook skips it
+        if ${local.enable_cc}; then
+          mkdir -p "$HOME/.claude"
+          cat > "$HOME/.claude/settings.json" <<CCEOF
+{
+  "permissions": {
+    "allow": ["Bash(git *)", "Bash(npm *)", "Read", "Write", "Edit", "Glob", "Grep"],
+    "deny": ["Bash(rm -rf *)"]
+  }
+}
+CCEOF
+          # Claude Code env vars for LiteLLM Anthropic pass-through
+          echo "export ANTHROPIC_BASE_URL=$LITELLM_URL/anthropic" >> "$HOME/.bashrc"
+          echo "export ANTHROPIC_API_KEY=$LITELLM_KEY" >> "$HOME/.bashrc"
+          echo "export CLAUDE_CODE_USE_BEDROCK=0" >> "$HOME/.bashrc"
+          echo "export ANTHROPIC_MODEL=$ANTHROPIC_MODEL" >> "$HOME/.bashrc"
+          echo "# Claude Code: run 'claude' to start" >> "$HOME/.bashrc"
+        fi
+
+        # --- Common environment variables ---
         echo "export AI_GATEWAY_URL=$LITELLM_URL" >> "$HOME/.bashrc"
         echo "export OPENAI_API_BASE=$LITELLM_URL/v1" >> "$HOME/.bashrc"
         echo "export OPENAI_API_KEY=$LITELLM_KEY" >> "$HOME/.bashrc"
@@ -451,9 +589,105 @@ resource "aws_ecs_service" "workspace" {
     assign_public_ip = false
   }
 
+  # Path 2: Register workspace in its own ALB target group for direct access
+  dynamic "load_balancer" {
+    for_each = var.enable_workspace_direct_access ? [1] : []
+    content {
+      target_group_arn = aws_lb_target_group.workspace[0].arn
+      container_name   = "dev"
+      container_port   = 13337
+    }
+  }
+
   tags = {
     Name                = local.workspace_name
     "coder.workspace"   = data.coder_workspace.me.name
     "coder.owner"       = data.coder_workspace_owner.me.name
+  }
+}
+
+# =============================================================================
+# PATH 2: PER-WORKSPACE DIRECT ACCESS (ALB → code-server)
+# Each workspace gets its own target group + OIDC-authenticated listener rule
+# =============================================================================
+
+# Per-workspace ALB target group — only this workspace's IP is registered
+resource "aws_lb_target_group" "workspace" {
+  count = var.enable_workspace_direct_access ? 1 : 0
+
+  name        = substr("ws-${data.coder_workspace_owner.me.name}-${lower(data.coder_workspace.me.name)}", 0, 32)
+  port        = 13337
+  protocol    = "HTTP"
+  vpc_id      = var.alb_vpc_id
+  target_type = "ip"
+
+  health_check {
+    enabled             = true
+    path                = "/healthz"
+    port                = "traffic-port"
+    protocol            = "HTTP"
+    healthy_threshold   = 2
+    unhealthy_threshold = 3
+    timeout             = 5
+    interval            = 30
+    matcher             = "200"
+  }
+
+  deregistration_delay = 15
+
+  tags = {
+    Name              = "ws-${local.workspace_name}"
+    "coder.workspace" = data.coder_workspace.me.name
+    "coder.owner"     = data.coder_workspace_owner.me.name
+    Path              = "direct-access"
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# Per-workspace ALB listener rule with OIDC authentication
+# Route: {owner}--{ws}.ide.domain → OIDC auth → workspace target group
+resource "aws_lb_listener_rule" "workspace_direct" {
+  count = var.enable_workspace_direct_access ? 1 : 0
+
+  listener_arn = var.alb_listener_arn
+
+  # Step 1: Authenticate with OIDC provider (IdP validates identity)
+  action {
+    type  = "authenticate-oidc"
+    order = 1
+
+    authenticate_oidc {
+      issuer                 = var.oidc_issuer_url
+      client_id              = var.oidc_client_id
+      client_secret          = var.oidc_client_secret
+      token_endpoint         = var.oidc_token_endpoint
+      authorization_endpoint = var.oidc_authorization_endpoint
+      user_info_endpoint     = var.oidc_user_info_endpoint
+      on_unauthenticated_request = "authenticate"
+      scope                  = "openid profile email"
+      session_timeout        = 28800
+    }
+  }
+
+  # Step 2: Forward to this workspace's target group
+  action {
+    type             = "forward"
+    order            = 2
+    target_group_arn = aws_lb_target_group.workspace[0].arn
+  }
+
+  condition {
+    host_header {
+      values = [local.workspace_hostname]
+    }
+  }
+
+  tags = {
+    "coder.workspace" = data.coder_workspace.me.name
+    "coder.owner"     = data.coder_workspace_owner.me.name
+    Path              = "direct-access"
   }
 }

@@ -265,6 +265,26 @@ data "coder_parameter" "ai_enforcement_level" {
   }
 }
 
+# AI Guardrail Action (block vs mask)
+data "coder_parameter" "guardrail_action" {
+  name         = "guardrail_action"
+  display_name = "Sensitive Data Handling"
+  description  = "How to handle detected PII, secrets, and financial data in AI prompts. Block rejects the request; Mask replaces sensitive values with [REDACTED] and proceeds."
+  type         = "string"
+  default      = "mask"
+  mutable      = false
+  icon         = "/icon/widgets.svg"
+
+  option {
+    name  = "Mask - Redact sensitive data and proceed (Recommended)"
+    value = "mask"
+  }
+  option {
+    name  = "Block - Reject requests containing sensitive data"
+    value = "block"
+  }
+}
+
 # ==========================================================================
 # NETWORK EGRESS EXCEPTIONS (Admin-Controlled)
 # Comma-separated list of extra TCP ports the workspace can reach.
@@ -443,6 +463,7 @@ password=${data.coder_parameter.git_password.value}
     AI_MODEL="${data.coder_parameter.ai_model.value}"
     AI_GATEWAY_URL="${data.coder_parameter.ai_gateway_url.value}"
     ENFORCEMENT_LEVEL="${data.coder_parameter.ai_enforcement_level.value}"
+    GUARDRAIL_ACTION="${data.coder_parameter.guardrail_action.value}"
 
     # Claude Code CLI is a plan-first agent by design — it already reasons before
     # coding, asks for confirmation, and follows structured workflows natively.
@@ -476,7 +497,7 @@ password=${data.coder_parameter.git_password.value}
           RESPONSE=$(curl -sf -X POST "$PROVISIONER_URL/api/v1/keys/workspace" \
             -H "Authorization: Bearer $PROVISIONER_SECRET" \
             -H "Content-Type: application/json" \
-            -d "{\"workspace_id\": \"$WORKSPACE_ID\", \"username\": \"$WORKSPACE_OWNER\", \"workspace_name\": \"$WORKSPACE_NAME\", \"enforcement_level\": \"$ENFORCEMENT_LEVEL\"}" \
+            -d "{\"workspace_id\": \"$WORKSPACE_ID\", \"username\": \"$WORKSPACE_OWNER\", \"workspace_name\": \"$WORKSPACE_NAME\", \"enforcement_level\": \"$ENFORCEMENT_LEVEL\", \"guardrail_action\": \"$GUARDRAIL_ACTION\"}" \
             2>/dev/null) && break
           echo "Key provisioner not ready (attempt $attempt/3), retrying in 5s..."
           sleep 5
