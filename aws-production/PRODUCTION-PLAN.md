@@ -1,9 +1,10 @@
 # Coder WebIDE Production Plan — AWS Deployment
 
 **Created:** February 4, 2026
-**Updated:** February 6, 2026
+**Updated:** February 8, 2026
 **Based on:** PoC validation + Security Review (68 issues identified)
 **Target:** AWS (ECS Fargate + managed services, VPN-only access)
+**Edition:** Coder OSS (Community Edition) — see Decision Log for Enterprise evaluation
 **Status:** Implementation Phase
 
 ---
@@ -11,6 +12,12 @@
 ## Executive Summary
 
 Transform the Docker Compose PoC into a production AWS deployment. The core strategy: **replace self-hosted infrastructure with AWS managed services** and run all workloads on ECS Fargate. **Private-only access via VPN — no public-facing endpoints.** This eliminates operational burden for databases, caching, storage, secrets, TLS, and monitoring — letting the team focus on the application layer (templates, AI integration, workspace networking). ECS Fargate removes node management entirely: no AMI patching, no kubelet, no Kubernetes expertise required.
+
+**Key architecture decisions (updated Feb 8):**
+- **Dual-path access:** Coder tunnel (management plane) + direct ALB→code-server (data plane) coexist
+- **Coder OSS (single-instance):** AWS-native HA (ECS auto-restart, dual-path) substitutes for Enterprise multi-replica
+- **Three AI agents:** Roo Code (VS Code), OpenCode (CLI), Claude Code (Anthropic native CLI)
+- **Corporate IdP ready:** Authentik deployed for PoC parity; production swaps to Okta/Azure AD via OIDC config change
 
 ### PoC → AWS Service Mapping
 
@@ -33,6 +40,32 @@ Transform the Docker Compose PoC into a production AWS deployment. The core stra
 
 ## Architecture
 
+### Dual-Path Access Model
+
+The platform provides **two coexisting access paths** to the same code-server process running inside each workspace container:
+
+| | Path 1: Coder Tunnel (Management Plane) | Path 2: Direct ALB (Data Plane) |
+|---|---|---|
+| **Route** | Browser → ALB → Coder Server → coder_agent tunnel → code-server | Browser → ALB (OIDC auth) → code-server directly |
+| **Auth** | Coder OIDC session | ALB OIDC authentication action |
+| **Depends on** | Coder server must be running | Only ALB + IdP must be running |
+| **Use case** | Workspace management, template provisioning, admin | Active development (VS Code, terminal, AI agents) |
+| **Coder server failure** | Interrupted until ECS restarts Coder (~30-60s) | **Zero impact** — continues working |
+
+**Why dual-path matters for OSS:**
+- Coder OSS runs as a **single instance** (multi-replica requires Enterprise license)
+- If the Coder server task restarts, **Path 2 provides zero-downtime for active developers**
+- Running workspaces (code-server, terminal, git, AI agents) are fully independent from the Coder server
+- ECS auto-restarts the Coder task within 30-60 seconds — Path 1 recovers automatically
+
+**ALB OIDC Authentication for Direct Path:**
+- AWS ALB natively supports OIDC authentication actions on listener rules
+- `ide.internal.company.com` → ALB OIDC authenticate → forward to workspace target group (port 13337)
+- The IdP (Authentik or corporate Okta/Azure AD) handles user authentication
+- No Coder dependency for the auth flow — ALB talks directly to the IdP
+
+### Architecture Diagram
+
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                    VPN (Corporate Network)                                    │
@@ -41,10 +74,13 @@ Transform the Docker Compose PoC into a production AWS deployment. The core stra
                           ┌─────┴─────┐
                           │ Internal  │  ← ACM TLS termination
                           │    ALB    │    coder.internal.company.com
-                          │  (HTTPS)  │    *.coder.internal.company.com
+                          │  (HTTPS)  │    ide.internal.company.com (direct)
                           └─────┬─────┘
-                                │
-┌───────────────────────────────┼──────────────────────────────────────────────┐
+                           ┌────┴────┐
+                    Path 1 │         │ Path 2
+                   (tunnel)│         │ (direct)
+                           ▼         ▼
+┌───────────────────────────────────────────────────────────────────────────────┐
 │  VPC (10.0.0.0/16)            │                                               │
 │                               │                                               │
 │  ┌────────────────────────────┼───────────────────────────────────────────┐  │
@@ -52,18 +88,24 @@ Transform the Docker Compose PoC into a production AWS deployment. The core stra
 │  │                                                                         │  │
 │  │  ┌──────────── ECS Cluster (Fargate) ─────────────────────────────┐   │  │
 │  │  │                                                                  │   │  │
-│  │  │  ┌─────────────┐  ┌─────────────┐                              │   │  │
-│  │  │  │ Coder Server│  │  Authentik  │                  (Tasks)    │   │  │
-│  │  │  │  (2 tasks)  │  │  (2 tasks)  │                              │   │  │
-│  │  │  └─────────────┘  └─────────────┘                              │   │  │
-│  │  │                                                                  │   │  │
+│  │  │  ┌─────────────┐  ┌─────────────┐  ┌──────────────┐           │   │  │
+│  │  │  │ Coder Server│  │ Authentik/  │  │ Key          │           │   │  │
+│  │  │  │  (1 task)   │  │ Corp IdP    │  │ Provisioner  │           │   │  │
+│  │  │  │  (OSS)      │  │  (2 tasks)  │  │  (1 task)    │           │   │  │
+│  │  │  └──────┬──────┘  └─────────────┘  └──────────────┘           │   │  │
+│  │  │         │ Path 1                                                │   │  │
+│  │  │         │ (tunnel)                                              │   │  │
+│  │  │         ▼                                                       │   │  │
 │  │  │  ┌─────────────┐  ┌──────────────────────────────────────┐      │   │  │
 │  │  │  │  LiteLLM    │  │  Workspace Tasks (per-user, Fargate) │      │   │  │
 │  │  │  │  (2 tasks)  │  │  ┌────────┐ ┌────────┐ ┌────────┐  │      │   │  │
 │  │  │  └─────────────┘  │  │ WS-1   │ │ WS-2   │ │ WS-N   │  │      │   │  │
 │  │  │                    │  │code-srv│ │code-srv│ │code-srv│  │      │   │  │
-│  │  │                    │  │+ agent │ │+ agent │ │+ agent │  │      │   │  │
-│  │  │                    │  └────────┘ └────────┘ └────────┘  │      │   │  │
+│  │  │                    │  │+agents │ │+agents │ │+agents │  │      │   │  │
+│  │  │                    │  │+claude │ │+claude │ │+claude │  │      │   │  │
+│  │  │                    │  └───┬────┘ └───┬────┘ └───┬────┘  │      │   │  │
+│  │  │                    │      ▲          ▲          ▲        │      │   │  │
+│  │  │                    │      └── Path 2 (direct ALB) ──────│──────│   │  │
 │  │  │                    └──────────────────────────────────────┘      │   │  │
 │  │  └──────────────────────────────────────────────────────────────────┘   │  │
 │  └─────────────────────────────────────────────────────────────────────────┘  │
@@ -282,11 +324,22 @@ These findings confirm the production approach (ACM + Internal ALB) will work wi
 **Goal:** HTTPS everywhere with zero cert management
 
 **Setup:**
-- ACM certificate for `coder.internal.company.com` + `*.coder.internal.company.com`
+- ACM certificate for `coder.internal.company.com` + `*.coder.internal.company.com` + `ide.internal.company.com`
 - Internal ALB (scheme: **internal** — not internet-facing)
 - ALB routes HTTPS to ECS services (HTTP internal)
 - Wildcard subdomain for workspace apps (`*.coder.internal.company.com`)
+- **`ide.internal.company.com`** — direct code-server access with ALB OIDC authentication (Path 2)
 - Route 53 private hosted zone for DNS resolution within VPC
+
+**ALB Routing Summary (Dual-Path):**
+
+| Host | Priority | Target | Auth | Path |
+|------|----------|--------|------|------|
+| `coder.internal.company.com` | 100 | Coder (7080) | Coder OIDC | Path 1 (tunnel) |
+| `auth.internal.company.com` | 200 | Authentik (9000) | None (IdP itself) | — |
+| `ai.internal.company.com` | 400 | LiteLLM (4000) | API key | — |
+| **`ide.internal.company.com`** | **450** | **Workspaces (13337)** | **ALB OIDC action** | **Path 2 (direct)** |
+| `*.internal.company.com` | 500 | Coder (7080) | Coder OIDC | Path 1 (wildcard) |
 
 **ALB Listener Rules (Terraform):**
 
@@ -340,9 +393,11 @@ resource "aws_lb_listener_rule" "authentik" {
 
 ---
 
-### 2.2 Coder Server (ECS)
+### 2.2 Coder Server (ECS) — OSS Single-Instance
 
-**Goal:** Production Coder deployment on ECS Fargate
+**Goal:** Production Coder OSS deployment on ECS Fargate
+
+> **OSS vs Enterprise:** Coder OSS does not support multi-replica deployment. The server runs as a single ECS task. The dual-path architecture ensures zero-downtime for active developers during Coder server restarts (30-60s). Evaluate Enterprise ($66/user/month) at 200+ users if template RBAC or audit logging is needed. See Decision Log.
 
 **ECS Task Definition:**
 
@@ -402,7 +457,7 @@ resource "aws_ecs_service" "coder" {
   name            = "coder-server"
   cluster         = aws_ecs_cluster.main.id
   task_definition = aws_ecs_task_definition.coder.arn
-  desired_count   = 2
+  desired_count   = 1  # OSS: single instance (multi-replica requires Enterprise)
   launch_type     = "FARGATE"
 
   network_configuration {
@@ -467,16 +522,31 @@ resource "aws_ecs_service" "authentik" {
 }
 ```
 
-**Enterprise alternative:** Replace Authentik with corporate IdP (Okta, Azure AD, AWS IAM Identity Center). Coder's OIDC config just points to the new issuer URL.
+**Corporate IdP Integration (Recommended for Production):**
+
+Authentik is deployed for PoC parity but should be replaced with the organization's existing IdP in production:
+
+| IdP | OIDC Issuer URL Example | Notes |
+|-----|------------------------|-------|
+| **Okta** | `https://company.okta.com/oauth2/default` | Most common enterprise IdP |
+| **Azure AD** | `https://login.microsoftonline.com/{tenant}/v2.0` | If org uses M365 |
+| **AWS IAM Identity Center** | `https://identitystore.{region}.amazonaws.com` | If AWS-native |
+| **Authentik (keep)** | `https://auth.internal.company.com/application/o/coder/` | Only if no corporate IdP |
+
+To swap: update `CODER_OIDC_ISSUER_URL`, `CODER_OIDC_CLIENT_ID`, `CODER_OIDC_CLIENT_SECRET` in Secrets Manager + ALB OIDC auth action config. No workspace changes needed.
+
+> **Note:** AWS IAM (infrastructure auth) and OIDC IdP (application SSO) serve **different layers** — they are not duplicates. IAM controls who can manage AWS resources; OIDC controls who can log into Coder/workspaces.
 
 #### LiteLLM (AI Gateway)
 
 LiteLLM is the **centralized AI gateway** for all workspace AI traffic. It provides:
-- OpenAI-compatible API (`/v1/chat/completions`) for Roo Code
+- OpenAI-compatible API (`/v1/chat/completions`) for Roo Code and OpenCode
+- **Anthropic-native pass-through** (`/anthropic/v1/messages`) for Claude Code CLI
 - Per-user virtual keys with budget caps and rate limits
 - Provider routing (Bedrock primary, Anthropic fallback)
 - Request/response logging to PostgreSQL for audit
 - Model aliasing (workspaces request `claude-sonnet-4-5`, LiteLLM routes to the right provider)
+- **Guardrail actions:** `block` (reject) or `mask` (redact PII with `[REDACTED]` tags) per key
 
 Deploy as ECS Fargate service with task role for Bedrock access:
 
@@ -565,11 +635,25 @@ litellm_settings:
   turn_off_message_logging: true
   # Callbacks:
   # 1. enforcement_hook — injects system prompts based on key metadata (design-first)
-  # 2. guardrails_hook — blocks PII, financial data, secrets before reaching model
+  # 2. guardrails_hook — blocks or masks PII/financial/secrets based on key metadata
   callbacks: ["enforcement_hook.proxy_handler_instance", "guardrails_hook.guardrails_instance"]
+
+  # Anthropic pass-through for Claude Code CLI (native Anthropic SDK format)
+  # Enables /anthropic/v1/messages endpoint — same virtual keys, same guardrails
+  enable_anthropic_pass_through: true
 ```
 
 > **Model groups:** Each model name has two provider entries. LiteLLM tries Bedrock first (IAM role, no static key). If Bedrock fails (quota, region issue), it auto-falls back to Anthropic direct API. This is the same pattern validated in the PoC.
+
+**Three AI Agent Support:**
+
+| Agent | Protocol | LiteLLM Endpoint | Configuration |
+|-------|----------|-------------------|---------------|
+| **Roo Code** (VS Code) | OpenAI-compatible | `/v1/chat/completions` | `openAiBaseUrl` in settings.json |
+| **OpenCode** (CLI) | OpenAI-compatible | `/v1/chat/completions` | `baseURL` in opencode.json |
+| **Claude Code** (CLI) | Anthropic native | `/anthropic/v1/messages` | `ANTHROPIC_BASE_URL` env var |
+
+Claude Code uses Anthropic's native SDK format. LiteLLM's `enable_anthropic_pass_through: true` routes these requests through the same proxy pipeline (virtual keys, guardrails, logging) without format translation. The enforcement hook **skips** Claude Code because it is inherently a plan-first agent (proposes changes before executing).
 
 **PoC lesson applied:** The PoC proved LiteLLM model group failover works reliably. Production makes Bedrock the primary (IAM auth = no keys to manage) while keeping Anthropic API as a safety net.
 
@@ -1105,11 +1189,11 @@ aws-production/
 
 ## Cost Estimation (Monthly)
 
-### Small (50 users, 20 concurrent workspaces)
+### Small (50 users, 20 concurrent workspaces) — Coder OSS
 
 | Resource | Specification | Monthly Cost |
 |----------|---------------|--------------|
-| ECS Fargate — Platform | Coder (2x 1vCPU/4GB), Authentik (2x 0.5vCPU/2GB), LiteLLM (2x 0.5vCPU/2GB) | $175 |
+| ECS Fargate — Platform | Coder (1x 1vCPU/4GB, OSS), Authentik (2x 0.5vCPU/2GB), LiteLLM (2x 0.5vCPU/2GB) | $145 |
 | ECS Fargate — Workspaces | 20 concurrent x 2vCPU x 4GB (Spot) | $450 |
 | RDS PostgreSQL | db.r6g.large Single-AZ | $175 |
 | ElastiCache Redis | cache.r6g.large | $200 |
@@ -1121,13 +1205,16 @@ aws-production/
 | NAT Gateway | 1 (single AZ) | $35 |
 | Bedrock (Claude) | ~$5/user/month avg | $250 |
 | GitLab Runner | t3.large (shared) | $60 |
-| **Total** | | **~$1,500/month** |
+| **Total (OSS)** | | **~$1,470/month** |
+| + Coder Enterprise | $66/user/month x 50 users | +$3,300/month |
 
-### Medium (200 users, 50 concurrent workspaces)
+> **Note:** Coder OSS is $0 license cost. Enterprise adds template RBAC, audit log streaming, and multi-replica HA but costs $66/user/month. For 50 users, Enterprise more than doubles the total. OSS + dual-path is recommended at this scale.
+
+### Medium (200 users, 50 concurrent workspaces) — Coder OSS
 
 | Resource | Specification | Monthly Cost |
 |----------|---------------|--------------|
-| ECS Fargate — Platform | Coder (2x 2vCPU/8GB), Authentik (2x 1vCPU/4GB), LiteLLM (2x 1vCPU/4GB) | $390 |
+| ECS Fargate — Platform | Coder (1x 2vCPU/8GB, OSS), Authentik (2x 1vCPU/4GB), LiteLLM (2x 1vCPU/4GB) | $330 |
 | ECS Fargate — Workspaces | 50 concurrent x 2vCPU x 4GB (Spot) | $1,120 |
 | RDS PostgreSQL | db.r6g.xlarge Single-AZ | $350 |
 | ElastiCache Redis | cache.r6g.xlarge | $400 |
@@ -1140,7 +1227,10 @@ aws-production/
 | NAT Gateway | 1 (single AZ) | $35 |
 | GitLab Runner | t3.xlarge (shared) | $120 |
 | Bedrock (Claude) | ~$5/user/month avg | $1,000 |
-| **Total** | | **~$3,760/month** |
+| **Total (OSS)** | | **~$3,700/month** |
+| + Coder Enterprise | $66/user/month x 200 users | +$13,200/month |
+
+> **Evaluate Enterprise at 200+ users** if template RBAC (restrict template visibility by group) or audit log streaming (compliance) is required. At 200 users, Enterprise adds $13.2K/month — a 3.5x increase.
 
 ### Cost Optimization
 
@@ -1183,8 +1273,11 @@ aws-production/
 
 ### Application
 - [ ] Workspace creation < 2 minutes (including Fargate cold start)
-- [ ] Roo Code + LiteLLM + Bedrock working end-to-end
+- [ ] Roo Code + OpenCode + Claude Code + LiteLLM + Bedrock working end-to-end
+- [ ] Claude Code CLI using Anthropic pass-through (`/anthropic/v1/messages`)
 - [ ] OIDC login working (Authentik or corporate IdP)
+- [ ] Dual-path access verified (Coder tunnel + direct ALB)
+- [ ] Direct path continues working during Coder server restart
 - [ ] Git clone/push working (existing GitLab with Azure AD SSO)
 - [ ] All PoC features preserved
 
@@ -1197,8 +1290,9 @@ aws-production/
 | Fargate cold start time (~30-60s) | High | Low | Acceptable for dev workspaces; keep platform services always-on |
 | Bedrock model availability / quotas | Medium | High | Request quota increases early; keep Anthropic API as fallback |
 | Fargate Spot interruption | Medium | Low | 2-min notice; workspace state on EFS survives interruption; auto-restart |
-| Authentik → corporate IdP migration | Medium | Medium | Abstract OIDC config; test with target IdP early |
+| Authentik → corporate IdP migration | Medium | Medium | Abstract OIDC config; test with target IdP early; ALB OIDC auth action also needs IdP update |
 | Cost overrun on Bedrock | Medium | Medium | LiteLLM budget caps + CloudWatch billing alarms |
+| Coder OSS single-instance restart | Medium | Low | Dual-path: direct ALB path is unaffected; ECS restarts in 30-60s; only management operations (workspace create/stop) are briefly interrupted |
 | Template migration (Docker → ECS Fargate) | High | Medium | Parallel testing; keep Docker template for PoC fallback |
 | Coder ECS provisioning maturity | Medium | Medium | Coder's Kubernetes provisioner is more mature than direct ECS; mitigate with thorough template testing and Coder community engagement |
 
@@ -1208,16 +1302,19 @@ aws-production/
 
 | Decision | Choice | Rationale | Alternatives Considered |
 |----------|--------|-----------|------------------------|
+| **Coder Edition** | **OSS (Community)** | $0 license; dual-path architecture provides zero-downtime for active developers during Coder restarts; template RBAC is UX convenience (layer 5 of 5 security layers), not a security requirement — Git permissions control code access; evaluate Enterprise at 200+ users | Enterprise ($66/user/mo — template RBAC, audit streaming, multi-replica HA) |
+| **Workspace Access** | **Dual-path (tunnel + direct ALB)** | Path 1 (Coder tunnel) for management; Path 2 (direct ALB→code-server) for data plane. Both hit the same code-server. Direct path is independent from Coder server, providing zero-downtime for developers | Tunnel only (single point of failure), direct only (loses Coder management features) |
 | Compute | ECS Fargate | Each task = isolated ENI + security group; no node management; simpler security model; no Kubernetes expertise needed | EKS (more ecosystem but more complexity), EC2+Docker (PoC pattern) |
 | Access | Private/VPN only | Reduces attack surface, eliminates WAF/Shield needs, simpler security model | Public (more exposure), VPN + public fallback |
 | Database | RDS Single-AZ | Zero-ops, automated backups, cost-effective | Multi-AZ (upgrade later for HA), Aurora (overkill), self-managed Patroni |
 | Storage | EFS | Multi-AZ persistent storage, per-workspace access points, no EBS attachment limits | EBS (single-AZ, must attach to node), S3 + FUSE (latency) |
 | CI/CD | Self-hosted GitLab + AWS Runner | Existing org tooling; runner on AWS for ECR/ECS access | GitHub Actions, CodePipeline, Jenkins |
-| AI Gateway | LiteLLM (Bedrock primary + Anthropic fallback) | Centralized proxy with per-user keys, budget caps, audit logging | Direct Bedrock only (no abstraction), Anthropic only (needs key management) |
+| **AI Agents** | **Roo Code + OpenCode + Claude Code** | Three agent options: Roo Code (VS Code UI), OpenCode (CLI), Claude Code (Anthropic native CLI, plan-first). All route through LiteLLM proxy with same guardrails and virtual keys | Single agent (limits developer choice), direct API access (no centralized controls) |
+| AI Gateway | LiteLLM (Bedrock primary + Anthropic fallback) | Centralized proxy with per-user keys, budget caps, audit logging; Anthropic pass-through for Claude Code CLI | Direct Bedrock only (no abstraction), Anthropic only (needs key management) |
 | Secrets | Secrets Manager | Native IAM, direct ECS integration for secret injection | Vault (more ops), SSM Parameter Store (less features) |
 | TLS | ACM + Internal ALB | Free, auto-renewal, no cert management | Let's Encrypt (more ops), self-signed (PoC pattern) |
 | Monitoring | CloudWatch + Managed Grafana | Less ops than self-hosted Prometheus stack | AMP+AMG (more cost), self-hosted (more ops) |
-| Identity | Authentik on ECS | PoC parity; swap later for corporate IdP | Cognito (less flexible), direct Okta (enterprise dep) |
+| **Identity** | **Authentik on ECS → Corporate IdP** | Authentik for PoC parity; production should swap to org's existing IdP (Okta/Azure AD) — just change OIDC issuer URL + client credentials. ALB OIDC auth for direct path uses same IdP | Cognito (less flexible), keep Authentik long-term (unnecessary ops) |
 | Git | Existing GitLab (Azure AD SSO) | Use org's existing Git platform; no additional infrastructure needed | Gitea on ECS (PoC pattern), CodeCommit (limited) |
 | Service Discovery | AWS Cloud Map | Native ECS integration, private DNS namespace | Route 53 resolver (more manual), consul (more ops) |
 
@@ -1234,6 +1331,7 @@ aws-production/
 
 ---
 
+*Plan updated February 8, 2026 — dual-path architecture, Coder OSS single-instance, Claude Code CLI, corporate IdP guidance*
 *Plan updated February 6, 2026 — retargeted for AWS (ECS Fargate + managed services, VPN-only access)*
 *Original plan (Docker Compose) created February 4, 2026 from PoC Security Review findings*
 *Architecture changed from EKS to ECS Fargate — eliminates Kubernetes complexity, simplifies operations*

@@ -66,6 +66,12 @@ variable "log_group_name" {
   default     = "/ecs/coder-production/workspaces"
 }
 
+variable "workspace_target_group_arn" {
+  description = "ALB target group ARN for direct workspace access (Path 2). Empty to disable."
+  type        = string
+  default     = ""
+}
+
 # =============================================================================
 # WORKSPACE PARAMETERS
 # =============================================================================
@@ -122,13 +128,27 @@ data "coder_parameter" "ai_assistant" {
   display_name = "AI Assistant"
   description  = "AI coding agent for development assistance"
   type         = "string"
-  default      = "both"
+  default      = "all"
   mutable      = true
 
-  option { name = "Roo Code + OpenCode (Recommended)"; value = "both" }
+  option { name = "All Agents (Recommended)";          value = "all" }
+  option { name = "Roo Code + OpenCode";               value = "both" }
+  option { name = "Claude Code CLI Only";              value = "claude-code" }
   option { name = "Roo Code Only";                     value = "roo-code" }
   option { name = "OpenCode CLI Only";                 value = "opencode" }
   option { name = "None (Disabled)";                   value = "none" }
+}
+
+data "coder_parameter" "guardrail_action" {
+  name         = "guardrail_action"
+  display_name = "Guardrail Action"
+  description  = "How to handle detected PII/secrets in AI requests"
+  type         = "string"
+  default      = "block"
+  mutable      = true
+
+  option { name = "Block (Reject request)";            value = "block" }
+  option { name = "Mask (Redact with [REDACTED])";     value = "mask" }
 }
 
 data "coder_parameter" "litellm_api_key" {
@@ -171,6 +191,22 @@ locals {
     "bedrock-claude-haiku"  = "bedrock-claude-haiku"
   }
   ai_model_id = lookup(local.ai_model_map, data.coder_parameter.ai_model.value, "claude-sonnet-4-5")
+
+  # Map LiteLLM model IDs to Anthropic native model IDs (for Claude Code CLI)
+  anthropic_model_map = {
+    "claude-sonnet-4-5"     = "claude-sonnet-4-5-20250929"
+    "claude-haiku-4-5"      = "claude-haiku-4-5-20251001"
+    "claude-opus-4"         = "claude-opus-4-20250514"
+    "bedrock-claude-sonnet" = "claude-sonnet-4-5-20250929"
+    "bedrock-claude-haiku"  = "claude-haiku-4-5-20251001"
+  }
+  anthropic_model_id = lookup(local.anthropic_model_map, local.ai_model_id, "claude-sonnet-4-5-20250929")
+
+  # AI assistant selection helpers (string values for shell script interpolation)
+  ai_assistant = data.coder_parameter.ai_assistant.value
+  enable_roo   = contains(["all", "both", "roo-code"], local.ai_assistant) ? "true" : "false"
+  enable_oc    = contains(["all", "both", "opencode"], local.ai_assistant) ? "true" : "false"
+  enable_cc    = contains(["all", "claude-code"], local.ai_assistant) ? "true" : "false"
 
   # Fargate valid CPU/memory combinations
   # 2 vCPU: 4096-16384 MB (in 1024 increments)
@@ -224,8 +260,10 @@ resource "coder_agent" "main" {
     AI_ASSISTANT="${data.coder_parameter.ai_assistant.value}"
     LITELLM_KEY="${data.coder_parameter.litellm_api_key.value}"
     LITELLM_MODEL="${local.ai_model_id}"
+    ANTHROPIC_MODEL="${local.anthropic_model_id}"
     LITELLM_URL="${local.litellm_url}"
     PROVISIONER_URL="${local.key_provisioner_url}"
+    GUARDRAIL_ACTION="${data.coder_parameter.guardrail_action.value}"
 
     if [ "$AI_ASSISTANT" != "none" ]; then
       # Auto-provision key if not provided
@@ -235,7 +273,7 @@ resource "coder_agent" "main" {
           RESPONSE=$(curl -sf -X POST "$PROVISIONER_URL/api/v1/keys/workspace" \
             -H "Authorization: Bearer $PROVISIONER_SECRET" \
             -H "Content-Type: application/json" \
-            -d "{\"workspace_id\": \"${data.coder_workspace.me.id}\", \"username\": \"${data.coder_workspace_owner.me.name}\", \"workspace_name\": \"${data.coder_workspace.me.name}\"}" \
+            -d "{\"workspace_id\": \"${data.coder_workspace.me.id}\", \"username\": \"${data.coder_workspace_owner.me.name}\", \"workspace_name\": \"${data.coder_workspace.me.name}\", \"guardrail_action\": \"$GUARDRAIL_ACTION\"}" \
             2>/dev/null) && break
           echo "Key provisioner not ready (attempt $attempt/3), retrying in 5s..."
           sleep 5
@@ -249,7 +287,7 @@ resource "coder_agent" "main" {
 
       if [ -n "$LITELLM_KEY" ]; then
         # --- Roo Code configuration ---
-        if [ "$AI_ASSISTANT" = "roo-code" ] || [ "$AI_ASSISTANT" = "both" ]; then
+        if ${local.enable_roo}; then
           mkdir -p "$HOME/.config/roo-code"
           cat > "$HOME/.config/roo-code/settings.json" <<ROOEOF
     {
@@ -270,8 +308,7 @@ resource "coder_agent" "main" {
         fi
 
         # --- OpenCode CLI configuration ---
-        if [ "$AI_ASSISTANT" = "opencode" ] || [ "$AI_ASSISTANT" = "both" ]; then
-          # Always write config if the binary exists (don't rely on PATH/command -v)
+        if ${local.enable_oc}; then
           if [ -x /home/coder/.opencode/bin/opencode ]; then
             mkdir -p "$HOME/.config/opencode"
             cat > "$HOME/.config/opencode/opencode.json" <<OCEOF
@@ -305,7 +342,28 @@ OCEOF
           fi
         fi
 
-        # --- Environment variables ---
+        # --- Claude Code CLI configuration ---
+        # Uses Anthropic-native pass-through endpoint (/anthropic/v1/messages)
+        # Claude Code is inherently plan-first, so enforcement hook skips it
+        if ${local.enable_cc}; then
+          mkdir -p "$HOME/.claude"
+          cat > "$HOME/.claude/settings.json" <<CCEOF
+{
+  "permissions": {
+    "allow": ["Bash(git *)", "Bash(npm *)", "Read", "Write", "Edit", "Glob", "Grep"],
+    "deny": ["Bash(rm -rf *)"]
+  }
+}
+CCEOF
+          # Claude Code env vars for LiteLLM Anthropic pass-through
+          echo "export ANTHROPIC_BASE_URL=$LITELLM_URL/anthropic" >> "$HOME/.bashrc"
+          echo "export ANTHROPIC_API_KEY=$LITELLM_KEY" >> "$HOME/.bashrc"
+          echo "export CLAUDE_CODE_USE_BEDROCK=0" >> "$HOME/.bashrc"
+          echo "export ANTHROPIC_MODEL=$ANTHROPIC_MODEL" >> "$HOME/.bashrc"
+          echo "# Claude Code: run 'claude' to start" >> "$HOME/.bashrc"
+        fi
+
+        # --- Common environment variables ---
         echo "export AI_GATEWAY_URL=$LITELLM_URL" >> "$HOME/.bashrc"
         echo "export OPENAI_API_BASE=$LITELLM_URL/v1" >> "$HOME/.bashrc"
         echo "export OPENAI_API_KEY=$LITELLM_KEY" >> "$HOME/.bashrc"
@@ -449,6 +507,17 @@ resource "aws_ecs_service" "workspace" {
     subnets          = var.private_subnet_ids
     security_groups  = [var.workspace_security_group_id]
     assign_public_ip = false
+  }
+
+  # Path 2: Register workspace with ALB target group for direct access
+  # ALB handles OIDC authentication before forwarding to code-server
+  dynamic "load_balancer" {
+    for_each = var.workspace_target_group_arn != "" ? [1] : []
+    content {
+      target_group_arn = var.workspace_target_group_arn
+      container_name   = "dev"
+      container_port   = 13337
+    }
   }
 
   tags = {

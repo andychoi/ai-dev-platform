@@ -220,6 +220,90 @@ resource "aws_lb_listener_rule" "litellm" {
   tags = merge(var.tags, { Service = "litellm" })
 }
 
+###############################################################################
+# Direct Workspace Access — Path 2 (ALB → code-server with OIDC auth)
+###############################################################################
+
+resource "aws_lb_target_group" "workspaces" {
+  count = var.enable_workspace_direct_access ? 1 : 0
+
+  name        = "${var.name_prefix}-workspaces"
+  port        = 13337
+  protocol    = "HTTP"
+  vpc_id      = var.vpc_id
+  target_type = "ip"
+
+  health_check {
+    enabled             = true
+    path                = "/healthz"
+    port                = "traffic-port"
+    protocol            = "HTTP"
+    healthy_threshold   = 3
+    unhealthy_threshold = 3
+    timeout             = 5
+    interval            = 30
+    matcher             = "200"
+  }
+
+  deregistration_delay = 30
+
+  tags = merge(var.tags, {
+    Name    = "${var.name_prefix}-workspaces"
+    Service = "workspaces"
+    Path    = "direct-access"
+  })
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# OIDC-authenticated listener rule for direct workspace access
+# ALB performs OIDC authentication before forwarding to code-server
+resource "aws_lb_listener_rule" "workspace_direct" {
+  count = var.enable_workspace_direct_access && var.oidc_issuer_url != "" ? 1 : 0
+
+  listener_arn = aws_lb_listener.https.arn
+  priority     = 450
+
+  # Step 1: Authenticate with OIDC provider
+  action {
+    type = "authenticate-oidc"
+    order = 1
+
+    authenticate_oidc {
+      issuer                 = var.oidc_issuer_url
+      client_id              = var.oidc_client_id
+      client_secret          = var.oidc_client_secret
+      token_endpoint         = var.oidc_token_endpoint
+      authorization_endpoint = var.oidc_authorization_endpoint
+      user_info_endpoint     = var.oidc_user_info_endpoint
+      on_unauthenticated_request = "authenticate"
+      scope                  = "openid profile email"
+      session_timeout        = 28800
+    }
+  }
+
+  # Step 2: Forward to workspace target group
+  action {
+    type             = "forward"
+    order            = 2
+    target_group_arn = aws_lb_target_group.workspaces[0].arn
+  }
+
+  condition {
+    host_header {
+      values = ["ide.${var.domain_name}"]
+    }
+  }
+
+  tags = merge(var.tags, { Service = "workspace-direct", Path = "direct-access" })
+}
+
+###############################################################################
+# Coder Wildcard (Path 1 — tunnel access for workspace subdomain apps)
+###############################################################################
+
 resource "aws_lb_listener_rule" "coder_wildcard" {
   listener_arn = aws_lb_listener.https.arn
   priority     = 500

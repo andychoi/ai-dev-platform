@@ -101,6 +101,53 @@ variable "hosted_zone_id" {
 }
 
 # -----------------------------------------------------------------------------
+# Dual-Path: Direct Workspace Access (ALB OIDC Authentication)
+# -----------------------------------------------------------------------------
+
+variable "enable_workspace_direct_access" {
+  description = "Enable direct ALB→code-server path (Path 2) with OIDC authentication"
+  type        = bool
+  default     = true
+}
+
+variable "oidc_issuer_url" {
+  description = "OIDC issuer URL for ALB authentication (e.g., Authentik, Okta, Azure AD)"
+  type        = string
+  default     = ""
+}
+
+variable "oidc_alb_client_id" {
+  description = "OIDC client ID for ALB direct workspace access authentication"
+  type        = string
+  default     = ""
+}
+
+variable "oidc_alb_client_secret" {
+  description = "OIDC client secret for ALB direct workspace access authentication"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "oidc_token_endpoint" {
+  description = "OIDC token endpoint URL"
+  type        = string
+  default     = ""
+}
+
+variable "oidc_authorization_endpoint" {
+  description = "OIDC authorization endpoint URL"
+  type        = string
+  default     = ""
+}
+
+variable "oidc_user_info_endpoint" {
+  description = "OIDC user info endpoint URL"
+  type        = string
+  default     = ""
+}
+
+# -----------------------------------------------------------------------------
 # Tags
 # -----------------------------------------------------------------------------
 

@@ -32,6 +32,51 @@ variable "domain_name" {
   type        = string
 }
 
+# ── Dual-Path: Direct Workspace Access (OIDC-Authenticated) ─────────────────
+
+variable "enable_workspace_direct_access" {
+  description = "Enable direct ALB→code-server path (Path 2) with OIDC authentication."
+  type        = bool
+  default     = true
+}
+
+variable "oidc_issuer_url" {
+  description = "OIDC issuer URL for ALB authentication action (e.g., Authentik, Okta, Azure AD)."
+  type        = string
+  default     = ""
+}
+
+variable "oidc_client_id" {
+  description = "OIDC client ID for ALB authentication action."
+  type        = string
+  default     = ""
+}
+
+variable "oidc_client_secret" {
+  description = "OIDC client secret for ALB authentication action."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "oidc_token_endpoint" {
+  description = "OIDC token endpoint URL. If empty, derived from issuer_url."
+  type        = string
+  default     = ""
+}
+
+variable "oidc_authorization_endpoint" {
+  description = "OIDC authorization endpoint URL. If empty, derived from issuer_url."
+  type        = string
+  default     = ""
+}
+
+variable "oidc_user_info_endpoint" {
+  description = "OIDC user info endpoint URL. If empty, derived from issuer_url."
+  type        = string
+  default     = ""
+}
+
 # ── Access Logging ───────────────────────────────────────────────────────────
 
 variable "enable_access_logs" {

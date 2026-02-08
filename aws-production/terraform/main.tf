@@ -60,6 +60,15 @@ module "alb" {
   vpc_cidr        = var.vpc_cidr
   domain_name     = var.domain_name
   tags            = var.tags
+
+  # Dual-path: direct workspace access via ALB with OIDC authentication
+  enable_workspace_direct_access = var.enable_workspace_direct_access
+  oidc_issuer_url                = var.oidc_issuer_url
+  oidc_client_id                 = var.oidc_alb_client_id
+  oidc_client_secret             = var.oidc_alb_client_secret
+  oidc_token_endpoint            = var.oidc_token_endpoint
+  oidc_authorization_endpoint    = var.oidc_authorization_endpoint
+  oidc_user_info_endpoint        = var.oidc_user_info_endpoint
 }
 
 module "efs" {

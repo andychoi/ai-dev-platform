@@ -30,8 +30,14 @@ output "listener_arn" {
 output "target_group_arns" {
   description = "Map of service name to target group ARN."
   value = {
-    coder    = aws_lb_target_group.services["coder"].arn
-    authentik = aws_lb_target_group.services["authentik"].arn
-    litellm  = aws_lb_target_group.services["litellm"].arn
+    coder      = aws_lb_target_group.services["coder"].arn
+    authentik  = aws_lb_target_group.services["authentik"].arn
+    litellm    = aws_lb_target_group.services["litellm"].arn
+    workspaces = var.enable_workspace_direct_access ? aws_lb_target_group.workspaces[0].arn : null
   }
+}
+
+output "workspace_direct_access_enabled" {
+  description = "Whether the direct workspace access path (Path 2) is enabled."
+  value       = var.enable_workspace_direct_access
 }

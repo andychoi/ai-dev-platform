@@ -120,7 +120,7 @@ resource "aws_ecs_service" "coder" {
   name            = "${local.name_prefix}-coder"
   cluster         = module.ecs.cluster_arn
   task_definition = aws_ecs_task_definition.coder.arn
-  desired_count   = 2
+  desired_count   = 1 # OSS: single instance (multi-replica requires Enterprise license)
   launch_type     = "FARGATE"
 
   network_configuration {
