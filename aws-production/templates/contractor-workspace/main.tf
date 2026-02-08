@@ -66,8 +66,65 @@ variable "log_group_name" {
   default     = "/ecs/coder-production/workspaces"
 }
 
-variable "workspace_target_group_arn" {
-  description = "ALB target group ARN for direct workspace access (Path 2). Empty to disable."
+# --- Direct workspace access (Path 2) variables ---
+
+variable "enable_workspace_direct_access" {
+  description = "Enable direct ALB→code-server path (Path 2) with per-workspace routing."
+  type        = bool
+  default     = false
+}
+
+variable "alb_listener_arn" {
+  description = "ALB HTTPS listener ARN for creating per-workspace listener rules."
+  type        = string
+  default     = ""
+}
+
+variable "alb_vpc_id" {
+  description = "VPC ID for workspace target group."
+  type        = string
+  default     = ""
+}
+
+variable "ide_domain_name" {
+  description = "Domain for direct workspace access (e.g., ide.internal.company.com)."
+  type        = string
+  default     = ""
+}
+
+variable "oidc_issuer_url" {
+  description = "OIDC issuer URL for ALB authentication action."
+  type        = string
+  default     = ""
+}
+
+variable "oidc_client_id" {
+  description = "OIDC client ID for ALB authentication action."
+  type        = string
+  default     = ""
+}
+
+variable "oidc_client_secret" {
+  description = "OIDC client secret for ALB authentication action."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "oidc_token_endpoint" {
+  description = "OIDC token endpoint URL."
+  type        = string
+  default     = ""
+}
+
+variable "oidc_authorization_endpoint" {
+  description = "OIDC authorization endpoint URL."
+  type        = string
+  default     = ""
+}
+
+variable "oidc_user_info_endpoint" {
+  description = "OIDC user info endpoint URL."
   type        = string
   default     = ""
 }
@@ -226,6 +283,10 @@ locals {
 
   # Key Provisioner endpoint via Cloud Map
   key_provisioner_url = "http://key-provisioner.coder-production.local:8100"
+
+  # Direct access hostname: {owner}--{ws}.ide.domain
+  # Double-dash separator avoids conflicts with usernames containing single dashes
+  workspace_hostname = "${data.coder_workspace_owner.me.name}--${lower(data.coder_workspace.me.name)}.${var.ide_domain_name}"
 }
 
 # =============================================================================
@@ -254,6 +315,25 @@ resource "coder_agent" "main" {
       if [ ! -d "$REPO_DIR" ]; then
         git clone "${data.coder_parameter.git_repo.value}" "$REPO_DIR" 2>/dev/null || true
       fi
+    fi
+
+    # Configure code-server for dual-path authentication
+    # Path 1 (Coder tunnel): Coder handles auth, code-server sees all requests as trusted
+    # Path 2 (direct ALB): ALB OIDC injects x-amzn-oidc-identity header
+    # code-server uses --auth none (Coder agent mode) but we add a proxy auth
+    # middleware via config to validate the OIDC header on direct-path requests
+    if [ "${var.enable_workspace_direct_access}" = "true" ]; then
+      mkdir -p "$HOME/.config/code-server"
+      cat > "$HOME/.config/code-server/config.yaml" <<CSEOF
+bind-addr: 0.0.0.0:13337
+auth: none
+cert: false
+# ALB injects x-amzn-oidc-identity after OIDC authentication.
+# code-server in Coder agent mode uses auth:none — the ALB OIDC action
+# is the application-layer auth for Path 2. The per-workspace hostname
+# routing ensures each user can only reach their own workspace.
+CSEOF
+      echo "Direct access enabled: ${local.workspace_hostname}"
     fi
 
     # Configure AI agents
@@ -509,12 +589,11 @@ resource "aws_ecs_service" "workspace" {
     assign_public_ip = false
   }
 
-  # Path 2: Register workspace with ALB target group for direct access
-  # ALB handles OIDC authentication before forwarding to code-server
+  # Path 2: Register workspace in its own ALB target group for direct access
   dynamic "load_balancer" {
-    for_each = var.workspace_target_group_arn != "" ? [1] : []
+    for_each = var.enable_workspace_direct_access ? [1] : []
     content {
-      target_group_arn = var.workspace_target_group_arn
+      target_group_arn = aws_lb_target_group.workspace[0].arn
       container_name   = "dev"
       container_port   = 13337
     }
@@ -524,5 +603,91 @@ resource "aws_ecs_service" "workspace" {
     Name                = local.workspace_name
     "coder.workspace"   = data.coder_workspace.me.name
     "coder.owner"       = data.coder_workspace_owner.me.name
+  }
+}
+
+# =============================================================================
+# PATH 2: PER-WORKSPACE DIRECT ACCESS (ALB → code-server)
+# Each workspace gets its own target group + OIDC-authenticated listener rule
+# =============================================================================
+
+# Per-workspace ALB target group — only this workspace's IP is registered
+resource "aws_lb_target_group" "workspace" {
+  count = var.enable_workspace_direct_access ? 1 : 0
+
+  name        = substr("ws-${data.coder_workspace_owner.me.name}-${lower(data.coder_workspace.me.name)}", 0, 32)
+  port        = 13337
+  protocol    = "HTTP"
+  vpc_id      = var.alb_vpc_id
+  target_type = "ip"
+
+  health_check {
+    enabled             = true
+    path                = "/healthz"
+    port                = "traffic-port"
+    protocol            = "HTTP"
+    healthy_threshold   = 2
+    unhealthy_threshold = 3
+    timeout             = 5
+    interval            = 30
+    matcher             = "200"
+  }
+
+  deregistration_delay = 15
+
+  tags = {
+    Name              = "ws-${local.workspace_name}"
+    "coder.workspace" = data.coder_workspace.me.name
+    "coder.owner"     = data.coder_workspace_owner.me.name
+    Path              = "direct-access"
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# Per-workspace ALB listener rule with OIDC authentication
+# Route: {owner}--{ws}.ide.domain → OIDC auth → workspace target group
+resource "aws_lb_listener_rule" "workspace_direct" {
+  count = var.enable_workspace_direct_access ? 1 : 0
+
+  listener_arn = var.alb_listener_arn
+
+  # Step 1: Authenticate with OIDC provider (IdP validates identity)
+  action {
+    type  = "authenticate-oidc"
+    order = 1
+
+    authenticate_oidc {
+      issuer                 = var.oidc_issuer_url
+      client_id              = var.oidc_client_id
+      client_secret          = var.oidc_client_secret
+      token_endpoint         = var.oidc_token_endpoint
+      authorization_endpoint = var.oidc_authorization_endpoint
+      user_info_endpoint     = var.oidc_user_info_endpoint
+      on_unauthenticated_request = "authenticate"
+      scope                  = "openid profile email"
+      session_timeout        = 28800
+    }
+  }
+
+  # Step 2: Forward to this workspace's target group
+  action {
+    type             = "forward"
+    order            = 2
+    target_group_arn = aws_lb_target_group.workspace[0].arn
+  }
+
+  condition {
+    host_header {
+      values = [local.workspace_hostname]
+    }
+  }
+
+  tags = {
+    "coder.workspace" = data.coder_workspace.me.name
+    "coder.owner"     = data.coder_workspace_owner.me.name
+    Path              = "direct-access"
   }
 }

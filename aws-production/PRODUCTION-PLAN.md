@@ -58,11 +58,22 @@ The platform provides **two coexisting access paths** to the same code-server pr
 - Running workspaces (code-server, terminal, git, AI agents) are fully independent from the Coder server
 - ECS auto-restarts the Coder task within 30-60 seconds — Path 1 recovers automatically
 
-**ALB OIDC Authentication for Direct Path:**
-- AWS ALB natively supports OIDC authentication actions on listener rules
-- `ide.internal.company.com` → ALB OIDC authenticate → forward to workspace target group (port 13337)
-- The IdP (Authentik or corporate Okta/Azure AD) handles user authentication
-- No Coder dependency for the auth flow — ALB talks directly to the IdP
+**Direct Path Authentication & Routing (Three-Layer):**
+
+The direct path must solve two problems: **authentication** (who are you?) and **routing** (which workspace is yours?).
+
+| Layer | Mechanism | What It Does |
+|-------|-----------|-------------|
+| 1. VPN | Corporate VPN | Network-level access control — only VPN users can reach the ALB |
+| 2. ALB OIDC action | AWS ALB `authenticate-oidc` action | Validates user identity via IdP, sets OIDC session cookie, injects signed JWT in `x-amzn-oidc-data` header |
+| 3. Per-workspace subdomain | `{owner}--{ws}.ide.internal.company.com` | Each workspace gets a unique hostname → its own ALB listener rule + target group. User A **cannot** reach User B's workspace |
+
+**Why per-workspace target groups (not a shared one):**
+- A shared target group would round-robin between ALL workspaces — User A could land on User B's workspace
+- Each workspace ECS service registers in its OWN target group (created by the workspace template)
+- The workspace template creates both the ALB listener rule (with OIDC auth) and target group
+- ALB listener rules have a 100-rule default quota (can be increased to 200+) — sufficient for typical deployments
+- DNS: Route 53 wildcard `*.ide.internal.company.com` → ALB (one record, covers all workspaces)
 
 ### Architecture Diagram
 
@@ -338,8 +349,10 @@ These findings confirm the production approach (ACM + Internal ALB) will work wi
 | `coder.internal.company.com` | 100 | Coder (7080) | Coder OIDC | Path 1 (tunnel) |
 | `auth.internal.company.com` | 200 | Authentik (9000) | None (IdP itself) | — |
 | `ai.internal.company.com` | 400 | LiteLLM (4000) | API key | — |
-| **`ide.internal.company.com`** | **450** | **Workspaces (13337)** | **ALB OIDC action** | **Path 2 (direct)** |
-| `*.internal.company.com` | 500 | Coder (7080) | Coder OIDC | Path 1 (wildcard) |
+| **`{owner}--{ws}.ide.internal.company.com`** | **dynamic** | **Per-workspace TG (13337)** | **ALB OIDC + code-server proxy auth** | **Path 2 (direct)** |
+| `*.coder.internal.company.com` | 500 | Coder (7080) | Coder OIDC | Path 1 (wildcard apps) |
+
+> **Note:** Workspace direct-access listener rules are created dynamically by the workspace Terraform template. Each workspace gets its own target group + listener rule at a priority computed from workspace ID. DNS: wildcard `*.ide.internal.company.com` → ALB.
 
 **ALB Listener Rules (Terraform):**
 

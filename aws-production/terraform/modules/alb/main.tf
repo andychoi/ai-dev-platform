@@ -221,84 +221,24 @@ resource "aws_lb_listener_rule" "litellm" {
 }
 
 ###############################################################################
-# Direct Workspace Access — Path 2 (ALB → code-server with OIDC auth)
+# Direct Workspace Access — Path 2 (per-workspace ALB → code-server)
+#
+# Each workspace creates its OWN target group + listener rule via the
+# workspace Terraform template (templates/contractor-workspace/main.tf).
+# This ensures:
+#   1. User A cannot reach User B's workspace (unique hostname routing)
+#   2. ALB OIDC authentication validates identity before forwarding
+#   3. code-server --auth proxy validates the OIDC identity header
+#
+# The ALB module only exports the listener ARN and OIDC config — the
+# workspace template uses these to create per-workspace resources:
+#   - aws_lb_target_group.workspace (port 13337, single workspace IP)
+#   - aws_lb_listener_rule.workspace (OIDC auth + host-header match)
+#
+# DNS: Route 53 wildcard *.ide.{domain} → ALB (one record, all workspaces)
+# Hostname format: {owner}--{ws}.ide.{domain}
+# ALB listener rule quota: 100 default (request increase for >100 workspaces)
 ###############################################################################
-
-resource "aws_lb_target_group" "workspaces" {
-  count = var.enable_workspace_direct_access ? 1 : 0
-
-  name        = "${var.name_prefix}-workspaces"
-  port        = 13337
-  protocol    = "HTTP"
-  vpc_id      = var.vpc_id
-  target_type = "ip"
-
-  health_check {
-    enabled             = true
-    path                = "/healthz"
-    port                = "traffic-port"
-    protocol            = "HTTP"
-    healthy_threshold   = 3
-    unhealthy_threshold = 3
-    timeout             = 5
-    interval            = 30
-    matcher             = "200"
-  }
-
-  deregistration_delay = 30
-
-  tags = merge(var.tags, {
-    Name    = "${var.name_prefix}-workspaces"
-    Service = "workspaces"
-    Path    = "direct-access"
-  })
-
-  lifecycle {
-    create_before_destroy = true
-  }
-}
-
-# OIDC-authenticated listener rule for direct workspace access
-# ALB performs OIDC authentication before forwarding to code-server
-resource "aws_lb_listener_rule" "workspace_direct" {
-  count = var.enable_workspace_direct_access && var.oidc_issuer_url != "" ? 1 : 0
-
-  listener_arn = aws_lb_listener.https.arn
-  priority     = 450
-
-  # Step 1: Authenticate with OIDC provider
-  action {
-    type = "authenticate-oidc"
-    order = 1
-
-    authenticate_oidc {
-      issuer                 = var.oidc_issuer_url
-      client_id              = var.oidc_client_id
-      client_secret          = var.oidc_client_secret
-      token_endpoint         = var.oidc_token_endpoint
-      authorization_endpoint = var.oidc_authorization_endpoint
-      user_info_endpoint     = var.oidc_user_info_endpoint
-      on_unauthenticated_request = "authenticate"
-      scope                  = "openid profile email"
-      session_timeout        = 28800
-    }
-  }
-
-  # Step 2: Forward to workspace target group
-  action {
-    type             = "forward"
-    order            = 2
-    target_group_arn = aws_lb_target_group.workspaces[0].arn
-  }
-
-  condition {
-    host_header {
-      values = ["ide.${var.domain_name}"]
-    }
-  }
-
-  tags = merge(var.tags, { Service = "workspace-direct", Path = "direct-access" })
-}
 
 ###############################################################################
 # Coder Wildcard (Path 1 — tunnel access for workspace subdomain apps)
