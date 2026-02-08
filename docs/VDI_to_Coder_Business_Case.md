@@ -349,7 +349,7 @@ Coder's open-source (Community) edition is fully functional for running workspac
 | **Custom roles** | No | Yes (v2.16.0+) | Useful for fine-grained admin delegation |
 | **Resource quotas** (per-user/group) | No | Yes | Can substitute with K8s resource quotas |
 | **Audit logging** (workspace lifecycle) | Basic | Detailed + exportable | Important for compliance at scale |
-| **High availability** (multi-replica) | No — single instance | Yes | Important at 200+ devs |
+| **High availability** (multi-replica) | No — single instance | Yes | **AWS-native HA + dual-path substitutes** (see below) |
 | **Workspace proxies** (geo-distributed) | No | Yes | Needed for multi-region teams |
 | **Multi-organization** | No — single org | Yes | Needed if multiple business units share the platform |
 | **Premium support** (vendor SLA) | Community (GitHub/Discord) | Vendor SLA, direct engineering | Important for production |
@@ -405,23 +405,100 @@ resource "null_resource" "access_check" {
 
 **Limitation:** The template is still visible in the UI but creation fails with a clear error message. Not ideal UX, but functionally equivalent for access control.
 
+#### Workspace Resilience: Dual-Path Architecture
+
+A critical architectural insight: **once a workspace is running, the container is independent from the Coder server.** code-server and CLI tools run inside the container — they don't depend on Coder to function. The Coder server is a management plane, not a data plane.
+
+**What depends on Coder server vs what doesn't:**
+
+| Function | Depends on Coder Server? | What Provides HA? |
+|----------|-------------------------|-------------------|
+| **Running workspace container** | No | ECS/EKS auto-restart |
+| **code-server (VS Code in browser)** | No — standalone process | Container keeps it alive |
+| **Terminal / CLI** | No | Container process |
+| **Git push/pull** | No — workspace → GitLab direct | GitLab HA |
+| **AI agents (Claude/Roo/OpenCode)** | No — workspace → LiteLLM direct | LiteLLM HA |
+| **Creating NEW workspaces** | **Yes** — Coder runs Terraform | Coder server must be up |
+| **Coder web dashboard** | **Yes** | Coder server must be up |
+| **Auto-stop/start scheduling** | **Yes** | Coder server must be up |
+| **New OIDC logins** | **Yes** | Coder server must be up |
+
+This means two access paths can coexist:
+
+```
+ ┌─────────────────────────────────────────────────────────────────┐
+ │                    DUAL-PATH ARCHITECTURE                       │
+ │                                                                  │
+ │  PATH 1: Coder Dashboard (management plane)                     │
+ │  ────────────────────────────────────────────                   │
+ │  Browser → ALB → Coder Server → coder_agent → code-server      │
+ │  Used for: login, create/delete workspace, template browse,     │
+ │            workspace settings, auto-stop config                 │
+ │  Auth: Coder OIDC (Corporate IdP)                               │
+ │  If Coder server down: can't manage, but devs keep coding       │
+ │                                                                  │
+ │  PATH 2: Direct IDE Access (data plane)                         │
+ │  ────────────────────────────────────────                       │
+ │  Browser → ALB → code-server (direct port on container)         │
+ │  Used for: actual coding, terminal, extensions, git, AI agents  │
+ │  Auth: ALB OIDC rule (AWS-native) or oauth2-proxy sidecar       │
+ │  If Coder server down: still works — zero dependency            │
+ │                                                                  │
+ │  Both paths hit the SAME code-server process in the container.  │
+ │  They coexist — developers use Path 2 daily, Path 1 for mgmt.  │
+ └─────────────────────────────────────────────────────────────────┘
+```
+
+**Direct path authentication options (no Coder dependency):**
+
+| Option | How It Works | Complexity |
+|--------|-------------|-----------|
+| **ALB OIDC rule** (recommended) | ALB authenticates via Corporate IdP before forwarding to container. Zero code changes. | Low — AWS-native |
+| **oauth2-proxy sidecar** | Sidecar container handles OIDC, proxies to code-server | Medium — extra container |
+| **code-server password** | Built-in password auth per workspace | Low — but no SSO |
+
+**What this means for failure scenarios:**
+
+| Failure | Tunnel-Only Impact | Dual-Path Impact |
+|---------|-------------------|-----------------|
+| Coder server crashes | **All developers blocked** | **Management UI down** — coding continues via direct path |
+| Coder server restart (30-60s) | 30-60s interruption for all | **Zero interruption** |
+| Coder server upgrade | Maintenance window needed | **Zero downtime** — upgrade while devs work |
+| Container restart | Recovers via both paths | Recovers via both paths |
+
+#### Enterprise HA vs AWS-Native HA
+
+Coder Enterprise's HA feature provides multi-replica active-active Coder server. But with dual-path architecture, the Coder server is only the management plane — and AWS already provides HA for it:
+
+| HA Concern | Coder Enterprise | AWS-Native (Free) |
+|---|---|---|
+| Workspace container crashes | N/A (not Coder's job) | ECS/EKS auto-restart, health checks |
+| Coder server crashes | Multi-replica (zero downtime) | ECS task auto-restart (30-60s recovery) + direct path keeps devs working |
+| Database failure | N/A | RDS Multi-AZ (automatic failover) |
+| Storage failure | N/A | EFS (built-in replication) |
+| Load balancing | N/A | ALB (inherently HA, multi-AZ) |
+
+**Coder Enterprise HA = zero-downtime management plane.** AWS-native HA = 30-60 second management plane recovery, with zero-downtime data plane (direct path). For most organizations, the 30-60 second management gap (during which all developers keep coding) does not justify the Enterprise license cost.
+
 #### When Enterprise IS Justified
 
-| Scenario | Why Enterprise Matters |
-|----------|----------------------|
-| **200+ developers** | HA (multi-replica Coder server) prevents single point of failure |
-| **Compliance-heavy environment** | Detailed audit logging for SOC2, ISO 27001 evidence |
-| **Multi-region teams** | Workspace proxies reduce latency for developers far from the cluster |
-| **Multiple business units** | Multi-org isolation keeps teams in separate admin domains |
-| **No in-house K8s expertise** | Premium support SLA for production incidents |
+With dual-path architecture and AWS-native HA, the Enterprise justification narrows:
 
-#### Recommendation: Start OSS, Graduate to Enterprise
+| Scenario | Why Enterprise Matters | Can OSS + AWS Substitute? |
+|----------|----------------------|--------------------------|
+| **Compliance-heavy environment** | Detailed audit logging for SOC2, ISO 27001 evidence | Partially — supplement with CloudTrail + LiteLLM audit + K8s audit logs |
+| **Multi-region teams** | Workspace proxies reduce latency | Yes — direct path per region via regional ALB |
+| **Multiple business units** | Multi-org isolation | No — OSS is single-org only |
+| **No in-house K8s expertise** | Premium support SLA | No substitute — community support only |
+| **Zero-downtime management plane** | Multi-replica Coder server | Mostly — dual-path gives zero-downtime data plane; 30-60s mgmt recovery |
 
-| Phase | License | When |
-|-------|---------|------|
-| **PoC / Pilot (1-50 devs)** | OSS | Now — validate the platform, prove the business case |
-| **Production (50-150 devs)** | OSS + Terraform guardrails | Git permissions + LiteLLM budgets handle security; K8s quotas handle resources |
-| **Scale (150+ devs)** | Enterprise | HA, audit logging, and vendor support justify the cost at this scale |
+#### Recommendation: Start OSS, Evaluate Enterprise Need at Scale
+
+| Phase | License | Rationale |
+|-------|---------|-----------|
+| **PoC / Pilot (1-50 devs)** | OSS | Validate the platform, prove the business case |
+| **Production (50-200 devs)** | OSS + dual-path + AWS HA | Git permissions + LiteLLM budgets handle security; ALB OIDC for direct access; ECS/EKS auto-restart for Coder server; K8s quotas for resources |
+| **Scale (200+ devs)** | Evaluate Enterprise | Only if: multi-org needed, compliance requires Coder-native audit, or no in-house K8s expertise for support |
 
 ### Cost at Scale: OSS vs Enterprise
 
@@ -664,13 +741,15 @@ Four teams interact with this platform. The table below defines clear ownership:
 
 3. **CDM provisioning is the hidden bottleneck** — Adding 200 project contractors takes 6-8 weeks via CDM team (5 VMs/day). Self-service provisioning with Coder: same day. The ramp-up delay cost ($2.9M-3.8M in lost billable hours) dwarfs the entire platform investment.
 
-4. **Template RBAC is not a security gate** — Workspaces are personal. Templates are toolbox definitions, not access grants. GitLab group/project permissions control code access. Coder Enterprise template RBAC is a UX optimization (reduce clutter), not a security requirement. Start with OSS; graduate to Enterprise when HA and audit logging justify the cost.
+4. **Template RBAC is not a security gate** — Workspaces are personal. Templates are toolbox definitions, not access grants. GitLab group/project permissions control code access. Coder Enterprise template RBAC is a UX optimization (reduce clutter), not a security requirement.
 
-5. **AI agents are here** — Roo Code, OpenCode, Claude Code CLI are production-ready. VDI has no governed way to deploy them. Container-based platforms provide AI with built-in budgets, enforcement, and audit.
+5. **Enterprise HA is replaceable by architecture** — Once a workspace is running, the container is independent from the Coder server. Dual-path architecture (ALB → code-server direct) gives developers zero-downtime access even during Coder server restarts. AWS ECS/EKS auto-restart handles Coder server recovery in 30-60 seconds. Enterprise multi-replica HA is a convenience, not a requirement.
 
-6. **Cost savings increase with scale** — At 100 developers: 76-77% savings (OSS). At 300 developers: 85% savings (OSS). Even with Enterprise: 62-72%. VDI scales linearly; containers scale sub-linearly.
+6. **AI agents are here** — Roo Code, OpenCode, Claude Code CLI are production-ready. VDI has no governed way to deploy them. Container-based platforms provide AI with built-in budgets, enforcement, and audit.
 
-7. **Contractor security is stronger, not weaker** — Browser-only access with container isolation + server-side guardrails replaces DLP agents that contractors can circumvent. No data ever reaches a local device.
+7. **Cost savings increase with scale** — At 100 developers: 76-77% savings (OSS). At 300 developers: 85% savings (OSS). Even with Enterprise: 62-72%. VDI scales linearly; containers scale sub-linearly.
+
+8. **Contractor security is stronger, not weaker** — Browser-only access with container isolation + server-side guardrails replaces DLP agents that contractors can circumvent. No data ever reaches a local device.
 
 ---
 
@@ -696,9 +775,10 @@ Four teams interact with this platform. The table below defines clear ownership:
 │     Coder OSS:  $108K - $222K/yr  + 0.5-1 FTE                  │
 │     Coder Ent:  $216K - $402K/yr  + 0.5-1 FTE                  │
 │                                                                  │
-│   Template RBAC is a UX preference, not a security gate.        │
-│   Git permissions (GitLab) control code access.                  │
-│   Start OSS → graduate to Enterprise at 150+ devs for HA.      │
+│   Dual-path architecture: code-server runs independent of       │
+│   Coder server. AWS ECS/EKS provides HA. Enterprise HA          │
+│   is optional — OSS + AWS-native HA covers production.          │
+│   Git permissions (GitLab) control code access, not templates.  │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -723,3 +803,4 @@ Four teams interact with this platform. The table below defines clear ownership:
 | 1.3 | 2026-02-08 | Platform Team | Add scaling comparison (100/200/300 devs); Coder Enterprise license; CDM team vs self-service provisioning; project ramp-up economics |
 | 1.4 | 2026-02-08 | Platform Team | Add Operating Model: R&R matrix (CDM/Infra/Platform/AWS), Linux patching clarification, CDM team transition impact |
 | 1.5 | 2026-02-08 | Platform Team | Add Coder OSS vs Enterprise analysis; template RBAC is UX not security; dual cost tiers (OSS 76-85% / Enterprise 62-72% savings); Terraform guardrail workaround; phased adoption recommendation |
+| 1.6 | 2026-02-08 | Platform Team | Add dual-path architecture (management plane vs data plane); workspace independence from Coder server; Enterprise HA vs AWS-native HA; ALB OIDC direct access; revised Enterprise justification |
