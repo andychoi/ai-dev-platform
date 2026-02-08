@@ -265,17 +265,224 @@ Windows VDI requires dedicated staff for operations that simply don't exist with
 
 ---
 
+## Scaling Cost Comparison: 100 / 200 / 300 Developers
+
+Real-world demand is not static. The baseline DevOps team (100 developers) is always-on, but project-based contractors ramp up and down. This section compares costs at three tiers:
+
+- **100 developers** — Baseline DevOps team (permanent)
+- **200 developers** — Baseline + 100 project contractors
+- **300 developers** — Baseline + 200 project contractors
+
+### VDI: Linear Scaling (Every Seat = Full Stack)
+
+Every additional VDI developer requires a full Windows VM + security agents + Microsoft licenses + admin effort. Costs scale 1:1 with headcount.
+
+```
+                        100 devs        200 devs        300 devs
+                        (baseline)      (+100 proj)     (+200 proj)
+ ─────────────────────────────────────────────────────────────────
+ Compute + storage      $11,000-21,000  $22,000-42,000  $33,000-63,000
+ Microsoft licensing    $2,000-2,800    $4,000-5,600    $6,000-8,400
+   (VDA+RDS+Server)
+ M365 E1 (web-only)     $800            $1,600          $2,400
+ Security stack         $2,400-5,800    $4,800-11,600   $7,200-17,400
+   (EDR+Zscaler+DLP)
+ Admin labor            $3,500-7,500    $7,000-15,000   $10,500-22,500
+ VDI broker license     $1,000-2,000    $2,000-4,000    $3,000-6,000
+ ─────────────────────────────────────────────────────────────────
+ TOTAL (monthly)        $20,700-40,100  $41,400-79,800  $62,100-119,700
+ TOTAL (annual)         $248K-481K      $497K-958K      $745K-$1.44M
+ ─────────────────────────────────────────────────────────────────
+ Admin FTE required     1-2 FTE         2-4 FTE         3-6 FTE
+ CDM provisioning team  0.5-1 FTE       1-2 FTE         1.5-3 FTE
+```
+
+**VDI pain at scale:** Adding 100 project contractors means 100 more VMs to provision, 100 more security agent deployments, 100 more Windows licenses, and proportionally more admin headcount. When the project ends, those VMs sit idle or require decommissioning effort.
+
+### Coder: Sub-Linear Scaling (Shared Platform, Concurrency-Based Compute)
+
+Container platforms scale differently. The platform infrastructure (Kubernetes cluster, Coder server, SSO, AI proxy) is shared — adding users adds containers, not VMs or agents. Compute scales with **concurrency** (how many developers work simultaneously), not **headcount**.
+
+```
+                        100 devs        200 devs        300 devs
+                        (baseline)      (+100 proj)     (+200 proj)
+ ─────────────────────────────────────────────────────────────────
+ Container compute      $1,500-3,500    $2,500-5,500    $3,500-7,500
+   (concurrency-based:
+    ~60% active at once)
+ Shared storage (EFS)   $500-1,000      $800-1,500      $1,000-2,000
+ Coder Enterprise       $3,000-5,000    $6,000-10,000   $9,000-15,000
+   license ($30-50/user)
+ AI tools (LiteLLM)     $500-1,000      $1,000-2,000    $1,500-3,000
+ Platform admin labor   $2,000-4,000    $2,500-5,000    $3,000-6,000
+ ─────────────────────────────────────────────────────────────────
+ TOTAL (monthly)        $7,500-14,500   $12,800-24,000  $18,000-33,500
+ TOTAL (annual)         $90K-174K       $154K-288K      $216K-402K
+ ─────────────────────────────────────────────────────────────────
+ Platform admin FTE     0.25-0.5 FTE    0.5-0.75 FTE    0.5-1 FTE
+ Provisioning team      0 (self-serve)  0 (self-serve)  0 (self-serve)
+```
+
+**Why compute scales sub-linearly:**
+- Not all 300 developers work at the same time — workspaces auto-stop after idle timeout
+- Kubernetes right-sizes pods based on actual resource usage, not allocated VM capacity
+- Adding 100 project contractors may only need 30-40% more compute (concurrency < headcount)
+- When the project ends, workspaces are deleted — compute drops immediately, zero decommissioning
+
+### Side-by-Side: Annual Cost at Scale
+
+```
+ Developers    VDI (annual)          Coder (annual)      Savings        Savings %
+ ─────────────────────────────────────────────────────────────────────────────────
+ 100           $248K - $481K         $90K - $174K        $158K-307K     62-64%
+ 200           $497K - $958K         $154K - $288K       $343K-670K     69-70%
+ 300           $745K - $1.44M        $216K - $402K       $529K-$1.04M   71-72%
+```
+
+> **Key insight:** Savings percentage *increases* with scale. VDI costs grow linearly (every seat adds compute + licenses + security + admin). Container costs grow sub-linearly (shared platform, concurrency-based compute, zero per-endpoint licensing). At 300 developers, VDI admin alone (3-6 FTE) costs more than the entire container platform.
+
+### Coder Enterprise: Platform Investment
+
+The cost comparison above includes **Coder Enterprise** (not OSS) to reflect production-grade deployment with:
+
+| Coder Enterprise Feature | Value |
+|--------------------------|-------|
+| **Template RBAC** | Per-template visibility — show only relevant templates to each team |
+| **High availability** | Multi-replica Coder server with automatic failover |
+| **Audit logging** | Detailed workspace lifecycle events for compliance |
+| **Quotas** | Per-user and per-group resource quotas |
+| **Premium support** | Vendor SLA, direct engineering support |
+| **Appearance customization** | Branded login page, custom messaging |
+
+**Estimated license:** $30-50/user/month (varies by contract size; volume discounts at 200+ seats). Contact [coder.com/pricing](https://coder.com/pricing) for exact quotes.
+
+**Platform admin effort for Coder:**
+
+| Task | Effort | Frequency |
+|------|--------|-----------|
+| Template maintenance (Dockerfile + Terraform) | 2-4 hrs/template | Monthly or on-demand |
+| Coder server upgrades | 1-2 hrs | Quarterly |
+| SSO / identity management (Authentik) | 1-2 hrs | On-demand |
+| LiteLLM model config + budget review | 1-2 hrs | Monthly |
+| Monitoring / alerting review | 1-2 hrs | Weekly |
+| User support (mostly self-serve) | 2-4 hrs | Weekly |
+| **Total** | **~0.25-0.5 FTE at 100 devs; ~0.5-1 FTE at 300 devs** | |
+
+Compared to VDI's 4.5-9 combined FTE at 300 developers (3-6 admin + 1.5-3 CDM provisioning), Coder requires 0.5-1 FTE total — a **80-90% reduction in operational headcount**.
+
+---
+
+## CDM Team vs Self-Service Provisioning
+
+The biggest operational difference is not compute or licensing — it's **who provisions environments and how long it takes**.
+
+> **Terminology:** "Requestor" below refers to the **system DevOps manager** (for existing systems) or **project manager** (for new projects or significant changes) — the person responsible for their team's development environments.
+
+### Current Model: CDM Team Provisions VDI
+
+```
+ DevOps/Project Manager            CDM Team                         Developer
+ ────────────────────────────────────────────────────────────────────────────
+ 1. Submit request  ──────────►  2. Receive ticket
+    (ServiceNow/email)           3. Allocate VM from pool
+                                 4. Install tools & runtimes
+                                 5. Deploy security agents         ◄── 3-5 days
+                                    (EDR, Zscaler, DLP)
+                                 6. Configure AD/GPO/certificates
+                                 7. Run compliance check
+                                 8. Assign user, send credentials ─►  9. First login
+                                                                      10. Self-configure
+                                                                          remaining tools
+                                                                          ◄── 1-2 weeks
+                                                                              total
+```
+
+**CDM team bottleneck at scale:**
+
+| Team Size | Provisioning Requests/mo | CDM FTE Needed | Avg Wait Time |
+|-----------|-------------------------|----------------|---------------|
+| 100 (stable) | 5-10 (turnover/new projects) | 0.5-1 | 3-5 days |
+| 200 (+100 project) | 100+ (initial ramp) then 10-15/mo | 1-2 (peak: 3+) | 1-2 weeks at ramp |
+| 300 (+200 project) | 200+ (initial ramp) then 15-20/mo | 1.5-3 (peak: 5+) | 2-3 weeks at ramp |
+
+At project ramp-up, the CDM team becomes the critical path. 200 contractors waiting for VDI provisioning at 5 per day = **6-8 weeks** before all developers are productive.
+
+### New Model: DevOps/Project Manager Self-Service with Coder
+
+```
+ DevOps/Project Manager                          Developer
+ ────────────────────────────────────────────────────────────────
+ 1. Select template   ──── (dropdown: backend /
+    matching role           frontend / data-eng /
+                            ML / full-stack)
+
+ 2. Set team size     ──── (workspace count)
+
+ 3. Invite via SSO    ──── (email/OIDC group) ──►  4. Click SSO login
+                                                   5. Workspace auto-provisions
+                                                      (30-60 seconds)
+                                                   6. Tools, runtimes, AI agents
+                                                      pre-configured
+                                                   ◄── < 1 hour total
+```
+
+**Key differences:**
+
+| Dimension | VDI (CDM Team) | Coder (Self-Service) |
+|-----------|---------------|---------------------|
+| **Who provisions** | CDM team (specialized staff) | DevOps manager or project manager (self-serve) |
+| **Time to first commit** | 1-2 weeks | < 1 hour |
+| **Provisioning at scale (200 devs)** | 6-8 weeks (CDM bottleneck) | Same day (parallel auto-provision) |
+| **Environment consistency** | CDM follows runbook; drift happens | Template guarantees identical environments |
+| **Right-sizing** | CDM picks from 2-3 VM sizes | Templates match role: backend (4 CPU/8 GB), ML (8 CPU/32 GB + GPU) |
+| **Decommissioning** | CDM ticket → VM cleanup → license release → compliance audit | Delete workspace (1 click); SSO revoke |
+| **CDM team involvement** | Required for every provision/deprovision | Zero — CDM focuses on platform, not provisioning |
+| **Cost of project ramp-up** | CDM overtime + contractor wait time + lost productivity | Zero marginal provisioning cost |
+
+### Impact on Project Economics
+
+For a 6-month project adding 200 contractors:
+
+```
+                                    VDI                     Coder
+ ────────────────────────────────────────────────────────────────
+ Ramp-up delay                      6-8 weeks               Same day
+ Lost productivity (ramp delay)     200 devs × 6 weeks      $0
+                                    × $60-80/hr =
+                                    $2.9M-3.8M in
+                                    delayed billable hours
+
+ CDM team cost (project)            2-3 FTE × 6 mo          $0 (self-serve)
+                                    = $60K-135K
+
+ Decommission cost (project end)    CDM ticket per dev       1-click bulk delete
+                                    + compliance audit
+                                    = $15K-30K
+
+ Per-developer monthly run          $199-399/user            $64-112/user
+   (incl. Enterprise license)                                (with Coder Enterprise)
+ ────────────────────────────────────────────────────────────────
+ 6-month project total (200 devs)   $314K-$544K              $77K-134K
+   (run cost only, excl. ramp)      + $3M-4M ramp delay      + $0 ramp delay
+```
+
+> **The ramp-up delay cost alone ($2.9M-3.8M in delayed billable hours) dwarfs the entire 6-month platform cost.** Self-service provisioning isn't just a convenience — it's the difference between a project starting on time and starting 6 weeks late.
+
+---
+
 ## Why This Matters Now
 
-1. **The security stack costs more than the platform** — EDR + Zscaler + DLP licenses alone ($24-58/user/mo) exceed the entire cost of a container-based platform ($25-55/user/mo including AI). Linux containers eliminate 100% of per-endpoint security licensing.
+1. **The security stack costs more than the platform** — EDR + Zscaler + DLP licenses alone ($24-58/user/mo) exceed the entire cost of a container-based platform including Coder Enterprise ($64-112/user/mo vs $199-399 for VDI). Linux containers eliminate 100% of per-endpoint security licensing.
 
-2. **Admin labor doesn't scale** — Every Windows VDI added means more patching, more agent troubleshooting, more AD management. Containers are immutable — update the image once, all workspaces inherit the change. You manage templates, not VMs.
+2. **Admin labor doesn't scale** — Every Windows VDI added means more patching, more agent troubleshooting, more AD management. At 300 developers, VDI needs 4.5-9 FTE for admin + provisioning; Coder needs 0.5-1 FTE. Containers are immutable — update the image once, all workspaces inherit the change.
 
-3. **AI agents are here** — Roo Code, OpenCode, Claude Code CLI are production-ready. VDI has no governed way to deploy them. Container-based platforms provide AI with built-in budgets, enforcement, and audit.
+3. **CDM provisioning is the hidden bottleneck** — Adding 200 project contractors takes 6-8 weeks via CDM team (5 VMs/day). Self-service provisioning with Coder: same day. The ramp-up delay cost ($2.9M-3.8M in lost billable hours) dwarfs the entire platform investment.
 
-4. **Cost pressure is real** — VDI cloud spend + security licenses + admin labor is the #1 infrastructure complaint. 80-90% total cost reduction is proven by Skydio and J.B. Hunt.
+4. **AI agents are here** — Roo Code, OpenCode, Claude Code CLI are production-ready. VDI has no governed way to deploy them. Container-based platforms provide AI with built-in budgets, enforcement, and audit.
 
-5. **Contractor security is stronger, not weaker** — Browser-only access with container isolation + server-side guardrails replaces DLP agents that contractors can circumvent. No data ever reaches a local device.
+5. **Cost savings increase with scale** — At 100 developers: 62-64% savings. At 300 developers: 71-72% savings. VDI scales linearly; containers scale sub-linearly (shared platform, concurrency-based compute).
+
+6. **Contractor security is stronger, not weaker** — Browser-only access with container isolation + server-side guardrails replaces DLP agents that contractors can circumvent. No data ever reaches a local device.
 
 ---
 
@@ -286,21 +493,23 @@ Windows VDI requires dedicated staff for operations that simply don't exist with
 │                                                                  │
 │   FROM WINDOWS VDI TO LINUX CONTAINERS: PROVEN AT SCALE         │
 │                                                                  │
-│   80-85%  total cost reduction (compute + security + admin)     │
+│   62-72%  total cost reduction (incl. Coder Enterprise license) │
 │   100%    endpoint security licensing eliminated                │
 │           (no EDR, no Zscaler, no DLP agents)                   │
-│   90%     admin labor reduction (templates replace per-VM ops)  │
-│   1 hr    new hire → first commit  (was 1-2 weeks)              │
+│   80-90%  admin headcount reduction (0.5-1 FTE vs 4.5-9 FTE)   │
+│   < 1 hr  new hire → first commit  (was 1-2 weeks)              │
+│   Same    day project ramp-up  (was 6-8 weeks via CDM team)     │
 │   0       API keys on contractor devices                        │
 │   3       AI agents with server-side governance                 │
 │                                                                  │
-│   "Skydio reduced cloud computing costs by 90% by              │
-│    automating shutdown of unused VMs and GPUs, making           │
-│    those resources available to other teams."                    │
-│                                    — coder.com/success-stories   │
+│   At 300 developers:                                             │
+│     VDI:   $745K - $1.44M/yr + 4.5-9 FTE                       │
+│     Coder: $216K - $402K/yr  + 0.5-1 FTE                       │
 │                                                                  │
-│   The Windows endpoint security stack alone costs more          │
-│   than the entire Linux container platform.                      │
+│   Self-service provisioning eliminates CDM bottleneck —         │
+│   DevOps/project managers provision directly.                    │
+│   Ramp delay cost ($2.9M-3.8M for 200 contractors)              │
+│   dwarfs the entire platform investment.                         │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -322,3 +531,4 @@ Windows VDI requires dedicated staff for operations that simply don't exist with
 | 1.0 | 2026-02-08 | Platform Team | Initial version — VDI to Coder business case with Skydio/J.B. Hunt references |
 | 1.1 | 2026-02-08 | Platform Team | Add Windows endpoint security stack analysis (EDR/Zscaler/DLP), admin labor costs, FTE impact |
 | 1.2 | 2026-02-08 | Platform Team | Break out Microsoft licensing (VDA, M365 E1, RDS CAL, Windows Server); offshore contractor context |
+| 1.3 | 2026-02-08 | Platform Team | Add scaling comparison (100/200/300 devs); Coder Enterprise license; CDM team vs self-service provisioning; project ramp-up economics |
