@@ -162,8 +162,16 @@ data "coder_parameter" "ai_assistant" {
   icon         = "/icon/widgets.svg"
 
   option {
-    name  = "Roo Code + OpenCode (Recommended)"
+    name  = "All Agents (Roo Code + OpenCode + Claude Code)"
+    value = "all"
+  }
+  option {
+    name  = "Roo Code + OpenCode"
     value = "both"
+  }
+  option {
+    name  = "Claude Code CLI"
+    value = "claude-code"
   }
   option {
     name  = "Roo Code Only"
@@ -635,6 +643,52 @@ OPENCODECONFIG
           fi
         fi
 
+        # --- Claude Code CLI configuration ---
+        if [ "$AI_ASSISTANT" = "claude-code" ] || [ "$AI_ASSISTANT" = "all" ]; then
+          if command -v claude >/dev/null 2>&1; then
+            echo "Configuring Claude Code CLI with LiteLLM proxy (Anthropic pass-through)..."
+            mkdir -p /home/coder/.claude
+
+            # Claude Code CLI uses the Anthropic SDK natively.
+            # LiteLLM's /anthropic/ endpoint accepts Anthropic-format requests,
+            # applies virtual key auth, enforcement hooks, guardrails, and budget tracking,
+            # then routes to the configured Anthropic provider.
+
+            # Write Claude Code settings with permitted tools
+            cat > /home/coder/.claude/settings.json << 'CLAUDECONFIG'
+{
+  "permissions": {
+    "allow": [
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Bash(git status:*)",
+      "Bash(npm test:*)",
+      "Bash(npm run:*)",
+      "Bash(npx:*)",
+      "Bash(node:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Read",
+      "Write",
+      "Edit"
+    ],
+    "deny": [
+      "Bash(curl:*)",
+      "Bash(wget:*)",
+      "Bash(ssh:*)",
+      "Bash(scp:*)"
+    ]
+  }
+}
+CLAUDECONFIG
+            echo "Claude Code configured: gateway=litellm:4000/anthropic enforcement=$ENFORCEMENT_LEVEL"
+          else
+            echo "Note: Claude Code CLI not found, skipping configuration"
+          fi
+        fi
+
         # --- Environment variables for CLI AI tools ---
         cat >> ~/.bashrc << AICONFIG
 # AI Configuration (LiteLLM)
@@ -646,6 +700,15 @@ export AI_MODEL="$LITELLM_MODEL"
 alias ai-models="echo 'Agent: $AI_ASSISTANT, Model: $LITELLM_MODEL, Gateway: litellm:4000'"
 alias ai-usage="curl -s http://litellm:4000/user/info -H 'Authorization: Bearer $LITELLM_KEY' | python3 -m json.tool"
 AICONFIG
+
+        # Claude Code CLI environment (Anthropic pass-through via LiteLLM)
+        if [ "$AI_ASSISTANT" = "claude-code" ] || [ "$AI_ASSISTANT" = "all" ]; then
+          cat >> ~/.bashrc << CLAUDEENV
+# Claude Code CLI (Anthropic pass-through via LiteLLM)
+export ANTHROPIC_BASE_URL="http://litellm:4000/anthropic"
+export ANTHROPIC_API_KEY="$LITELLM_KEY"
+CLAUDEENV
+        fi
         echo "AI environment configured: gateway=litellm:4000"
       else
         echo "Note: No AI API key available. Ask your platform admin or use the self-service script."
@@ -735,7 +798,11 @@ DBCONFIG
     echo "=== Workspace ready ==="
     echo "Git Server: ${data.coder_parameter.git_server_url.value}"
     echo "AI Gateway: $${AI_GATEWAY_URL}"
+    echo "AI Agent: $${AI_ASSISTANT}"
     echo "AI Behavior: $${ENFORCEMENT_LEVEL}"
+    if [ "$AI_ASSISTANT" = "claude-code" ] || [ "$AI_ASSISTANT" = "all" ]; then
+      echo "Claude Code: litellm:4000/anthropic (Anthropic pass-through)"
+    fi
     if [ "$DB_TYPE" != "none" ]; then
       echo "Database: $${DEVDB_NAME:-not provisioned} (type: $DB_TYPE)"
     fi

@@ -31,19 +31,19 @@ This document describes how AI capabilities are integrated into the Coder WebIDE
 │                                                                              │
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
 │  │                         USER INTERFACES                              │   │
-│  │  ┌───────────────┐  ┌───────────────┐  ┌───────────────┐           │   │
-│  │  │ Coder Chat   │  │   Roo Code   │  │  OpenCode +   │           │   │
-│  │  │ (DISABLED)   │  │  (VS Code)    │  │  CLI Tools    │           │   │
-│  │  └──────────────┘  └───────┬───────┘  └───────┬───────┘           │   │
-│  └─────────────────────────────┼──────────────────┼─────────────────────┘   │
-│                                │                  │                          │
-│                                ▼                  ▼                          │
-│                        ┌─────────────────┐  ┌─────────────────┐              │
-│                        │  Roo Code API  │  │    LiteLLM      │              │
-│                        │  (via LiteLLM) │  │    (Proxy)      │              │
-│                        └────────┬────────┘  └────────┬────────┘              │
-│                                 │                    │                        │
-│                                 └────────────────────┘                        │
+│  │  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐  │   │
+│  │  │ Coder Chat  │ │  Roo Code   │ │  OpenCode   │ │ Claude Code │  │   │
+│  │  │ (DISABLED)  │ │  (VS Code)  │ │  (CLI)      │ │  (CLI)      │  │   │
+│  │  └─────────────┘ └──────┬──────┘ └──────┬──────┘ └──────┬──────┘  │   │
+│  └──────────────────────────┼──────────────┼───────────────┼──────────┘   │
+│                             │              │               │               │
+│                             ▼              ▼               ▼               │
+│                      ┌────────────┐ ┌────────────┐ ┌──────────────┐       │
+│                      │  /v1/chat/ │ │  /v1/chat/ │ │ /anthropic/  │       │
+│                      │completions │ │completions │ │ v1/messages  │       │
+│                      │(OpenAI API)│ │(OpenAI API)│ │(Anthropic API│       │
+│                      └─────┬──────┘ └─────┬──────┘ └──────┬───────┘       │
+│                            └──────────────┼────────────────┘               │
 │                                │         │                                   │
 │                                │    ┌────┴──────────┐                        │
 │                                │    │   Langfuse    │  (async callback)      │
@@ -72,6 +72,7 @@ This document describes how AI capabilities are integrated into the Coder WebIDE
 | Documentation | Roo Code | Bedrock/Anthropic (via LiteLLM) | Generate docs/comments |
 | Test Generation | Roo Code | Bedrock/Anthropic (via LiteLLM) | Generate unit tests |
 | CLI AI Agent | OpenCode CLI | Bedrock/Anthropic (via LiteLLM) | Terminal-based agentic coding |
+| CLI AI Agent | Claude Code CLI | Anthropic (via LiteLLM pass-through) | Terminal-based agentic coding (Anthropic native) |
 | CLI Assistant | Terminal Tools | LiteLLM | Shell commands, debugging |
 | Trace Analytics | Langfuse Web UI | LiteLLM → Langfuse | Trace visualization, latency analytics, cost trends |
 
@@ -1194,3 +1195,4 @@ See `GUARDRAILS.md` for full pattern reference, custom pattern format, per-key c
 | 1.5 | 2026-02-06 | Platform Team | Add Section 12: Design-First AI Enforcement Layer |
 | 1.6 | 2026-02-07 | Platform Team | Add Section 13: Langfuse Observability Layer |
 | 1.7 | 2026-02-07 | Platform Team | Add Section 14: Content Guardrails (PII/financial/secret detection) |
+| 1.8 | 2026-02-08 | Platform Team | Add Claude Code CLI as AI agent option (Anthropic pass-through via LiteLLM) |
