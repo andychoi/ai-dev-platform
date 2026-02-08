@@ -180,19 +180,25 @@ All three use the **same virtual key** — LiteLLM accepts both `x-api-key` and 
 
 ## 7. Enforcement & Guardrails
 
-### Server-Side Enforcement
+### Design-First Enforcement — Skipped for Claude Code
 
-The LiteLLM enforcement hook works identically for Claude Code CLI as for Roo Code and OpenCode:
+Claude Code CLI is a **plan-first agent by design**. It already reasons before coding, asks for user confirmation before file operations, and follows structured workflows natively. The platform's enforcement hook (`design-first`, `standard`) was built to replicate this behavior in other agents (Roo Code, OpenCode). Applying it back to Claude Code is redundant.
 
-- **`unrestricted`** — No system prompt injected
-- **`standard`** — Lightweight reasoning prompt prepended
-- **`design-first`** — Full architect-mode prompt; design proposal required before code
+When `ai_assistant=claude-code`, the startup script automatically sets `enforcement_level=unrestricted` for the virtual key, bypassing the enforcement hook. This means:
 
-The enforcement level is stored in the virtual key's `metadata.enforcement_level` and cannot be changed from the workspace.
+| LiteLLM Layer | Active for Claude Code? | Reason |
+|---|---|---|
+| Design-first enforcement | **No** | Claude Code already plans first natively |
+| Standard enforcement | **No** | Claude Code already reasons step-by-step |
+| Content guardrails (PII/secrets) | **Yes** | Agent-agnostic — catches sensitive data in prompts |
+| Budget & rate limits | **Yes** | Per-user cost control |
+| Audit logging (Langfuse) | **Yes** | Usage tracking and compliance |
 
-### Content Guardrails
+> **Note:** When `ai_assistant=all` (Claude Code + Roo Code + OpenCode sharing the same key), the user-selected enforcement level is preserved because Roo Code and OpenCode still benefit from it.
 
-The guardrails hook scans all messages for PII, financial data, and secrets. This applies to Claude Code CLI requests through the Anthropic pass-through endpoint just as it does for OpenAI-compatible requests.
+### Content Guardrails — Still Active
+
+The guardrails hook scans all messages for PII, financial data, and secrets. This applies to Claude Code CLI requests through the Anthropic pass-through endpoint. Claude Code has no built-in PII scanner, so this server-side layer remains valuable.
 
 ### Client-Side Permissions
 
@@ -207,7 +213,7 @@ The `~/.claude/settings.json` file pre-configures Claude Code's tool permissions
 **Denied:**
 - Network tools (curl, wget, ssh, scp) — prevents data exfiltration
 
-This is advisory reinforcement — the server-side enforcement hook and network egress firewall provide the actual security boundary.
+This is advisory reinforcement — the content guardrails hook and network egress firewall provide the actual security boundary.
 
 ---
 

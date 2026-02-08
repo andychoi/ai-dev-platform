@@ -444,6 +444,15 @@ password=${data.coder_parameter.git_password.value}
     AI_GATEWAY_URL="${data.coder_parameter.ai_gateway_url.value}"
     ENFORCEMENT_LEVEL="${data.coder_parameter.ai_enforcement_level.value}"
 
+    # Claude Code CLI is a plan-first agent by design — it already reasons before
+    # coding, asks for confirmation, and follows structured workflows natively.
+    # The enforcement hook (design-first/standard prompts) was built to replicate
+    # Claude Code's behavior in other agents. Applying it back is redundant.
+    # Budget, rate limits, guardrails (PII/secrets), and audit logging still apply.
+    if [ "$AI_ASSISTANT" = "claude-code" ]; then
+      ENFORCEMENT_LEVEL="unrestricted"
+    fi
+
     if [ "$AI_ASSISTANT" != "none" ]; then
       # Determine model name for LiteLLM
       case "$AI_MODEL" in
