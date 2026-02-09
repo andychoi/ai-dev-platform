@@ -276,12 +276,70 @@ ai-usage
 
 | Issue | Cause | Solution |
 |-------|-------|----------|
-| `claude: command not found` | CLI not installed | Rebuild workspace image: `docker build -t nodejs-workspace:latest ./build` |
+| **Login prompt** ("Select login method") | `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY` not set | See [Login Prompt Fix](#login-prompt-select-login-method) below |
+| `claude: command not found` | CLI not installed in workspace image | Rebuild base + language image (see below) |
 | `401 Unauthorized` | Invalid or missing API key | Check `echo $ANTHROPIC_API_KEY` — re-provision via `generate-ai-key.sh` |
 | `Connection refused` | LiteLLM not running | Check `curl http://litellm:4000/health` from workspace |
 | `Model not found` | Model name mismatch | Verify the model exists in `litellm/config.yaml` model_list |
 | `Budget exceeded` | User hit spending limit | Check with `ai-usage`, ask admin to reset |
 | Claude Code ignores enforcement | Key metadata missing enforcement_level | Recreate workspace or rotate key via key-provisioner |
+
+### Login Prompt ("Select login method")
+
+**Symptom:** Running `claude` shows:
+
+```
+Select login method:
+❯ 1. Claude account with subscription · Pro, Max, Team, or Enterprise
+  2. Anthropic Console account · API usage billing
+```
+
+**Cause:** `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY` are not set. Without these, Claude Code falls back to its default authentication flow (direct Anthropic login), which is not how the platform works.
+
+This typically happens when:
+- The workspace was created **before** Claude Code was added to the template
+- The `ai_assistant` parameter was not set to `claude-code` or `all`
+- The startup script failed to configure the environment variables
+
+**Quick fix (no workspace recreation):**
+
+```bash
+# Set the env vars for the current session
+export ANTHROPIC_BASE_URL="http://litellm:4000/anthropic"
+export ANTHROPIC_API_KEY="$OPENAI_API_KEY"  # reuse existing LiteLLM virtual key
+
+# Persist to .bashrc so it survives terminal restarts
+echo 'export ANTHROPIC_BASE_URL="http://litellm:4000/anthropic"' >> ~/.bashrc
+echo "export ANTHROPIC_API_KEY=\"$OPENAI_API_KEY\"" >> ~/.bashrc
+
+# Now run claude
+claude
+```
+
+> **Why `$OPENAI_API_KEY`?** All three agents share the same LiteLLM virtual key. The workspace already has it as `OPENAI_API_KEY` (configured by the Roo Code / OpenCode startup script). Claude Code uses the same key but expects it in `ANTHROPIC_API_KEY`.
+
+**Permanent fix:** Delete and recreate the workspace from the updated template. The new startup script configures Claude Code automatically.
+
+### `claude: command not found`
+
+**Cause:** The workspace Docker image was built before `@anthropic-ai/claude-code` was added to the base Dockerfile.
+
+**Fix:** Rebuild images and recreate the workspace:
+
+```bash
+cd coder-poc
+
+# Rebuild base image (installs Claude Code CLI)
+docker build -t workspace-base:latest templates/workspace-base/build
+
+# Rebuild language image (e.g., python-workspace)
+docker build -t python-workspace:latest templates/python-workspace/build
+
+# Push updated template
+./scripts/setup-workspace.sh
+
+# Then delete and recreate the workspace in Coder UI
+```
 
 ### Diagnostic Commands
 
@@ -355,3 +413,4 @@ The workspace `ANTHROPIC_API_KEY` is a **LiteLLM virtual key** (starts with `sk-
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | 2026-02-08 | Platform Team | Initial version — Claude Code CLI + LiteLLM integration |
+| 1.1 | 2026-02-09 | Platform Team | Added login prompt troubleshooting, `command not found` fix, env var quick-fix |

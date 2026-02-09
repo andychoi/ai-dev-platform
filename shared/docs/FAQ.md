@@ -190,8 +190,11 @@ Note: Some settings require recreating the workspace.
 - GitLens
 - Go, Java, C# support
 - SQLTools (database)
-- Roo Code (AI coding agent)
-- OpenCode CLI (terminal AI agent — run `opencode`)
+- Roo Code (AI coding agent — VS Code sidebar)
+
+**Terminal AI tools** (not extensions — run from the terminal):
+- OpenCode CLI — run `opencode`
+- Claude Code CLI — run `claude`
 
 You can install additional extensions from the VS Code marketplace.
 
@@ -255,7 +258,7 @@ Note: Language-level packages persist in your workspace (installed under `/home/
 
 ### Q: How do I use the AI assistant?
 
-**A:** Your workspace includes two AI coding tools, both pre-configured and ready to use:
+**A:** Your workspace can include up to three AI coding tools, all pre-configured and ready to use. Which ones are available depends on the "AI Coding Agent" option selected when creating your workspace.
 
 **Roo Code** (VS Code sidebar):
 - Click the **Roo Code icon** in the VS Code Activity Bar to open the AI panel
@@ -265,9 +268,15 @@ Note: Language-level packages persist in your workspace (installed under `/home/
 **OpenCode** (terminal TUI):
 - Run `opencode` in your terminal to launch the AI coding agent
 - OpenCode is a terminal-based UI — great for SSH-style workflows and quick tasks
-- Same AI models and budget as Roo Code (both share your LiteLLM virtual key)
 
-> **Note:** The built-in Coder Chat, GitHub Copilot, and Cody are all disabled. Roo Code and OpenCode are the only AI interfaces, and both route requests through the platform's centralized LiteLLM proxy for auditing and cost control.
+**Claude Code** (terminal CLI):
+- Run `claude` in your terminal to launch the Claude Code CLI agent
+- Claude Code is Anthropic's native CLI — it plans before coding, asks for confirmation, and follows structured workflows
+- Best for complex multi-file tasks, refactoring, and codebase exploration
+
+All three agents share your auto-provisioned LiteLLM virtual key (same budget, same audit trail).
+
+> **Note:** The built-in Coder Chat, GitHub Copilot, and Cody are all disabled. Roo Code, OpenCode, and Claude Code are the only AI interfaces, and all route requests through the platform's centralized LiteLLM proxy for auditing and cost control.
 
 ---
 
@@ -639,12 +648,38 @@ Admins may have visibility into all workspaces for support purposes.
 ### Q: AI is not working!
 
 **A:**
-1. **Check Roo Code**: Click the Roo Code icon in the sidebar — does the AI panel open?
-2. **Check config**: In terminal, run `cat ~/.config/roo-code/settings.json` — verify `apiKey` is present (not empty)
-3. **Check budget**: Run `ai-usage` — you may have hit your spending limit
-4. **Rebuild workspace**: If the API key is missing, rebuilding will re-provision it automatically
-5. **Check model**: Try switching to a different AI model
-6. **Contact admin**: There may be a service issue with LiteLLM
+1. **Check config**: In terminal, run `ai-models` to verify your agent, model, and gateway are set
+2. **Check budget**: Run `ai-usage` — you may have hit your spending limit
+3. **Check Roo Code**: Click the Roo Code icon in the sidebar — does the AI panel open?
+4. **Check Claude Code**: Run `claude --version` in terminal — if "command not found", the image needs rebuilding (ask admin)
+5. **Check API key**: Run `echo $ANTHROPIC_API_KEY` (for Claude Code) or `cat ~/.config/roo-code/settings.json` (for Roo Code) — verify key is present
+6. **Rebuild workspace**: If the API key is missing or Claude Code isn't installed, delete and recreate the workspace
+7. **Contact admin**: There may be a service issue with LiteLLM
+
+---
+
+### Q: Claude Code shows "Select login method" prompt!
+
+**A:** This means the `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY` environment variables are not configured. Without these, Claude Code tries to authenticate directly with Anthropic (which is not how this platform works).
+
+**Quick fix** (run in your workspace terminal):
+
+```bash
+export ANTHROPIC_BASE_URL="http://litellm:4000/anthropic"
+export ANTHROPIC_API_KEY="$OPENAI_API_KEY"
+claude
+```
+
+To make it permanent (survives terminal restarts):
+
+```bash
+echo 'export ANTHROPIC_BASE_URL="http://litellm:4000/anthropic"' >> ~/.bashrc
+echo "export ANTHROPIC_API_KEY=\"$OPENAI_API_KEY\"" >> ~/.bashrc
+source ~/.bashrc
+claude
+```
+
+**Why this happened:** Your workspace was likely created before Claude Code support was added to the template. The `$OPENAI_API_KEY` is your existing LiteLLM virtual key (shared by all AI agents). For a permanent fix, recreate the workspace from the updated template.
 
 ---
 
@@ -712,14 +747,17 @@ There is **no YAML editor or web UI** for editing templates. You edit `.tf` file
 ### Q: How do I create a new template?
 
 **A:**
-1. Copy the existing template directory:
+1. Copy an existing template directory as a starting point:
    ```bash
-   cp -r coder-poc/templates/contractor-workspace coder-poc/templates/my-template
+   cp -r coder-poc/templates/python-workspace coder-poc/templates/my-template
    ```
 2. Edit `main.tf` — change parameters, resources, startup scripts
-3. Edit `build/Dockerfile` — add/remove tools, languages, extensions
-4. Build the Docker image:
+3. Edit `build/Dockerfile` — extend `workspace-base:latest` and add language-specific tools
+4. Build the Docker images:
    ```bash
+   # Build base first (if not already built)
+   docker build -t workspace-base:latest coder-poc/templates/workspace-base/build
+   # Build your template image
    docker build -t my-template:latest coder-poc/templates/my-template/build
    ```
 5. Push to Coder (via Docker exec, no host CLI needed):
@@ -786,23 +824,25 @@ To assign:
 ### Q: How do I update templates?
 
 **A:**
-1. Edit the template files locally (main.tf, Dockerfile, etc.)
-2. If you changed the Dockerfile, rebuild the image:
+1. Edit the template files locally (`main.tf`, `build/Dockerfile`, etc.)
+2. If you changed the Dockerfile, rebuild images and push:
    ```bash
-   docker build -t contractor-workspace:latest coder-poc/templates/contractor-workspace/build
+   cd coder-poc
+   REBUILD_IMAGE=true ./scripts/setup-workspace.sh
    ```
-3. Push the updated template to Coder:
+3. If you only changed `main.tf` (no Dockerfile changes), push without rebuilding:
    ```bash
-   docker cp coder-poc/templates/contractor-workspace coder-server:/tmp/template-update
-   docker exec -e CODER_URL=http://localhost:7080 -e CODER_SESSION_TOKEN=$TOKEN \
-     coder-server coder templates push contractor-workspace --directory /tmp/template-update --yes
+   cd coder-poc
+   ./scripts/setup-workspace.sh
    ```
+
+For a single template manual push, see [ADMIN-HOWTO.md — Pushing a Template to Coder](../coder-poc/docs/ADMIN-HOWTO.md#pushing-a-template-to-coder).
 
 **Important:**
 - Existing workspaces keep using the old template version
 - New workspaces automatically use the latest version
 - Users can click "Update" on their workspace to adopt template changes
-- Some changes (agent URLs, env vars) require workspace **deletion and recreation** — not just an update
+- Some changes (Dockerfile tools, agent URLs, env vars) require workspace **deletion and recreation** — not just an update
 
 ---
 
@@ -927,7 +967,8 @@ To assign:
 ║  ────────────────                                                         ║
 ║  • Roo Code: Click icon in Activity Bar (VS Code sidebar)                 ║
 ║  • OpenCode: Run `opencode` in terminal (TUI agent)                       ║
-║  • Both share your auto-provisioned LiteLLM key                           ║
+║  • Claude Code: Run `claude` in terminal (CLI agent)                      ║
+║  • All share your auto-provisioned LiteLLM key                            ║
 ║                                                                            ║
 ║  GIT WORKFLOW                                                             ║
 ║  ────────────                                                             ║
@@ -937,7 +978,7 @@ To assign:
 ║                                                                            ║
 ║  GETTING HELP                                                             ║
 ║  ────────────                                                             ║
-║  • AI Agent: Roo Code (sidebar) or `opencode` (terminal)                  ║
+║  • AI Agent: Roo Code (sidebar), `opencode`, or `claude` (terminal)       ║
 ║  • Bug report: Create Issue in template-requests repo                     ║
 ║  • Platform admin: [Contact info]                                         ║
 ║                                                                            ║
@@ -954,3 +995,4 @@ To assign:
 | 1.1 | 2026-02-06 | Platform Team | HTTPS URLs, Bedrock model options, secure context troubleshooting, template management how-to |
 | 1.2 | 2026-02-06 | Platform Team | OpenCode CLI references, auto-provisioned keys, updated AI assistant section |
 | 1.3 | 2026-02-07 | Platform Team | Fixed sudo/apt-get section (now restricted), updated credentials to match RBAC doc |
+| 1.4 | 2026-02-09 | Platform Team | Added Claude Code CLI references, updated template push docs, updated Quick Reference |

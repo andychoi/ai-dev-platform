@@ -152,39 +152,79 @@ docker exec -e CODER_URL=http://localhost:7080 -e CODER_SESSION_TOKEN=$TOKEN \
 
 # View template versions
 docker exec -e CODER_URL=http://localhost:7080 -e CODER_SESSION_TOKEN=$TOKEN \
-  coder-server coder templates versions contractor-workspace
+  coder-server coder templates versions python-workspace
 ```
 
 ### Editing a Template
 
 1. **Edit main.tf** — Change parameters, resources, or startup scripts:
    ```bash
-   # Edit locally with your preferred editor
-   code coder-poc/templates/contractor-workspace/main.tf
+   # Edit locally with your preferred editor (replace <template> with template name)
+   code coder-poc/templates/<template>/main.tf
    ```
 
 2. **Edit Dockerfile** — Add tools, languages, or extensions:
    ```bash
-   code coder-poc/templates/contractor-workspace/build/Dockerfile
+   code coder-poc/templates/<template>/build/Dockerfile
    ```
 
 3. **Edit settings.json** — Change VS Code defaults:
    ```bash
-   code coder-poc/templates/contractor-workspace/build/settings.json
+   code coder-poc/templates/workspace-base/build/settings.json
    ```
 
 ### Building the Workspace Image
 
-After Dockerfile changes, rebuild:
+After Dockerfile changes, rebuild the base image first (all language images extend it), then the language image:
 
 ```bash
-docker build -t contractor-workspace:latest \
-  coder-poc/templates/contractor-workspace/build
+# 1. Always rebuild base first (shared tools: code-server, Claude Code, OpenCode, etc.)
+docker build -t workspace-base:latest coder-poc/templates/workspace-base/build
+
+# 2. Rebuild the language image
+docker build -t python-workspace:latest coder-poc/templates/python-workspace/build
+
+# Or use the automated script with REBUILD_IMAGE=true
+REBUILD_IMAGE=true ./scripts/setup-workspace.sh
 ```
 
 ### Pushing a Template to Coder
 
-Coder doesn't need the `coder` CLI on the host — push from inside the coder-server container:
+#### Automated (recommended): `setup-workspace.sh`
+
+The setup script handles authentication, image building, and template push in one step:
+
+```bash
+cd coder-poc
+
+# Normal run — builds images only if missing, pushes templates
+./scripts/setup-workspace.sh
+
+# Force image rebuild (after Dockerfile changes)
+REBUILD_IMAGE=true ./scripts/setup-workspace.sh
+```
+
+**What the script does:**
+1. Waits for Coder server to be ready
+2. Authenticates (creates first user or logs in)
+3. Builds `workspace-base:latest` (if missing or `REBUILD_IMAGE=true`)
+4. Builds language images (e.g., `python-workspace:latest`)
+5. Pushes templates to Coder via `docker exec` into the `coder-server` container
+6. Verifies templates are available
+
+**Environment overrides:**
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `CODER_ADMIN_EMAIL` | `admin@example.com` | Admin email for auth |
+| `CODER_ADMIN_PASSWORD` | `CoderAdmin123!` | Admin password |
+| `REBUILD_IMAGE` | (unset) | Set to `true` to force image rebuild |
+
+> **Note:** The script currently deploys `python-workspace` only for the PoC. To deploy other templates (nodejs, java, dotnet, docker), add them to the `TEMPLATES` array in the script.
+
+#### Manual Push (single template)
+
+To push one template without rebuilding images:
 
 ```bash
 # Step 1: Get a session token
@@ -193,26 +233,28 @@ TOKEN=$(curl -sf http://localhost:7080/api/v2/users/login \
   -d '{"email":"admin@example.com","password":"CoderAdmin123!"}' | python3 -c "import sys,json; print(json.load(sys.stdin)['session_token'])")
 
 # Step 2: Copy template into container
-docker cp coder-poc/templates/contractor-workspace coder-server:/tmp/template-push
+docker cp coder-poc/templates/python-workspace coder-server:/tmp/template-push
 
 # Step 3: Push (create or update)
 docker exec -e CODER_URL=http://localhost:7080 -e CODER_SESSION_TOKEN=$TOKEN \
   coder-server sh -c "
     cd /tmp/template-push
-    coder templates push contractor-workspace --directory . --yes 2>&1 || \
-    coder templates create contractor-workspace --directory . --yes 2>&1
+    coder templates push python-workspace --directory . --yes 2>&1 || \
+    coder templates create python-workspace --directory . --yes 2>&1
     rm -rf /tmp/template-push
   "
 ```
 
-Or run the automated setup script:
-```bash
-./coder-poc/scripts/setup-workspace.sh
-```
+Replace `python-workspace` with the template name you're pushing (e.g., `nodejs-workspace`, `docker-workspace`).
+
+#### After Pushing: Rebuild vs Recreate
+
+- **Template push only** (main.tf changes) — new workspaces get changes automatically; existing workspaces get changes on next start
+- **Image rebuild + template push** (Dockerfile changes) — requires `REBUILD_IMAGE=true` and workspace **deletion + recreation** for existing workspaces
 
 ### Template Parameters
 
-The current `contractor-workspace` template exposes these user-configurable parameters:
+All workspace templates expose these user-configurable parameters:
 
 | Parameter | Type | Default | Mutable | Description |
 |-----------|------|---------|---------|-------------|
@@ -222,11 +264,19 @@ The current `contractor-workspace` template exposes these user-configurable para
 | git_repo | string | (empty) | Yes | Repository to auto-clone |
 | dotfiles_repo | string | (empty) | Yes | Dotfiles repo |
 | developer_background | string | vscode | Yes | IDE keybinding preset |
-| ai_assistant | string | roo-code | Yes | AI agent (roo-code or none) |
-| litellm_api_key | string | (empty) | Yes | Per-user LiteLLM virtual key |
-| ai_model | string | claude-sonnet | Yes | AI model selection |
+| ai_assistant | string | both | Yes | AI agent: `all`, `both`, `claude-code`, `roo-code`, `opencode`, `none` |
+| litellm_api_key | string | (empty) | Yes | Per-user LiteLLM virtual key (auto-provisioned if empty) |
+| ai_model | string | bedrock-claude-haiku | Yes | AI model selection |
+| ai_enforcement_level | string | standard | **No** | AI behavior mode (admin-set, immutable) |
+| guardrail_action | string | mask | **No** | Sensitive data handling: `mask` or `block` (admin-set) |
 
-**Note:** `disk_size` is `mutable = false` — changing it requires deleting and recreating the workspace.
+**AI assistant options:**
+- **All Agents** (`all`) — Roo Code + OpenCode + Claude Code CLI
+- **Roo Code + OpenCode** (`both`) — IDE + terminal AI agents
+- **Claude Code CLI** (`claude-code`) — Terminal-only, plan-first agent (enforcement auto-set to `unrestricted`)
+- **Roo Code Only** / **OpenCode Only** / **None**
+
+**Note:** `disk_size`, `ai_enforcement_level`, and `guardrail_action` are `mutable = false` — changing them requires deleting and recreating the workspace.
 
 ### Template Update vs. Workspace Recreate
 
@@ -602,9 +652,9 @@ open https://host.docker.internal:7443
 ### Task: Add a New AI Model Option for Users
 
 1. Add model to `litellm/config.yaml` (see [Adding a New Model](#adding-a-new-model))
-2. Add option to `templates/contractor-workspace/main.tf`
-3. Add case to the model mapping in the startup script
-4. Rebuild image (if Dockerfile changed): `docker build -t contractor-workspace:latest ...`
+2. Add option to each template's `main.tf` (e.g., `templates/python-workspace/main.tf`)
+3. Add case to the model mapping in the startup script (`case "$AI_MODEL"` block)
+4. Rebuild image (if Dockerfile changed): `REBUILD_IMAGE=true ./scripts/setup-workspace.sh`
 5. Push template: `./scripts/setup-workspace.sh`
 6. Tell users to create new workspaces (or update existing ones)
 

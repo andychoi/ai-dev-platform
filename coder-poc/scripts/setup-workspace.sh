@@ -27,9 +27,13 @@ ADMIN_PASSWORD="${CODER_ADMIN_PASSWORD:-CoderAdmin123!}"
 BASE_IMAGE_DIR="${POC_DIR}/templates/workspace-base/build"
 
 # Templates to set up: "name:directory:image" triplets
-# PoC deploys python-workspace only; production adds nodejs, java, dotnet
+# All discovered templates are deployed automatically
 TEMPLATES=()
 [ -d "${POC_DIR}/templates/python-workspace" ] && TEMPLATES+=("python-workspace:python-workspace:python-workspace")
+[ -d "${POC_DIR}/templates/nodejs-workspace" ] && TEMPLATES+=("nodejs-workspace:nodejs-workspace:nodejs-workspace")
+[ -d "${POC_DIR}/templates/java-workspace" ] && TEMPLATES+=("java-workspace:java-workspace:java-workspace")
+[ -d "${POC_DIR}/templates/dotnet-workspace" ] && TEMPLATES+=("dotnet-workspace:dotnet-workspace:dotnet-workspace")
+[ -d "${POC_DIR}/templates/docker-workspace" ] && TEMPLATES+=("docker-workspace:docker-workspace:docker-workspace")
 
 # =============================================================================
 # Helper Functions
@@ -240,30 +244,13 @@ echo "  1. Go to https://host.docker.internal:7443 (accept self-signed cert warn
 echo "  2. Login via OIDC or local account"
 echo "  3. Click 'Create Workspace'"
 echo "  4. Select a template and configure workspace options:"
-echo "     - AI Assistant: 'Roo Code + OpenCode' (recommended) or 'OpenCode CLI Only'"
+echo "     - AI Assistant: 'All Agents' (Roo Code + OpenCode + Claude Code) or pick one"
 echo "     - Default LLM: pick a model (bedrock-claude-haiku is cheapest)"
 echo "     - AI key is auto-provisioned on first start (no manual paste needed)"
 echo "  5. Once workspace is running:"
 echo "     - Web IDE (Roo Code): click 'code-server' in the workspace toolbar"
 echo "     - Terminal AI (OpenCode): open the web terminal and run 'opencode'"
+echo "     - Terminal AI (Claude Code): open the web terminal and run 'claude'"
 echo ""
-
-# Guide for additional templates (not deployed in PoC)
-EXTRA_TEMPLATES=()
-[ -d "${POC_DIR}/templates/nodejs-workspace" ] && EXTRA_TEMPLATES+=("nodejs-workspace")
-[ -d "${POC_DIR}/templates/java-workspace" ] && EXTRA_TEMPLATES+=("java-workspace")
-[ -d "${POC_DIR}/templates/dotnet-workspace" ] && EXTRA_TEMPLATES+=("dotnet-workspace")
-
-if [ ${#EXTRA_TEMPLATES[@]} -gt 0 ]; then
-    echo -e "${YELLOW}Additional templates (not deployed in PoC):${NC}"
-    for tpl in "${EXTRA_TEMPLATES[@]}"; do
-        echo "  - ${tpl}"
-    done
-    echo ""
-    echo "  To deploy, build the image then push the template:"
-    echo "    docker build -t <name>:latest templates/<name>/build"
-    echo "    REBUILD_IMAGE=true ./scripts/setup-workspace.sh   # add to TEMPLATES array first"
-    echo ""
-fi
 
 log_success "Setup completed successfully!"
