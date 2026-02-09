@@ -162,8 +162,16 @@ data "coder_parameter" "ai_assistant" {
   icon         = "/icon/widgets.svg"
 
   option {
-    name  = "Roo Code + OpenCode (Recommended)"
+    name  = "All Agents (Roo Code + OpenCode + Claude Code)"
+    value = "all"
+  }
+  option {
+    name  = "Roo Code + OpenCode"
     value = "both"
+  }
+  option {
+    name  = "Claude Code CLI"
+    value = "claude-code"
   }
   option {
     name  = "Roo Code Only"
@@ -254,6 +262,25 @@ data "coder_parameter" "ai_enforcement_level" {
   option {
     name  = "Unrestricted - Original tool behavior"
     value = "unrestricted"
+  }
+}
+
+data "coder_parameter" "guardrail_action" {
+  name         = "guardrail_action"
+  display_name = "Sensitive Data Handling"
+  description  = "How to handle detected PII, secrets, and financial data in AI prompts. Block rejects the request; Mask replaces sensitive values with [REDACTED] and proceeds."
+  type         = "string"
+  default      = "mask"
+  mutable      = false
+  icon         = "/icon/widgets.svg"
+
+  option {
+    name  = "Mask - Redact sensitive data and proceed (Recommended)"
+    value = "mask"
+  }
+  option {
+    name  = "Block - Reject requests containing sensitive data"
+    value = "block"
   }
 }
 
@@ -548,6 +575,16 @@ password=${data.coder_parameter.git_password.value}
     AI_MODEL="${data.coder_parameter.ai_model.value}"
     AI_GATEWAY_URL="${data.coder_parameter.ai_gateway_url.value}"
     ENFORCEMENT_LEVEL="${data.coder_parameter.ai_enforcement_level.value}"
+    GUARDRAIL_ACTION="${data.coder_parameter.guardrail_action.value}"
+
+    # Claude Code CLI is a plan-first agent by design — it already reasons before
+    # coding, asks for confirmation, and follows structured workflows natively.
+    # The enforcement hook (design-first/standard prompts) was built to replicate
+    # Claude Code's behavior in other agents. Applying it back is redundant.
+    # Budget, rate limits, guardrails (PII/secrets), and audit logging still apply.
+    if [ "$AI_ASSISTANT" = "claude-code" ]; then
+      ENFORCEMENT_LEVEL="unrestricted"
+    fi
 
     if [ "$AI_ASSISTANT" != "none" ]; then
       case "$AI_MODEL" in
@@ -593,7 +630,7 @@ password=${data.coder_parameter.git_password.value}
       # Configure AI tools if we have a key
       if [ -n "$LITELLM_KEY" ]; then
         # --- Roo Code configuration ---
-        if [ "$AI_ASSISTANT" = "roo-code" ] || [ "$AI_ASSISTANT" = "both" ]; then
+        if [ "$AI_ASSISTANT" = "roo-code" ] || [ "$AI_ASSISTANT" = "both" ] || [ "$AI_ASSISTANT" = "all" ]; then
           echo "Configuring Roo Code with LiteLLM proxy..."
           mkdir -p /home/coder/.config/roo-code
 
@@ -649,7 +686,7 @@ ROOCONFIG
         fi
 
         # --- OpenCode CLI configuration ---
-        if [ "$AI_ASSISTANT" = "opencode" ] || [ "$AI_ASSISTANT" = "both" ]; then
+        if [ "$AI_ASSISTANT" = "opencode" ] || [ "$AI_ASSISTANT" = "both" ] || [ "$AI_ASSISTANT" = "all" ]; then
           if [ -x /home/coder/.opencode/bin/opencode ]; then
             echo "Configuring OpenCode CLI with LiteLLM proxy..."
             mkdir -p /home/coder/.config/opencode
@@ -742,6 +779,45 @@ OPENCODECONFIG
           fi
         fi
 
+        # --- Claude Code CLI configuration ---
+        if [ "$AI_ASSISTANT" = "claude-code" ] || [ "$AI_ASSISTANT" = "all" ]; then
+          if command -v claude >/dev/null 2>&1; then
+            echo "Configuring Claude Code CLI with LiteLLM proxy (Anthropic pass-through)..."
+            mkdir -p /home/coder/.claude
+
+            cat > /home/coder/.claude/settings.json << 'CLAUDECONFIG'
+{
+  "permissions": {
+    "allow": [
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Bash(git status:*)",
+      "Bash(docker:*)",
+      "Bash(docker compose:*)",
+      "Bash(make:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Read",
+      "Write",
+      "Edit"
+    ],
+    "deny": [
+      "Bash(curl:*)",
+      "Bash(wget:*)",
+      "Bash(ssh:*)",
+      "Bash(scp:*)"
+    ]
+  }
+}
+CLAUDECONFIG
+            echo "Claude Code configured: gateway=litellm:4000/anthropic enforcement=$ENFORCEMENT_LEVEL"
+          else
+            echo "Note: Claude Code CLI not found, skipping configuration"
+          fi
+        fi
+
         # --- Environment variables for CLI AI tools ---
         cat >> ~/.bashrc << AICONFIG
 # AI Configuration (LiteLLM)
@@ -753,6 +829,15 @@ export AI_MODEL="$LITELLM_MODEL"
 alias ai-models="echo 'Agent: $AI_ASSISTANT, Model: $LITELLM_MODEL, Gateway: litellm:4000'"
 alias ai-usage="curl -s http://litellm:4000/user/info -H 'Authorization: Bearer $LITELLM_KEY' | python3 -m json.tool"
 AICONFIG
+
+        # Claude Code CLI environment (Anthropic pass-through via LiteLLM)
+        if [ "$AI_ASSISTANT" = "claude-code" ] || [ "$AI_ASSISTANT" = "all" ]; then
+          cat >> ~/.bashrc << CLAUDEENV
+# Claude Code CLI (Anthropic pass-through via LiteLLM)
+export ANTHROPIC_BASE_URL="http://litellm:4000/anthropic"
+export ANTHROPIC_API_KEY="$LITELLM_KEY"
+CLAUDEENV
+        fi
         echo "AI environment configured: gateway=litellm:4000"
       else
         echo "Note: No AI API key available. Ask your platform admin or use the self-service script."
@@ -837,7 +922,11 @@ DBCONFIG
     echo "=== Docker-enabled workspace ready ==="
     echo "Git Server: ${data.coder_parameter.git_server_url.value}"
     echo "AI Gateway: $${AI_GATEWAY_URL}"
+    echo "AI Agent: $${AI_ASSISTANT}"
     echo "AI Behavior: $${ENFORCEMENT_LEVEL}"
+    if [ "$AI_ASSISTANT" = "claude-code" ] || [ "$AI_ASSISTANT" = "all" ]; then
+      echo "Claude Code: litellm:4000/anthropic (Anthropic pass-through)"
+    fi
     echo "Docker: DOCKER_HOST=tcp://${local.dind_name}:2375 (rootless DinD)"
     if [ "$DB_TYPE" != "none" ]; then
       echo "Database: $${DEVDB_NAME:-not provisioned} (type: $DB_TYPE)"

@@ -519,7 +519,7 @@ password=${data.coder_parameter.git_password.value}
       # Configure AI tools if we have a key
       if [ -n "$LITELLM_KEY" ]; then
         # --- Roo Code configuration ---
-        if [ "$AI_ASSISTANT" = "roo-code" ] || [ "$AI_ASSISTANT" = "both" ]; then
+        if [ "$AI_ASSISTANT" = "roo-code" ] || [ "$AI_ASSISTANT" = "both" ] || [ "$AI_ASSISTANT" = "all" ]; then
           echo "Configuring Roo Code with LiteLLM proxy..."
           mkdir -p /home/coder/.config/roo-code
 
@@ -577,7 +577,7 @@ ROOCONFIG
         fi
 
         # --- OpenCode CLI configuration ---
-        if [ "$AI_ASSISTANT" = "opencode" ] || [ "$AI_ASSISTANT" = "both" ]; then
+        if [ "$AI_ASSISTANT" = "opencode" ] || [ "$AI_ASSISTANT" = "both" ] || [ "$AI_ASSISTANT" = "all" ]; then
           # Always write config if the binary exists (don't rely on PATH/command -v)
           if [ -x /home/coder/.opencode/bin/opencode ]; then
             echo "Configuring OpenCode CLI with LiteLLM proxy..."
