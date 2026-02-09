@@ -42,6 +42,7 @@ Original project development lifecycle documents. See [poc-planning/README.md](p
 | [GUARDRAILS.md](../shared/docs/GUARDRAILS.md) | Content guardrails (PII/financial/secret detection) |
 | [KEY-MANAGEMENT.md](../shared/docs/KEY-MANAGEMENT.md) | Virtual key taxonomy and management |
 | [ROO-CODE-LITELLM.md](../shared/docs/ROO-CODE-LITELLM.md) | Roo Code + LiteLLM integration |
+| [CLAUDE-CODE-LITELLM.md](../shared/docs/CLAUDE-CODE-LITELLM.md) | Claude Code CLI + LiteLLM integration |
 | [OPENCODE.md](../shared/docs/OPENCODE.md) | OpenCode CLI setup |
 | [DATABASE.md](../shared/docs/DATABASE.md) | Developer database management |
 | [MINIO-FAQ.md](../shared/docs/MINIO-FAQ.md) | MinIO/S3 usage patterns |
@@ -55,7 +56,8 @@ Original project development lifecycle documents. See [poc-planning/README.md](p
 | Document | Description |
 |----------|-------------|
 | [runbook.md](../coder-poc/docs/runbook.md) | Operations guide and troubleshooting |
-| [ADMIN-HOWTO.md](../coder-poc/docs/ADMIN-HOWTO.md) | Admin procedures |
+| [ADMIN-HOWTO.md](../coder-poc/docs/ADMIN-HOWTO.md) | Admin procedures (templates, TLS, AI models, users) |
+| [HTTPS.md](../coder-poc/docs/HTTPS.md) | TLS architecture, Traefik evaluation, traffic flows |
 | [AUTHENTIK-SSO.md](../coder-poc/docs/AUTHENTIK-SSO.md) | SSO configuration with Authentik |
 | [INFRA.md](../coder-poc/docs/INFRA.md) | Infrastructure and service details |
 | [PRODUCTION.md](../coder-poc/docs/PRODUCTION.md) | Production readiness |
@@ -71,16 +73,18 @@ Original project development lifecycle documents. See [poc-planning/README.md](p
 
 | Aspect | PoC Implementation | Production Target |
 |--------|-------------------|-------------------|
-| Orchestration | Docker Compose | ECS Fargate / Kubernetes |
-| Identity | Authentik (OIDC) | Authentik or enterprise IdP |
+| Orchestration | Docker Compose | ECS Fargate |
+| Identity | Authentik (OIDC) | Azure AD direct OIDC |
 | Secrets | Environment variables | AWS Secrets Manager |
-| TLS | Self-signed cert (port 7443) | CA-signed certs |
-| Network | Docker bridge + iptables egress | K8s NetworkPolicy / VPC |
+| TLS | Self-signed cert (port 7443) | CA-signed certs (ACM + ALB) |
+| Network | Docker bridge + iptables egress | VPC + Security Groups |
+| AI Keys | Key-provisioner + scoped virtual keys | Same (on ECS) |
 
 ## Update History
 
 | Date | Description |
 |------|-------------|
+| 2026-02-08 | Added HTTPS.md, CLAUDE-CODE-LITELLM.md; updated PoC vs Production table (Azure AD, ECS) |
 | 2026-02-07 | Reorganized: renamed docs/ai/ to docs/poc-planning/, added new docs to index, fixed TLS status |
 | 2026-02-05 | Documentation refresh - aligned with current codebase |
 | 2026-02-04 | Initial comprehensive documentation |

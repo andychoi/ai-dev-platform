@@ -4,11 +4,59 @@
 ## Purpose (For Claude)
 
 This file defines what Claude must know first when assisting with this repository.
-It intentionally stays high-level and references deeper operational detail in:
+It intentionally stays high-level and references deeper operational detail in the documentation map below.
 
-- coder-poc/docs/runbook.md – how to operate, configure, manage, and troubleshoot the system
+Claude should reference those files instead of duplicating procedures.
 
-Claude should reference that file instead of duplicating procedures.
+---
+
+## Documentation Map
+
+Claude should look up details in these files rather than relying on this summary alone.
+
+### PoC Operations (`coder-poc/docs/`)
+
+| Document | When to Reference |
+|----------|-------------------|
+| [runbook.md](coder-poc/docs/runbook.md) | Service lifecycle, troubleshooting, environment setup |
+| [ADMIN-HOWTO.md](coder-poc/docs/ADMIN-HOWTO.md) | Template management, TLS, AI models, user management |
+| [HTTPS.md](coder-poc/docs/HTTPS.md) | TLS architecture decisions, Traefik evaluation, traffic flows |
+| [INFRA.md](coder-poc/docs/INFRA.md) | Infrastructure details, service configuration |
+| [AUTHENTIK-SSO.md](coder-poc/docs/AUTHENTIK-SSO.md) | OIDC provider setup, redirect URIs, user provisioning |
+
+### Platform-Wide (`shared/docs/`)
+
+| Document | When to Reference |
+|----------|-------------------|
+| [AI.md](shared/docs/AI.md) | AI integration architecture, enforcement levels, disabled features |
+| [KEY-MANAGEMENT.md](shared/docs/KEY-MANAGEMENT.md) | Key provisioner, virtual key taxonomy, scoped budgets |
+| [ROO-CODE-LITELLM.md](shared/docs/ROO-CODE-LITELLM.md) | Roo Code + LiteLLM setup, config format, troubleshooting |
+| [CLAUDE-CODE-LITELLM.md](shared/docs/CLAUDE-CODE-LITELLM.md) | Claude Code CLI integration with LiteLLM pass-through |
+| [OPENCODE.md](shared/docs/OPENCODE.md) | OpenCode CLI agent setup |
+| [SECURITY.md](shared/docs/SECURITY.md) | Security architecture, network isolation, threat model |
+| [GUARDRAILS.md](shared/docs/GUARDRAILS.md) | Content guardrails (PII/financial/secret detection) |
+| [RBAC-ACCESS-CONTROL.md](shared/docs/RBAC-ACCESS-CONTROL.md) | Roles, permissions, service access matrix |
+| [DATABASE.md](shared/docs/DATABASE.md) | Developer database provisioning (DevDB) |
+| [FAQ.md](shared/docs/FAQ.md) | End-user frequently asked questions |
+
+### AWS Production (`aws-production/`)
+
+| Document | When to Reference |
+|----------|-------------------|
+| [PRODUCTION-PLAN.md](aws-production/PRODUCTION-PLAN.md) | AWS migration: ECS Fargate, RDS, ALB, Azure AD OIDC |
+| `terraform/` | IaC modules (VPC, ECS, RDS, ALB, IAM, S3, Secrets, ElastiCache, EFS) |
+
+### Claude Skills (`.claude/skills/`)
+
+| Skill | Domain |
+|-------|--------|
+| `coder/SKILL.md` | Coder platform, templates, users, OIDC |
+| `poc-services/SKILL.md` | All services, ports, credentials, Docker networking |
+| `ai-gateway/SKILL.md` | Roo Code + LiteLLM + OpenCode AI integration |
+| `key-management/SKILL.md` | Key provisioner, auto-provisioning, service keys |
+| `authentik-sso/SKILL.md` | Authentik identity provider, SSO |
+| `gitea/SKILL.md` | Git server, permissions, OIDC |
+| `minio/SKILL.md` | S3-compatible storage |
 
 ---
 
@@ -21,13 +69,14 @@ Coder-based WebIDE PoC enabling contractors to work in browser-based development
 - No direct access to internal networks
 
 Core components:
-- Coder
-- Authentik (OIDC)
-- Gitea
-- MinIO
+- Coder (HTTPS on port 7443, native TLS)
+- Authentik (OIDC identity provider)
+- Gitea (Git server) + MinIO (S3 storage)
 - PostgreSQL / Redis
-- LiteLLM (AI proxy) + Key Provisioner (key management) + Enforcement Hook (design-first AI controls)
+- LiteLLM (AI proxy, port 4000) + Key Provisioner (key management, port 8100) + Enforcement Hook
+- Platform Admin Dashboard (Flask, port 5050)
 - Roo Code (AI agent, VS Code) + OpenCode (AI agent, CLI) + Claude Code (AI agent, CLI, Anthropic native)
+- Langfuse (AI observability, port 3100)
 
 ---
 

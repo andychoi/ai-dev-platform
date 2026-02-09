@@ -146,11 +146,12 @@ CODER_OAUTH2_GITHUB_DEFAULT_PROVIDER_ENABLE: "false"
 
 Authentik must have the redirect URI configured to match what Coder sends.
 
-**Critical:** Coder generates callback URL from `CODER_ACCESS_URL`. If using `host.docker.internal`, Authentik needs BOTH:
+**Critical:** Coder generates callback URL from `CODER_ACCESS_URL`. With HTTPS enabled, Authentik needs these redirect URIs:
 
 ```
-http://localhost:7080/api/v2/users/oidc/callback
+https://host.docker.internal:7443/api/v2/users/oidc/callback
 http://host.docker.internal:7080/api/v2/users/oidc/callback
+http://localhost:7080/api/v2/users/oidc/callback
 ```
 
 **Fix redirect_uri mismatch in Authentik:**
@@ -158,8 +159,9 @@ http://host.docker.internal:7080/api/v2/users/oidc/callback
 docker exec authentik-server ak shell -c "
 from authentik.providers.oauth2.models import OAuth2Provider
 p = OAuth2Provider.objects.get(client_id='coder')
-p.redirect_uris = '''http://localhost:7080/api/v2/users/oidc/callback
-http://host.docker.internal:7080/api/v2/users/oidc/callback'''
+p.redirect_uris = '''https://host.docker.internal:7443/api/v2/users/oidc/callback
+http://host.docker.internal:7080/api/v2/users/oidc/callback
+http://localhost:7080/api/v2/users/oidc/callback'''
 p.save()
 "
 ```

@@ -100,13 +100,13 @@ docker compose logs -f coder
 echo "127.0.0.1 host.docker.internal" | sudo tee -a /etc/hosts
 
 # 4. Create admin user (first time only)
-# Open http://host.docker.internal:7080 and follow the setup wizard
+# Open https://host.docker.internal:7443 and follow the setup wizard
 
 # 5. Install Coder CLI
 curl -fsSL https://coder.com/install.sh | sh
 
 # 6. Login to Coder
-coder login http://host.docker.internal:7080
+coder login https://host.docker.internal:7443
 
 # 7. Create the workspace template
 cd templates/contractor-workspace
@@ -149,18 +149,19 @@ This verifies:
 
 ## Access Information
 
-**Important:** For OIDC/SSO to work correctly, access Coder at `http://host.docker.internal:7080` instead of `localhost:7080`.
+**Important:** Access Coder via HTTPS at `https://host.docker.internal:7443`. HTTPS is required for browser secure context (extension webviews). Accept the self-signed certificate warning.
 
 | Service | URL | Credentials |
 |---------|-----|-------------|
-| Dashboard Admin | http://localhost:5050 | admin / admin123 |
-| Coder Dashboard | http://host.docker.internal:7080 | admin@example.com / CoderAdmin123! |
+| **Coder Dashboard** | https://host.docker.internal:7443 | admin@example.com / CoderAdmin123! |
+| Coder API (scripts) | http://localhost:7080 | Same (HTTP for automation only) |
+| Platform Admin | http://localhost:5050 | admin / admin123 |
+| LiteLLM (AI Proxy) | http://localhost:4000/ui | Master key (see .env) |
+| Key Provisioner | http://localhost:8100 | PROVISIONER_SECRET (see .env) |
 | Authentik Admin | http://localhost:9000 | akadmin / admin |
 | Gitea (Git Server) | http://localhost:3000 | gitea / admin123 |
-| Drone CI | http://localhost:8080 | Via Gitea OAuth |
-| AI Gateway | http://localhost:8090 | N/A |
-| LiteLLM (AI Proxy) | http://localhost:4000 | Master key (see .env) |
 | MinIO Console | http://localhost:9001 | minioadmin / minioadmin |
+| Langfuse | http://localhost:3100 | See .env |
 | Mailpit (Email) | http://localhost:8025 | N/A |
 | DevDB (Internal) | devdb:5432 | Trust auth (no password) |
 | VS Code (in workspace) | Via Coder Dashboard | N/A |
@@ -298,7 +299,7 @@ This creates OAuth2 providers and applications for Coder, Gitea, MinIO, and Plat
 docker compose -f docker-compose.yml -f docker-compose.sso.yml up -d
 ```
 
-**Important:** Access Coder at `http://host.docker.internal:7080` (not localhost) for OIDC to work correctly. Add to `/etc/hosts` if needed:
+**Important:** Access Coder at `https://host.docker.internal:7443` (HTTPS required for extension webviews). Add to `/etc/hosts` if needed:
 
 ```bash
 echo "127.0.0.1 host.docker.internal" | sudo tee -a /etc/hosts
@@ -311,7 +312,7 @@ echo "127.0.0.1 host.docker.internal" | sudo tee -a /etc/hosts
    - Type: OAuth2/OpenID Provider
    - Name: `Coder OIDC`
    - Client ID: `coder`
-   - Redirect URIs: `http://host.docker.internal:7080/api/v2/users/oidc/callback`
+   - Redirect URIs: `https://host.docker.internal:7443/api/v2/users/oidc/callback`
 
 2. **Create Application:**
    - Go to Admin → Applications → Applications → Create
@@ -388,11 +389,12 @@ coder-poc/
 ├── README.md                       # This file
 ├── postgres/
 │   └── init.sql                    # Creates all databases and users
-├── ai-gateway/                     # Multi-provider AI proxy
-│   ├── gateway.py                  # Main application
-│   ├── config.yaml                 # Provider configuration
-│   ├── Dockerfile                  # Container image
-│   └── requirements.txt            # Python dependencies
+├── litellm/                        # LiteLLM AI proxy config
+│   └── config.yaml                 # Model definitions, routing, hooks
+├── platform-admin/                 # Admin dashboard (Flask)
+│   ├── app.py                      # Main application
+│   ├── templates/                  # Jinja2 HTML templates
+│   └── Dockerfile                  # Container image
 ├── gitea/
 │   └── app.ini                     # Gitea Git server configuration
 ├── testdb/
@@ -404,13 +406,15 @@ coder-poc/
 │       ├── requirements.txt        # Dependencies
 │       └── .drone.yml              # CI pipeline
 ├── scripts/
-│   ├── setup.sh                    # Automated setup script
+│   ├── setup.sh                    # Automated full setup
 │   ├── setup-gitea.sh              # Gitea users & repos setup
-│   ├── setup-authentik-sso-full.sh # Full Authentik SSO setup (creates apps + providers)
-│   ├── setup-authentik-sso.sh      # Basic SSO setup
+│   ├── setup-authentik-sso-full.sh # Full Authentik SSO + RBAC setup
+│   ├── setup-litellm-keys.sh       # Bootstrap AI key setup
+│   ├── generate-ai-key.sh          # Self-service key generation
+│   ├── manage-service-keys.sh      # CI/agent key management
+│   ├── manage-devdb.sh             # Database admin (list, cleanup, delete)
 │   ├── validate.sh                 # Validation test suite
-│   ├── test-access-control.sh      # Access control tests
-│   └── cleanup.sh                  # Cleanup script
+│   └── test-access-control.sh      # Access control tests
 └── templates/
     └── contractor-workspace/
         ├── main.tf                 # Terraform template
@@ -424,7 +428,7 @@ coder-poc/
 ### Creating a Workspace
 
 **Via Web UI:**
-1. Open http://localhost:7080
+1. Open https://host.docker.internal:7443
 2. Click "Create Workspace"
 3. Select "contractor-workspace" template
 4. Configure options (CPU, Memory, Git repo)
@@ -492,7 +496,7 @@ cp .env.example .env
 |----------|---------|-------------|
 | `CODER_PORT` | 7080 | Coder UI port |
 | `POSTGRES_PASSWORD` | coderpassword | Database password |
-| `CODER_ACCESS_URL` | http://host.docker.internal:7080 | External URL (use host.docker.internal for OIDC) |
+| `CODER_ACCESS_URL` | https://host.docker.internal:7443 | External URL (HTTPS required, see [HTTPS.md](docs/HTTPS.md)) |
 
 ### Workspace Template Parameters
 
@@ -687,11 +691,12 @@ Remove all PoC resources:
 
 | Aspect | PoC | Production |
 |--------|-----|------------|
-| TLS | Disabled | Required (TLS 1.3) |
-| Authentication | Local users | SSO/OIDC required |
-| Network | Open | NetworkPolicy isolation |
-| Secrets | Environment vars | Vault integration |
-| Audit | Basic logs | Full audit trail |
+| TLS | Self-signed cert (port 7443) | CA-signed certs (Let's Encrypt / ACM) |
+| Authentication | Authentik OIDC + password fallback | Azure AD direct OIDC |
+| Network | Docker bridge + iptables egress | VPC + Security Groups |
+| Secrets | Environment variables | AWS Secrets Manager |
+| AI Keys | Scoped virtual keys via key-provisioner | Same (key-provisioner on ECS) |
+| Audit | LiteLLM logs + Langfuse | CloudWatch + Langfuse |
 
 ## Next Steps
 
@@ -704,15 +709,24 @@ After validating the PoC:
 5. **Pilot Program**: Onboard test contractors
 6. **Production Deploy**: Migrate to Kubernetes
 
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [ADMIN-HOWTO.md](docs/ADMIN-HOWTO.md) | Admin procedures (templates, TLS, AI models, users) |
+| [HTTPS.md](docs/HTTPS.md) | TLS architecture, traffic flows, Traefik evaluation |
+| [runbook.md](docs/runbook.md) | Operations guide and troubleshooting |
+| [INFRA.md](docs/INFRA.md) | Infrastructure and service configuration |
+| [AUTHENTIK-SSO.md](docs/AUTHENTIK-SSO.md) | SSO setup with Authentik |
+| [AI.md](../shared/docs/AI.md) | AI integration and enforcement architecture |
+| [KEY-MANAGEMENT.md](../shared/docs/KEY-MANAGEMENT.md) | Virtual key taxonomy and management |
+| [ROO-CODE-LITELLM.md](../shared/docs/ROO-CODE-LITELLM.md) | Roo Code + LiteLLM setup |
+| [CLAUDE-CODE-LITELLM.md](../shared/docs/CLAUDE-CODE-LITELLM.md) | Claude Code CLI integration |
+| [DATABASE.md](../shared/docs/DATABASE.md) | Developer database provisioning |
+
 ## References
 
 - [Coder Documentation](https://coder.com/docs)
 - [Coder GitHub](https://github.com/coder/coder)
 - [Docker Provisioner](https://coder.com/docs/templates/docker)
 - [Workspace Templates](https://coder.com/docs/templates)
-
-## Support
-
-For issues with this PoC, check:
-1. [Coder Community](https://coder.com/community)
-2. [GitHub Issues](https://github.com/coder/coder/issues)

@@ -230,6 +230,8 @@ The current `contractor-workspace` template exposes these user-configurable para
 
 ## 4. HTTPS / TLS Configuration
 
+> For architecture decisions, Traefik evaluation, and traffic flow diagrams, see [HTTPS.md](HTTPS.md).
+
 ### Current Setup
 
 Coder runs with native TLS on port 7443 using a self-signed certificate.

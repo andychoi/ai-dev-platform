@@ -13,12 +13,15 @@ This skill provides a complete reference for all services in the Coder WebIDE PO
 
 | Service | Port | Purpose | Health Check |
 |---------|------|---------|--------------|
-| **Coder** | 7080 | WebIDE platform | `http://localhost:7080/api/v2/buildinfo` |
+| **Coder** | 7443 (HTTPS) / 7080 (HTTP) | WebIDE platform | `http://localhost:7080/api/v2/buildinfo` |
+| **LiteLLM** | 4000 | AI proxy (OpenAI-compatible) | `http://localhost:4000/health/readiness` |
+| **Key Provisioner** | 8100 | AI key auto-provisioning | `http://localhost:8100/health` |
+| **Platform Admin** | 5050 | Admin dashboard (Flask) | `http://localhost:5050/health` |
 | **Gitea** | 3000 | Git server | `http://localhost:3000/` |
 | **Authentik** | 9000 | SSO/Identity Provider | `http://localhost:9000/-/health/ready/` |
 | **MinIO Console** | 9001 | S3 storage UI | `http://localhost:9001/` |
 | **MinIO API** | 9002 | S3 API endpoint | `http://localhost:9002/minio/health/live` |
-| **AI Gateway** | 8090 | AI API proxy | `http://localhost:8090/health` |
+| **Langfuse** | 3100 | AI observability | `http://localhost:3100/` |
 | **Mailpit** | 8025 | Email testing | `http://localhost:8025/` |
 | **DevDB** | 5432 | PostgreSQL (internal) | N/A (internal only) |
 
@@ -130,14 +133,20 @@ docker exec gitea sqlite3 /data/gitea/gitea.db \
         ▼                   ▼                   ▼
 ┌───────────────┐   ┌───────────────┐   ┌───────────────┐
 │    Coder      │   │    Gitea      │   │    MinIO      │
-│  Port: 7080   │   │  Port: 3000   │   │ Port: 9001    │
+│  :7443 (TLS)  │   │  Port: 3000   │   │ Port: 9001    │
 └───────┬───────┘   └───────────────┘   └───────────────┘
         │
         ▼
 ┌───────────────┐   ┌───────────────┐   ┌───────────────┐
-│  Workspaces   │──▶│  AI Gateway   │   │    DevDB      │
-│  (Docker)     │   │  Port: 8090   │   │  Port: 5432   │
-└───────────────┘   └───────────────┘   └───────────────┘
+│  Workspaces   │──▶│   LiteLLM     │   │    DevDB      │
+│  (Docker)     │   │  Port: 4000   │   │  Port: 5432   │
+└───────┬───────┘   └───────┬───────┘   └───────────────┘
+        │                   │
+        ▼                   ▼
+┌───────────────┐   ┌───────────────┐
+│  Key Provis.  │   │   Langfuse    │
+│  Port: 8100   │   │  Port: 3100   │
+└───────────────┘   └───────────────┘
 ```
 
 ## Troubleshooting Credentials
@@ -198,23 +207,29 @@ echo "127.0.0.1 host.docker.internal" | sudo tee -a /etc/hosts
 
 **Why this is required:**
 1. Workspace containers use `host.docker.internal` to reach Coder server
-2. OIDC callback redirects browser to `host.docker.internal:7080`
+2. OIDC callback redirects browser to `host.docker.internal:7443`
 3. Without this hosts entry, browser cannot resolve the hostname after OIDC login
 
 ### Browser Access URLs
 
-**For OIDC login to work, you MUST access Coder at `host.docker.internal`:**
+**Access Coder via HTTPS at `host.docker.internal`:**
 
 | Service | Browser URL | Notes |
 |---------|-------------|-------|
-| **Coder** | `http://host.docker.internal:7080` | **Required for OIDC!** |
+| **Coder** | `https://host.docker.internal:7443` | **HTTPS required** (extension webviews) |
+| Coder API | `http://localhost:7080` | Scripts/automation only |
+| Platform Admin | `http://localhost:5050` | Admin dashboard |
+| LiteLLM Admin | `http://localhost:4000/ui` | AI proxy management |
 | Authentik | `http://localhost:9000` | SSO admin |
 | Gitea | `http://localhost:3000` | Git server |
 
-**Why not localhost for Coder?**
+**Why HTTPS and host.docker.internal for Coder?**
+- HTTPS is required for browser secure context (`crypto.subtle` / extension webviews)
 - OAuth state cookie is set on the domain you visit
-- OIDC callback returns to `host.docker.internal:7080` (from `CODER_ACCESS_URL`)
+- OIDC callback returns to `host.docker.internal:7443` (from `CODER_ACCESS_URL`)
 - Cookie domain must match, otherwise: `Cookie "oauth_state" must be provided` error
+
+See `coder-poc/docs/HTTPS.md` for the full TLS architecture and Traefik evaluation.
 
 ## Docker Networking for PoC
 
@@ -234,13 +249,13 @@ With `/etc/hosts` configured, `host.docker.internal` works from BOTH browser and
 
 | URL | Works From | Use For |
 |-----|------------|---------|
-| `http://host.docker.internal:7080` | Browser AND containers | **Primary Coder access** |
+| `https://host.docker.internal:7443` | Browser AND containers | **Primary Coder access (HTTPS)** |
 | `http://localhost:7080` | Browser only | Backup (breaks OIDC) |
 | `http://coder-server:7080` | Inside containers on same network | Container-to-container |
 
 **Correct Configuration:**
-- **`CODER_ACCESS_URL`:** `http://host.docker.internal:7080`
-- **Browser access:** `http://host.docker.internal:7080` (same URL!)
+- **`CODER_ACCESS_URL`:** `https://host.docker.internal:7443`
+- **Browser access:** `https://host.docker.internal:7443` (same URL!)
 - **Ensure hosts file is configured** (see above)
 
 ### The `localhost` Problem
@@ -277,8 +292,8 @@ environment:
   # BAD: Containers can't reach this
   CODER_ACCESS_URL: "http://localhost:7080"
 
-  # GOOD: Containers can reach the host
-  CODER_ACCESS_URL: "http://host.docker.internal:7080"
+  # GOOD: Containers can reach the host (HTTPS for browser secure context)
+  CODER_ACCESS_URL: "https://host.docker.internal:7443"
 ```
 
 ### Container-to-Container Communication
@@ -289,7 +304,7 @@ Containers on the same Docker network can reach each other by container name:
 # From workspace container:
 # ✓ http://coder-server:7080    (container name)
 # ✓ http://gitea:3000           (container name)
-# ✓ http://ai-gateway:8090      (container name)
+# ✓ http://litellm:4000          (container name)
 # ✗ http://localhost:7080       (won't work)
 ```
 
@@ -299,8 +314,8 @@ Containers on the same Docker network can reach each other by container name:
 
 | Setting | Used By | Recommended Value |
 |---------|---------|-------------------|
-| `CODER_ACCESS_URL` | Agent downloads, API calls | `http://host.docker.internal:7080` |
-| `CODER_WILDCARD_ACCESS_URL` | Subdomain app routing | `http://*.host.docker.internal:7080` (if using subdomains) |
+| `CODER_ACCESS_URL` | Agent downloads, API calls, browser | `https://host.docker.internal:7443` |
+| `CODER_WILDCARD_ACCESS_URL` | Subdomain app routing | `https://*.host.docker.internal:7443` (if using subdomains) |
 
 #### Agent Connection Flow
 
@@ -325,7 +340,7 @@ docker logs <workspace-container> 2>&1 | tail -20
 **Fix:**
 ```bash
 # Update docker-compose.yml
-CODER_ACCESS_URL: "http://host.docker.internal:7080"
+CODER_ACCESS_URL: "https://host.docker.internal:7443"
 
 # Restart Coder
 docker compose up -d coder
@@ -501,7 +516,9 @@ check "Coder" "http://localhost:7080/api/v2/buildinfo"
 check "Gitea" "http://localhost:3000/"
 check "Authentik" "http://localhost:9000/-/health/ready/"
 check "MinIO Console" "http://localhost:9001/"
-check "AI Gateway" "http://localhost:8090/health"
+check "LiteLLM" "http://localhost:4000/health/readiness"
+check "Key Provisioner" "http://localhost:8100/health"
+check "Platform Admin" "http://localhost:5050/health"
 check "Mailpit" "http://localhost:8025/"
 
 echo "=== Done ==="
