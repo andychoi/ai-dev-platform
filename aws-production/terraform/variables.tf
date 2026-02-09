@@ -59,6 +59,28 @@ variable "key_provisioner_image" {
 }
 
 # -----------------------------------------------------------------------------
+# Docker-Enabled Workspaces (EC2 Capacity Provider)
+# -----------------------------------------------------------------------------
+
+variable "enable_docker_workspaces" {
+  description = "Enable EC2 capacity provider for Docker-enabled workspaces. Adds an ASG that scales to zero when idle."
+  type        = bool
+  default     = false
+}
+
+variable "docker_instance_type" {
+  description = "EC2 instance type for Docker-enabled workspaces"
+  type        = string
+  default     = "t3.medium"
+}
+
+variable "docker_max_instances" {
+  description = "Maximum EC2 instances for Docker workspaces (ASG max_size)"
+  type        = number
+  default     = 3
+}
+
+# -----------------------------------------------------------------------------
 # RDS
 # -----------------------------------------------------------------------------
 

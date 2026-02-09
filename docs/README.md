@@ -57,6 +57,7 @@ Original project development lifecycle documents. See [poc-planning/README.md](p
 |----------|-------------|
 | [runbook.md](../coder-poc/docs/runbook.md) | Operations guide and troubleshooting |
 | [ADMIN-HOWTO.md](../coder-poc/docs/ADMIN-HOWTO.md) | Admin procedures (templates, TLS, AI models, users) |
+| [DOCKER-DEV.md](../coder-poc/docs/DOCKER-DEV.md) | Docker-in-workspace options, access control, mixed ECS architecture |
 | [HTTPS.md](../coder-poc/docs/HTTPS.md) | TLS architecture, Traefik evaluation, traffic flows |
 | [AUTHENTIK-SSO.md](../coder-poc/docs/AUTHENTIK-SSO.md) | SSO configuration with Authentik |
 | [INFRA.md](../coder-poc/docs/INFRA.md) | Infrastructure and service details |
@@ -79,12 +80,14 @@ Original project development lifecycle documents. See [poc-planning/README.md](p
 | TLS | Self-signed cert (port 7443) | CA-signed certs (ACM + ALB) |
 | Network | Docker bridge + iptables egress | VPC + Security Groups |
 | AI Keys | Key-provisioner + scoped virtual keys | Same (on ECS) |
+| Docker Dev | Rootless DinD sidecar | Mixed Fargate + EC2 capacity provider |
+| Docker Access | Terraform group precondition | Precondition + ECS init container |
 
 ## Update History
 
 | Date | Description |
 |------|-------------|
-| 2026-02-08 | Added HTTPS.md, CLAUDE-CODE-LITELLM.md; updated PoC vs Production table (Azure AD, ECS) |
+| 2026-02-08 | Added Docker workspace template (PoC + production), access control (group precondition + ECS init container), mixed Fargate+EC2 architecture, ecs-ec2-docker Terraform module, testing scripts |
 | 2026-02-07 | Reorganized: renamed docs/ai/ to docs/poc-planning/, added new docs to index, fixed TLS status |
 | 2026-02-05 | Documentation refresh - aligned with current codebase |
 | 2026-02-04 | Initial comprehensive documentation |

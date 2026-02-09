@@ -18,6 +18,12 @@ variable "service_discovery_domain" {
   default     = "coder.internal"
 }
 
+variable "additional_capacity_providers" {
+  description = "Additional capacity provider names to register on the cluster (e.g., EC2 Docker provider)."
+  type        = list(string)
+  default     = []
+}
+
 variable "tags" {
   description = "Common tags applied to all resources."
   type        = map(string)

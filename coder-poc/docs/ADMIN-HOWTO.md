@@ -123,12 +123,25 @@ Templates are `.tf` files — **not YAML**. There is no web-based template edito
 ### Template File Structure
 
 ```
-templates/contractor-workspace/
-  main.tf               # Everything: providers, parameters, resources, agent, apps
-  build/
-    Dockerfile          # Base image with tools, extensions, system config
-    settings.json       # VS Code settings (AI, extensions, UI preferences)
+templates/
+  python-workspace/       # Standard Python workspace (no Docker)
+    main.tf
+    build/Dockerfile
+  nodejs-workspace/       # Standard Node.js workspace (no Docker)
+    main.tf
+    build/Dockerfile
+  java-workspace/         # Standard Java workspace (no Docker)
+    main.tf
+    build/Dockerfile
+  dotnet-workspace/       # Standard .NET workspace (no Docker)
+    main.tf
+    build/Dockerfile
+  docker-workspace/       # Docker-enabled (rootless DinD sidecar)
+    main.tf               # Includes access control precondition
+    build/Dockerfile      # Extends python-workspace + Docker CLI
 ```
+
+> **Docker workspace access control:** The `docker-workspace` template checks `docker-users` group membership at creation time. See [Docker Workspace Access](#docker-workspace-access-docker-users-group) in Section 6.
 
 ### Viewing the Current Template
 
@@ -452,6 +465,45 @@ When using OIDC/SSO (Authentik), users are created automatically on first login.
 | Template Admin | Manage templates, view all workspaces |
 | Member | Create/manage own workspaces only |
 | Auditor | View audit logs only |
+
+### Docker Workspace Access (docker-users Group)
+
+The Docker-enabled workspace template requires membership in the `docker-users` group. This is enforced in the template via Terraform precondition — Coder OSS has no template ACLs.
+
+**Grant Docker workspace access:**
+
+1. **Authentik Admin** → Directory → Groups → `docker-users`
+2. Click **Add existing user** → select the user
+3. Tell the user to **log out and log back in** (group changes sync on OIDC login via `CODER_OIDC_GROUP_AUTO_CREATE=true`)
+4. User can now create workspaces from the `docker-workspace` template
+
+**Create the docker-users group (first-time setup):**
+
+1. **Authentik Admin** → Directory → Groups → **Create Group**
+2. Name: `docker-users`
+3. No special attributes needed — it's just a membership group
+4. Ensure the group appears in the OIDC `groups` claim (already configured — Authentik includes all user groups by default)
+
+**Revoke Docker workspace access:**
+
+1. **Authentik Admin** → Directory → Groups → `docker-users`
+2. Remove the user from the group
+3. User must log out and back in for the change to take effect
+4. Existing Docker workspaces continue running — delete them manually if needed
+
+**Verify group membership (via Coder API):**
+
+```bash
+# Check a user's groups
+curl -sf http://localhost:7080/api/v2/users/{username} \
+  -H "Coder-Session-Token: $ADMIN_TOKEN" | jq '.organization_ids, .roles'
+
+# Or check from the template perspective (when user creates a workspace):
+# The template logs: "Your groups: [\"docker-users\", ...]"
+# Visible in Coder workspace build logs
+```
+
+> **See also:** [DOCKER-DEV.md Section 17](DOCKER-DEV.md#17-access-control-docker-workspace-authorization) for the full layered authorization architecture.
 
 ### Identity Consistency
 

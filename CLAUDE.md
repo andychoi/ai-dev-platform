@@ -20,6 +20,7 @@ Claude should look up details in these files rather than relying on this summary
 |----------|-------------------|
 | [runbook.md](coder-poc/docs/runbook.md) | Service lifecycle, troubleshooting, environment setup |
 | [ADMIN-HOWTO.md](coder-poc/docs/ADMIN-HOWTO.md) | Template management, TLS, AI models, user management |
+| [DOCKER-DEV.md](coder-poc/docs/DOCKER-DEV.md) | Docker-in-workspace options, DinD, security analysis |
 | [HTTPS.md](coder-poc/docs/HTTPS.md) | TLS architecture decisions, Traefik evaluation, traffic flows |
 | [INFRA.md](coder-poc/docs/INFRA.md) | Infrastructure details, service configuration |
 | [AUTHENTIK-SSO.md](coder-poc/docs/AUTHENTIK-SSO.md) | OIDC provider setup, redirect URIs, user provisioning |
@@ -146,6 +147,24 @@ See coder-poc/docs/runbook.md → Troubleshooting → Workspace & Agent Issues.
 
 ---
 
+### Docker Workspace Access Rule
+
+Docker-enabled workspaces require the user to be in the `docker-users` group (Authentik/Azure AD). This is enforced at two layers:
+
+1. **Terraform precondition** — `data.coder_workspace_owner.me.groups` must contain `docker-users`
+2. **ECS init container** (production only) — calls authorization service before task starts
+
+Coder OSS has no template ACLs, so this group check is the only access control for templates.
+
+Key facts:
+- Group changes take effect after the user logs out and back in (OIDC sync)
+- Existing Docker workspaces are NOT affected when a user is removed from the group
+- The init container is fail-closed: if the auth service is unreachable, the workspace is blocked
+
+See coder-poc/docs/DOCKER-DEV.md Sections 17-18.
+
+---
+
 ### LiteLLM API Key Rule (AI Critical)
 
 LiteLLM is a **proxy**, not a model provider.
@@ -238,6 +257,10 @@ See shared/docs/AI.md Section 12 and shared/docs/ROO-CODE-LITELLM.md Section 7.
 - Using Roo Cloud auth when LiteLLM is the provider
 - Bypassing key-provisioner to call LiteLLM admin endpoints from workspaces
 - Assuming changing the `ai_enforcement_level` template parameter updates existing keys (it does not — key rotation or workspace recreation is required)
+- Mounting host Docker socket into workspaces (allows container escape — use rootless DinD sidecar)
+- Using `--privileged` DinD when rootless DinD works (unnecessary privilege escalation)
+- Running Docker workspaces on Fargate (impossible — Fargate has no nested container support)
+- Skipping the `docker-users` group check (Coder OSS has no template ACLs — the group precondition is the only access control)
 
 ---
 

@@ -1,0 +1,6 @@
+# Auth-check init container — minimal image for authorization validation
+# Used as ECS init container (essential=false, dependsOn=SUCCESS)
+FROM alpine:3.19
+RUN apk add --no-cache curl
+COPY --chmod=755 auth-check.sh /auth-check.sh
+ENTRYPOINT ["/auth-check.sh"]

@@ -386,72 +386,183 @@ See [AI.md Section 12](AI.md#12-design-first-ai-enforcement-layer) for the full 
 
 ## 5. Git & Version Control
 
-### Q: How do I clone a repository?
+### Q: What Git URL do I use to clone a repo?
 
-**A:** In the terminal:
+**A:** It depends on **where you are running the command**:
+
+| Where | Git URL | Why |
+|-------|---------|-----|
+| **Inside a workspace** (terminal) | `http://gitea:3000/org/repo.git` | `gitea` is the Docker network hostname |
+| **From your host machine** | `http://localhost:3000/org/repo.git` | `localhost:3000` is mapped to the Gitea container |
+| **From a browser** | `http://localhost:3000` | Browse repos, manage settings |
+
+**Common mistake:** Using `localhost` inside a workspace. Inside a container, `localhost` means the container itself — Gitea isn't running there. Always use `gitea:3000` from workspace terminals.
+
 ```bash
-# Using the Git server
-git clone http://gitea:3000/username/repository.git
+# WRONG (inside workspace) — "Connection refused"
+git clone http://localhost:3000/gitea/python-sample.git
 
-# Enter credentials when prompted
-```
+# CORRECT (inside workspace)
+git clone http://gitea:3000/gitea/python-sample.git
 
-Or specify credentials inline:
-```bash
-git clone http://username:password@gitea:3000/username/repository.git
+# ALSO WORKS (inside workspace) — but takes a roundabout path via host
+git clone http://host.docker.internal:3000/gitea/python-sample.git
 ```
 
 ---
 
-### Q: How do I configure Git credentials?
+### Q: Why does `git push` fail with "Unauthorized" or "Authentication failed"?
 
-**A:** You have two options:
+**A:** HTTP push to Gitea requires credentials. Clone may work for public repos without auth, but push always needs it.
 
-**Option 1: One-time setup**
+**Fix — embed credentials in the remote URL:**
+
+```bash
+# cd into your cloned repo first!
+cd ~/python-sample
+
+# Set remote with credentials
+git remote set-url origin http://contractor1:password123@gitea:3000/gitea/python-sample.git
+
+# Now push works
+git push origin main
+```
+
+**Or use the credential helper** (saves credentials after first prompt):
+
 ```bash
 git config --global credential.helper store
-git clone http://gitea:3000/user/repo.git
-# Enter credentials once - they'll be saved
+git push origin main
+# Enter username: contractor1
+# Enter password: password123
+# Credentials are saved for future pushes
 ```
 
-**Option 2: Set during workspace creation**
-- Enter Git username/password in workspace parameters
-- Credentials are configured automatically
+> **Tip:** If you're unsure of your Gitea password, check with your admin or see the test user table in this FAQ's "Getting Started" section.
 
 ---
 
-### Q: How do I push changes?
+### Q: I get "fatal: not a git repository" — what's wrong?
 
-**A:**
+**A:** You're running a git command outside a cloned repo. You need to `cd` into the repo directory first.
+
 ```bash
-# Stage changes
+# See what's in your home directory
+ls ~/
+
+# If you cloned python-sample, it'll be in a subfolder
+cd ~/python-sample
+
+# Now git commands work
+git status
+git remote -v
+```
+
+If you're not sure where you cloned it:
+
+```bash
+# Search for git repos
+find /home/coder -name ".git" -type d 2>/dev/null
+```
+
+---
+
+### Q: How do I clone a repo and push changes (full workflow)?
+
+**A:** Complete example from inside a workspace terminal:
+
+```bash
+# 1. Clone (use gitea:3000, NOT localhost)
+git clone http://contractor1:password123@gitea:3000/gitea/python-sample.git
+cd python-sample
+
+# 2. Make changes
+echo "# My change" >> README.md
+
+# 3. Configure git identity (first time only)
+git config --global user.name "Contractor One"
+git config --global user.email "contractor1@example.com"
+
+# 4. Commit
 git add .
+git commit -m "Update README"
 
-# Commit
-git commit -m "Your commit message"
-
-# Push
+# 5. Push
 git push origin main
 ```
 
 ---
 
-### Q: I can't push - permission denied!
+### Q: Can I use SSH for Git instead of HTTP?
 
-**A:** Check:
-1. You have write access to the repository
-2. Your credentials are correct
-3. You're pushing to the right branch
+**A:** Yes, Gitea SSH is available on port 10022 (remapped from 22):
 
-Contact your admin if issues persist.
+```bash
+# From inside workspace
+git clone ssh://git@gitea:22/gitea/python-sample.git
+
+# From host machine
+git clone ssh://git@localhost:10022/gitea/python-sample.git
+```
+
+You'll need to add your SSH public key in Gitea: `http://localhost:3000/user/settings/keys`.
 
 ---
 
-### Q: Where is the Git server?
+### Q: Where is the Git server? How do I browse repos?
 
-**A:** The internal Git server is at:
-- Web UI: `http://localhost:3000` (or provided URL)
-- Clone URL: `http://gitea:3000/username/repo.git` (from workspace)
+**A:**
+
+| Access | URL | Notes |
+|--------|-----|-------|
+| Web UI (from browser) | `http://localhost:3000` | Browse repos, manage settings, create tokens |
+| Git HTTP (from workspace) | `http://gitea:3000` | Clone/push/pull |
+| Git SSH (from workspace) | `ssh://git@gitea:22` | SSH clone/push |
+| Git HTTP (from host) | `http://localhost:3000` | Clone/push from host terminal |
+| Git SSH (from host) | `ssh://git@localhost:10022` | SSH from host |
+
+---
+
+### Q: How do I configure Git credentials permanently?
+
+**A:** Three options, from simplest to most secure:
+
+**Option 1: Credential helper store** (saves plaintext in `~/.git-credentials`)
+```bash
+git config --global credential.helper store
+# Next push will prompt once, then credentials are saved
+```
+
+**Option 2: Embed in remote URL** (visible in `git remote -v`)
+```bash
+git remote set-url origin http://user:pass@gitea:3000/org/repo.git
+```
+
+**Option 3: Gitea access token** (recommended for automation)
+1. Go to `http://localhost:3000/user/settings/applications`
+2. Create a new token with repo permissions
+3. Use the token as the password:
+```bash
+git remote set-url origin http://contractor1:YOUR_TOKEN@gitea:3000/org/repo.git
+```
+
+---
+
+### Q: `host.docker.internal` works but `localhost` doesn't (or vice versa) — why?
+
+**A:** These names resolve differently depending on where you are:
+
+| Name | Inside a container | On host machine |
+|------|--------------------|-----------------|
+| `localhost` | The container itself | The host machine |
+| `host.docker.internal` | The host machine | The host machine (if `/etc/hosts` configured) |
+| `gitea` | The Gitea container | Does NOT resolve |
+| `coder-server` | The Coder container | Does NOT resolve |
+
+**Rule of thumb:**
+- **Inside workspace terminal:** use container names (`gitea:3000`, `litellm:4000`)
+- **On your host / in browser:** use `localhost:PORT`
+- **For Coder specifically:** use `https://host.docker.internal:7443` (OIDC cookies require it)
 
 ---
 

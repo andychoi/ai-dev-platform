@@ -44,10 +44,11 @@ module "vpc" {
 module "ecs" {
   source = "./modules/ecs"
 
-  name_prefix              = local.name_prefix
-  vpc_id                   = module.vpc.vpc_id
-  service_discovery_domain = "${local.name_prefix}.local"
-  tags                     = var.tags
+  name_prefix                    = local.name_prefix
+  vpc_id                         = module.vpc.vpc_id
+  service_discovery_domain       = "${local.name_prefix}.local"
+  additional_capacity_providers  = var.enable_docker_workspaces ? [module.ecs_ec2_docker[0].capacity_provider_name] : []
+  tags                           = var.tags
 }
 
 module "alb" {
@@ -139,6 +140,26 @@ module "iam" {
   s3_bucket_arns     = module.s3.bucket_arns
   aws_region         = var.aws_region
   tags               = var.tags
+}
+
+# -----------------------------------------------------------------------------
+# Phase 1b: EC2 Capacity for Docker-Enabled Workspaces (Optional)
+# Enable by setting enable_docker_workspaces = true
+# Adds EC2 Auto Scaling Group that scales to zero when idle
+# -----------------------------------------------------------------------------
+
+module "ecs_ec2_docker" {
+  source = "./modules/ecs-ec2-docker"
+  count  = var.enable_docker_workspaces ? 1 : 0
+
+  name_prefix                = local.name_prefix
+  vpc_id                     = module.vpc.vpc_id
+  subnet_ids                 = module.vpc.private_app_subnet_ids
+  ecs_cluster_name           = module.ecs.cluster_name
+  instance_type              = var.docker_instance_type
+  max_instances              = var.docker_max_instances
+  allowed_security_group_ids = [module.alb.alb_security_group_id, aws_security_group.ecs_services.id]
+  tags                       = var.tags
 }
 
 # -----------------------------------------------------------------------------
