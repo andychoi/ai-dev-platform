@@ -132,11 +132,12 @@ echo -e "${BLUE}4. Template Tests${NC}"
 echo "   ───────────────"
 
 if [ "$CLI_AUTH" = true ]; then
-    # Test 4.1: Template exists
-    run_test "contractor-workspace template exists" "coder templates list | grep -q contractor-workspace"
+    # Test 4.1: Template exists (python or java)
+    run_test "python-workspace template exists" "coder templates list | grep -q python-workspace"
+    run_test "java-workspace template exists" "coder templates list | grep -q java-workspace"
 
     # Test 4.2: Template has versions
-    run_test "Template has active version" "coder templates versions list contractor-workspace 2>/dev/null | grep -q active"
+    run_test "Template has active version" "coder templates versions list python-workspace 2>/dev/null | grep -q active"
 else
     skip_test "Template tests" "CLI not authenticated"
 fi
@@ -154,7 +155,7 @@ WORKSPACE_CREATED=false
 if [ "$CLI_AUTH" = true ]; then
     # Test 5.1: Create workspace
     echo -n "  Testing: Create test workspace... "
-    if coder create "$TEST_WORKSPACE_NAME" --template contractor-workspace \
+    if coder create "$TEST_WORKSPACE_NAME" --template python-workspace \
         --parameter cpu_cores=2 \
         --parameter memory_gb=4 \
         --parameter disk_size=10 \

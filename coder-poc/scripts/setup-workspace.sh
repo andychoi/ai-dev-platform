@@ -27,13 +27,14 @@ ADMIN_PASSWORD="${CODER_ADMIN_PASSWORD:-CoderAdmin123!}"
 BASE_IMAGE_DIR="${POC_DIR}/templates/workspace-base/build"
 
 # Templates to set up: "name:directory:image" triplets
-# All discovered templates are deployed automatically
+# Default: Python and Java only. Add more entries to deploy additional templates.
 TEMPLATES=()
 [ -d "${POC_DIR}/templates/python-workspace" ] && TEMPLATES+=("python-workspace:python-workspace:python-workspace")
-[ -d "${POC_DIR}/templates/nodejs-workspace" ] && TEMPLATES+=("nodejs-workspace:nodejs-workspace:nodejs-workspace")
 [ -d "${POC_DIR}/templates/java-workspace" ] && TEMPLATES+=("java-workspace:java-workspace:java-workspace")
-[ -d "${POC_DIR}/templates/dotnet-workspace" ] && TEMPLATES+=("dotnet-workspace:dotnet-workspace:dotnet-workspace")
-[ -d "${POC_DIR}/templates/docker-workspace" ] && TEMPLATES+=("docker-workspace:docker-workspace:docker-workspace")
+# Uncomment to deploy additional templates:
+# [ -d "${POC_DIR}/templates/nodejs-workspace" ] && TEMPLATES+=("nodejs-workspace:nodejs-workspace:nodejs-workspace")
+# [ -d "${POC_DIR}/templates/dotnet-workspace" ] && TEMPLATES+=("dotnet-workspace:dotnet-workspace:dotnet-workspace")
+# [ -d "${POC_DIR}/templates/docker-workspace" ] && TEMPLATES+=("docker-workspace:docker-workspace:docker-workspace")
 
 # =============================================================================
 # Helper Functions
@@ -245,7 +246,7 @@ echo "  2. Login via OIDC or local account"
 echo "  3. Click 'Create Workspace'"
 echo "  4. Select a template and configure workspace options:"
 echo "     - AI Assistant: 'All Agents' (Roo Code + OpenCode + Claude Code) or pick one"
-echo "     - Default LLM: pick a model (bedrock-claude-haiku is cheapest)"
+echo "     - Default LLM: pick a model (gemma3 is local/free, claude-haiku-4-5 for cloud)"
 echo "     - AI key is auto-provisioned on first start (no manual paste needed)"
 echo "  5. Once workspace is running:"
 echo "     - Web IDE (Roo Code): click 'code-server' in the workspace toolbar"

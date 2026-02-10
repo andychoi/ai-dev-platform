@@ -219,12 +219,14 @@ if [ "${1:-}" == "--images" ] || [ "${2:-}" == "--images" ] || [ "${1:-}" == "--
         fi
     done
 
-    # Remove workspace images
-    WORKSPACE_IMAGES=$(docker images --filter "reference=*contractor-workspace*" -q 2>/dev/null || true)
-    if [ -n "$WORKSPACE_IMAGES" ]; then
-        docker rmi $WORKSPACE_IMAGES 2>/dev/null || true
-        print_status "Workspace images removed"
-    fi
+    # Remove workspace images (all language templates)
+    for ws_img in python-workspace java-workspace nodejs-workspace dotnet-workspace docker-workspace workspace-base contractor-workspace; do
+        WS_IMG_IDS=$(docker images --filter "reference=*${ws_img}*" -q 2>/dev/null || true)
+        if [ -n "$WS_IMG_IDS" ]; then
+            docker rmi $WS_IMG_IDS 2>/dev/null || true
+            print_status "Removed image: $ws_img"
+        fi
+    done
 
     # Remove old AI gateway image (deprecated, replaced by LiteLLM)
     AI_GATEWAY_IMAGES=$(docker images --filter "reference=*ai-gateway*" -q 2>/dev/null || true)

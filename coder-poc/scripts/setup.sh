@@ -448,8 +448,8 @@ print_summary() {
     echo -e "${BLUE}Next Steps:${NC}"
     echo "  1. Open https://host.docker.internal:7443 in your browser (accept cert warning)"
     echo "  2. Login via OIDC (Authentik)"
-    echo "  3. Create a workspace from 'contractor-workspace' template"
-    echo "     - Paste the user's LiteLLM key into the 'LiteLLM API Key' field"
+    echo "  3. Create a workspace from 'python-workspace' or 'java-workspace' template"
+    echo "     - AI key is auto-provisioned on first start (no manual paste needed)"
     echo "  4. Click 'code-server' to open VS Code in browser"
     echo "  5. Open Roo Code (sidebar icon) — AI chat should work immediately"
 
