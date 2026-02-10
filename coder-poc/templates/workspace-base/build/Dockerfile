@@ -54,6 +54,11 @@ RUN curl -fsSL https://code-server.dev/install.sh | sh -s -- --version 4.108.2
 # Installed as root so binary lands in /usr/bin/claude (system PATH)
 RUN npm install -g @anthropic-ai/claude-code
 
+# Ollama CLI — local model inference client (connects to host Mac's Ollama server)
+# zstd required for Ollama's compressed archive extraction
+RUN apt-get update && apt-get install -y zstd && rm -rf /var/lib/apt/lists/* \
+    && curl -fsSL https://ollama.com/install.sh | sh
+
 # NOTE: Coder CLI intentionally NOT installed (484 MB) — agent is injected at runtime
 
 # Install database tools

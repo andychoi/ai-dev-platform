@@ -404,6 +404,8 @@ resource "coder_agent" "main" {
     # Requires: launchctl setenv OLLAMA_HOST "0.0.0.0" on host Mac + restart Ollama
     ANTHROPIC_BASE_URL  = "http://host.docker.internal:11434"
     ANTHROPIC_AUTH_TOKEN = "ollama"
+    # Claude Code: Disable auto-update (immutable container image — versions pinned at build time)
+    CLAUDE_CODE_DISABLE_AUTOUPDATE = "1"
   }
 
   # Startup script runs when workspace starts

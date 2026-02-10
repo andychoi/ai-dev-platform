@@ -16,10 +16,6 @@ RUN apt-get update && apt-get install -y \
     && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 \
     && update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
 
-# Install Ollama for local model inference (zstd required for archive extraction)
-RUN apt-get update && apt-get install -y zstd && rm -rf /var/lib/apt/lists/* \
-    && curl -fsSL https://ollama.com/install.sh | sh
-
 USER coder
 
 # Common Python packages
