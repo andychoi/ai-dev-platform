@@ -7,10 +7,10 @@ model_list:
   # Ollama runs on the host machine; containers reach it via host.docker.internal
   # ==========================================================================
 
-  # GLM-4.7 — default local model with tool use support (local, no API key needed)
+  # GLM-4.7 Flash — default local model with tool use support (local, no API key needed)
   - model_name: glm-4.7
     litellm_params:
-      model: ollama_chat/glm-4.7
+      model: ollama_chat/glm-4.7-flash
       api_base: http://host.docker.internal:11434
     model_info:
       max_tokens: 8192
