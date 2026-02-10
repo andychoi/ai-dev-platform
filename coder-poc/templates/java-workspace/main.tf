@@ -204,13 +204,13 @@ data "coder_parameter" "ai_model" {
   display_name = "AI Model"
   description  = "Select the AI model for chat and code assistance"
   type         = "string"
-  default      = "gemma3"
+  default      = "glm-4.7"
   mutable      = true
   icon         = "/icon/widgets.svg"
 
   option {
-    name  = "Gemma 3 12B (Local, Default)"
-    value = "gemma3"
+    name  = "GLM-4.7 (Local, Default)"
+    value = "glm-4.7"
   }
   option {
     name  = "Claude Sonnet 4.5 (Balanced)"
@@ -486,13 +486,13 @@ password=${data.coder_parameter.git_password.value}
     if [ "$AI_ASSISTANT" != "none" ]; then
       # Determine model name for LiteLLM
       case "$AI_MODEL" in
-        "gemma3")                LITELLM_MODEL="gemma3" ;;
+        "glm-4.7")              LITELLM_MODEL="glm-4.7" ;;
         "claude-sonnet")         LITELLM_MODEL="claude-sonnet-4-5" ;;
         "claude-haiku")          LITELLM_MODEL="claude-haiku-4-5" ;;
         "claude-opus")           LITELLM_MODEL="claude-opus-4" ;;
         "bedrock-claude-sonnet") LITELLM_MODEL="bedrock-claude-sonnet" ;;
         "bedrock-claude-haiku")  LITELLM_MODEL="bedrock-claude-haiku" ;;
-        *)                       LITELLM_MODEL="gemma3" ;;
+        *)                       LITELLM_MODEL="glm-4.7" ;;
       esac
 
       # Auto-provision key if not provided
@@ -665,7 +665,7 @@ ENFORCEMENTMD
         "apiKey": "$LITELLM_KEY"
       },
       "models": {
-        "gemma3": { "name": "Gemma 3 12B (Local)" },
+        "glm-4.7": { "name": "GLM-4.7 (Local)" },
         "claude-sonnet-4-5": { "name": "Claude Sonnet 4.5" },
         "claude-haiku-4-5": { "name": "Claude Haiku 4.5" },
         "claude-opus-4": { "name": "Claude Opus 4" },
@@ -675,7 +675,7 @@ ENFORCEMENTMD
     }
   },
   "model": "litellm/$LITELLM_MODEL",
-  "small_model": "litellm/gemma3"
+  "small_model": "litellm/glm-4.7"
 }
 OPENCODECONFIG
             echo "OpenCode configured: model=litellm/$LITELLM_MODEL enforcement=$ENFORCEMENT_LEVEL"

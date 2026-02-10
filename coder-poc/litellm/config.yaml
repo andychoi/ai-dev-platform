@@ -7,10 +7,10 @@ model_list:
   # Ollama runs on the host machine; containers reach it via host.docker.internal
   # ==========================================================================
 
-  # Gemma 3 12B — default general-purpose model (local, no API key needed)
-  - model_name: gemma3
+  # GLM-4.7 — default local model with tool use support (local, no API key needed)
+  - model_name: glm-4.7
     litellm_params:
-      model: ollama_chat/gemma3:12b
+      model: ollama_chat/glm-4.7
       api_base: http://host.docker.internal:11434
     model_info:
       max_tokens: 8192
