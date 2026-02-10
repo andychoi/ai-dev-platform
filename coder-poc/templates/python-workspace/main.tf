@@ -400,12 +400,11 @@ resource "coder_agent" "main" {
   # Disable devcontainer detection (requires Docker-in-Docker which we don't support)
   env = {
     CODER_AGENT_DEVCONTAINERS_ENABLE = "false"
-    # Ollama: Route Claude Code CLI to host Mac's Ollama server (GPU-accelerated)
-    # Requires: launchctl setenv OLLAMA_HOST "0.0.0.0" on host Mac + restart Ollama
-    ANTHROPIC_BASE_URL  = "http://host.docker.internal:11434"
-    ANTHROPIC_AUTH_TOKEN = "ollama"
     # Claude Code: Disable auto-update (immutable container image — versions pinned at build time)
     CLAUDE_CODE_DISABLE_AUTOUPDATE = "1"
+    # Claude Code uses Anthropic Enterprise native auth (per-seat).
+    # Run `claude login` on first use. Tokens persist in ~/.claude/.
+    # Aliases: claude-litellm (governed), claude-local (Ollama)
   }
 
   # Startup script runs when workspace starts
@@ -739,14 +738,14 @@ alias ai-models="echo 'Agent: $AI_ASSISTANT, Model: $LITELLM_MODEL, Gateway: lit
 alias ai-usage="curl -s http://litellm:4000/user/info -H 'Authorization: Bearer $LITELLM_KEY' | python3 -m json.tool"
 AICONFIG
 
-        # Claude Code CLI environment (Ollama on host Mac)
+        # Claude Code CLI environment (Anthropic Enterprise native auth)
         if [ "$AI_ASSISTANT" = "claude-code" ] || [ "$AI_ASSISTANT" = "all" ]; then
           cat >> ~/.bashrc << CLAUDEENV
-# Claude Code CLI (Ollama on host Mac — GPU-accelerated)
-export ANTHROPIC_BASE_URL="http://host.docker.internal:11434"
-export ANTHROPIC_AUTH_TOKEN="ollama"
-# Governed route via LiteLLM (budget tracking, guardrails, audit)
-alias claude-litellm='ANTHROPIC_BASE_URL="http://litellm:4000/anthropic" ANTHROPIC_API_KEY="$OPENAI_API_KEY" ANTHROPIC_AUTH_TOKEN="" claude'
+# Claude Code CLI (Anthropic Enterprise — native auth)
+# Run 'claude login' on first use. Tokens persist across restarts.
+# Alternatives: claude-litellm (governed), claude-local (Ollama on host Mac)
+alias claude-litellm='ANTHROPIC_BASE_URL="http://litellm:4000/anthropic" ANTHROPIC_API_KEY="\$OPENAI_API_KEY" ANTHROPIC_AUTH_TOKEN="" claude'
+alias claude-local='ANTHROPIC_BASE_URL="http://host.docker.internal:11434" ANTHROPIC_AUTH_TOKEN="ollama" claude'
 CLAUDEENV
         fi
         echo "AI environment configured: gateway=litellm:4000"
@@ -862,7 +861,8 @@ OLLAMACONFIG
     echo "AI Behavior: $${ENFORCEMENT_LEVEL}"
     echo "Ollama: host.docker.internal:11434 (host Mac)"
     if [ "$AI_ASSISTANT" = "claude-code" ] || [ "$AI_ASSISTANT" = "all" ]; then
-      echo "Claude Code: litellm:4000/anthropic (Anthropic pass-through)"
+      echo "Claude Code: Anthropic Enterprise (run 'claude login' on first use)"
+      echo "  Alternatives: claude-litellm (governed), claude-local (Ollama)"
     fi
     if [ "$DB_TYPE" != "none" ]; then
       echo "Database: $${DEVDB_NAME:-not provisioned} (type: $DB_TYPE)"

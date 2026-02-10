@@ -274,17 +274,19 @@ Note: Language-level packages persist in your workspace (installed under `/home/
 - Claude Code is Anthropic's native CLI — it plans before coding, asks for confirmation, and follows structured workflows
 - Best for complex multi-file tasks, refactoring, and codebase exploration
 
-All three agents share your auto-provisioned LiteLLM virtual key (same budget, same audit trail).
+Roo Code and OpenCode share your auto-provisioned LiteLLM virtual key (same budget, same audit trail). Claude Code uses Anthropic Enterprise native auth — run `claude login` on first use.
 
-> **Note:** The built-in Coder Chat, GitHub Copilot, and Cody are all disabled. Roo Code, OpenCode, and Claude Code are the only AI interfaces, and all route requests through the platform's centralized LiteLLM proxy for auditing and cost control.
+> **Note:** The built-in Coder Chat, GitHub Copilot, and Cody are all disabled. Roo Code, OpenCode, and Claude Code are the only AI interfaces. Roo Code and OpenCode route through the platform's centralized LiteLLM proxy for auditing and cost control. Claude Code uses Anthropic Enterprise directly (governed via Anthropic admin console), with a `claude-litellm` alias available for the governed LiteLLM route.
 
 ---
 
 ### Q: Do I need to sign in or enter an API key for AI features?
 
-**A:** No! When your workspace is created, a personal LiteLLM API key is automatically provisioned for you behind the scenes. Roo Code is pre-configured and works immediately — no sign-in, no key pasting, no setup required.
+**A:** For **Roo Code** and **OpenCode** — no! A personal LiteLLM API key is automatically provisioned when your workspace is created. These tools work immediately.
 
-Your key has per-user budget and rate limits managed by the platform. You can check your usage at any time:
+For **Claude Code CLI** — yes, once. Claude Code uses Anthropic Enterprise native auth (per-seat subscription). On first use, run `claude login` and follow the browser login flow. Your auth token is saved in `~/.claude/` and persists across workspace restarts.
+
+Your LiteLLM key (for Roo Code/OpenCode) has per-user budget and rate limits managed by the platform. You can check your usage at any time:
 
 ```bash
 ai-usage    # Shows your spend, remaining budget, and request count
@@ -448,6 +450,35 @@ Update `~/.bashrc` **inside your Coder workspace** (not your Mac) to point Claud
 > ```
 
 > **Note:** Using Ollama directly bypasses LiteLLM's budget tracking, guardrails, and audit logging. For governed AI usage, use the default LiteLLM route (`http://litellm:4000/anthropic`) instead. This direct-to-Ollama approach is best for local experimentation with open-weight models.
+
+---
+
+### Q: How do I log in to Claude Code with Anthropic Enterprise?
+
+**A:** Claude Code uses Anthropic Enterprise native authentication (per-seat subscription). There are three routes available:
+
+| Route | Command | Auth | Governed? |
+|-------|---------|------|-----------|
+| **Enterprise (default)** | `claude` | `claude login` (first use) | Anthropic admin console |
+| **LiteLLM (governed)** | `claude-litellm` | Auto-provisioned key | Budget, guardrails, audit |
+| **Ollama (PoC only)** | `claude-local` | None | No governance |
+
+**First-time setup:**
+
+```bash
+# Run claude — you'll see "Select login method"
+claude
+
+# Select "Claude account with subscription" (option 1)
+# Follow the browser-based login flow
+# Auth token is saved in ~/.claude/ — persists across restarts
+```
+
+**When to use each route:**
+
+- **`claude`** — Default for most work. Uses your Enterprise seat directly with Anthropic. Full model access, extended thinking, latest features.
+- **`claude-litellm`** — When you need governed AI (budget tracking, content guardrails, audit logging via LiteLLM). Uses your auto-provisioned virtual key.
+- **`claude-local`** — PoC only. Routes to Ollama on your host Mac for offline/GPU-accelerated usage with open-weight models.
 
 ---
 
@@ -728,26 +759,25 @@ Admins may have visibility into all workspaces for support purposes.
 
 ### Q: Claude Code shows "Select login method" prompt!
 
-**A:** This means the `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY` environment variables are not configured. Without these, Claude Code tries to authenticate directly with Anthropic (which is not how this platform works).
+**A:** This is now the **expected behavior** for first-time use. With Anthropic Enterprise, Claude Code uses native authentication instead of LiteLLM pass-through.
 
-**Quick fix** (run in your workspace terminal):
+**What to do:**
 
-```bash
-export ANTHROPIC_BASE_URL="http://litellm:4000/anthropic"
-export ANTHROPIC_API_KEY="$OPENAI_API_KEY"
-claude
-```
+1. Select **"Claude account with subscription"** (option 1)
+2. Follow the browser-based login flow
+3. Your auth token is saved in `~/.claude/` and persists across workspace restarts
 
-To make it permanent (survives terminal restarts):
+**Alternative routes** (available as aliases in your terminal):
 
 ```bash
-echo 'export ANTHROPIC_BASE_URL="http://litellm:4000/anthropic"' >> ~/.bashrc
-echo "export ANTHROPIC_API_KEY=\"$OPENAI_API_KEY\"" >> ~/.bashrc
-source ~/.bashrc
-claude
+# Governed route via LiteLLM (budget tracking, guardrails, audit)
+claude-litellm
+
+# Local route via Ollama on host Mac (PoC only)
+claude-local
 ```
 
-**Why this happened:** Your workspace was likely created before Claude Code support was added to the template. The `$OPENAI_API_KEY` is your existing LiteLLM virtual key (shared by all AI agents). For a permanent fix, recreate the workspace from the updated template.
+> **Note:** If you see this prompt and your workspace was created **before** the Enterprise migration, the governed route (`claude-litellm`) still works as a fallback. For the full Enterprise experience, recreate the workspace from the updated template.
 
 ---
 
@@ -1035,8 +1065,8 @@ For a single template manual push, see [ADMIN-HOWTO.md — Pushing a Template to
 ║  ────────────────                                                         ║
 ║  • Roo Code: Click icon in Activity Bar (VS Code sidebar)                 ║
 ║  • OpenCode: Run `opencode` in terminal (TUI agent)                       ║
-║  • Claude Code: Run `claude` in terminal (CLI agent)                      ║
-║  • All share your auto-provisioned LiteLLM key                            ║
+║  • Claude Code: Run `claude` in terminal (Enterprise auth)                ║
+║  • Roo/OpenCode share LiteLLM key; Claude uses Enterprise auth            ║
 ║                                                                            ║
 ║  GIT WORKFLOW                                                             ║
 ║  ────────────                                                             ║
@@ -1065,3 +1095,4 @@ For a single template manual push, see [ADMIN-HOWTO.md — Pushing a Template to
 | 1.3 | 2026-02-07 | Platform Team | Fixed sudo/apt-get section (now restricted), updated credentials to match RBAC doc |
 | 1.4 | 2026-02-09 | Platform Team | Added Claude Code CLI references, updated template push docs, updated Quick Reference |
 | 1.5 | 2026-02-10 | Platform Team | Added Ollama + Claude Code CLI from Coder workspace FAQ |
+| 1.6 | 2026-02-10 | Platform Team | Claude Code Enterprise auth migration — updated login prompt FAQ, added Enterprise login FAQ, updated "Do I need to sign in?" |

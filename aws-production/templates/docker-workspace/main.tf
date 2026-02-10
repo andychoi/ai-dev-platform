@@ -294,6 +294,14 @@ resource "coder_agent" "main" {
       echo "export OPENAI_API_BASE=$LITELLM_URL/v1" >> "$HOME/.bashrc"
       echo "export OPENAI_API_KEY=$LITELLM_KEY" >> "$HOME/.bashrc"
       echo "export AI_MODEL=$LITELLM_MODEL" >> "$HOME/.bashrc"
+
+      # Claude Code CLI (Anthropic Enterprise — native auth)
+      # Run 'claude login' on first use. Tokens persist in ~/.claude/.
+      # Alternative: claude-litellm (governed route via LiteLLM)
+      if [ "$AI_ASSISTANT" = "claude-code" ] || [ "$AI_ASSISTANT" = "all" ]; then
+        echo "alias claude-litellm='ANTHROPIC_BASE_URL=\"$LITELLM_URL/anthropic\" ANTHROPIC_API_KEY=\"\$OPENAI_API_KEY\" ANTHROPIC_AUTH_TOKEN=\"\" claude'" >> "$HOME/.bashrc"
+        echo "# Claude Code: run 'claude login' on first use, then 'claude' to start" >> "$HOME/.bashrc"
+      fi
     fi
 
     echo "=== Docker workspace ready ==="

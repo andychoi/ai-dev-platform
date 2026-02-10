@@ -414,3 +414,4 @@ The workspace `ANTHROPIC_API_KEY` is a **LiteLLM virtual key** (starts with `sk-
 |---------|------|--------|---------|
 | 1.0 | 2026-02-08 | Platform Team | Initial version — Claude Code CLI + LiteLLM integration |
 | 1.1 | 2026-02-09 | Platform Team | Added login prompt troubleshooting, `command not found` fix, env var quick-fix |
+| 1.2 | 2026-02-10 | Platform Team | Anthropic Enterprise auth is now default. LiteLLM pass-through is the governed alternative (`claude-litellm` alias). Templates no longer set `ANTHROPIC_BASE_URL`/`ANTHROPIC_API_KEY` — users run `claude login` for Enterprise auth on first use. |

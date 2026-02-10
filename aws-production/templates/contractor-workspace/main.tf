@@ -423,8 +423,8 @@ OCEOF
         fi
 
         # --- Claude Code CLI configuration ---
-        # Uses Anthropic-native pass-through endpoint (/anthropic/v1/messages)
-        # Claude Code is inherently plan-first, so enforcement hook skips it
+        # Claude Code uses Anthropic Enterprise native auth (per-seat subscription).
+        # Run 'claude login' on first use. Tokens persist in ~/.claude/.
         if ${local.enable_cc}; then
           mkdir -p "$HOME/.claude"
           cat > "$HOME/.claude/settings.json" <<CCEOF
@@ -435,12 +435,10 @@ OCEOF
   }
 }
 CCEOF
-          # Claude Code env vars for LiteLLM Anthropic pass-through
-          echo "export ANTHROPIC_BASE_URL=$LITELLM_URL/anthropic" >> "$HOME/.bashrc"
-          echo "export ANTHROPIC_API_KEY=$LITELLM_KEY" >> "$HOME/.bashrc"
-          echo "export CLAUDE_CODE_USE_BEDROCK=0" >> "$HOME/.bashrc"
-          echo "export ANTHROPIC_MODEL=$ANTHROPIC_MODEL" >> "$HOME/.bashrc"
-          echo "# Claude Code: run 'claude' to start" >> "$HOME/.bashrc"
+          # Claude Code CLI (Anthropic Enterprise — native auth)
+          # Alternative: claude-litellm (governed route via LiteLLM)
+          echo "alias claude-litellm='ANTHROPIC_BASE_URL=\"$LITELLM_URL/anthropic\" ANTHROPIC_API_KEY=\"\$OPENAI_API_KEY\" ANTHROPIC_AUTH_TOKEN=\"\" claude'" >> "$HOME/.bashrc"
+          echo "# Claude Code: run 'claude login' on first use, then 'claude' to start" >> "$HOME/.bashrc"
         fi
 
         # --- Common environment variables ---
