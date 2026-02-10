@@ -45,6 +45,7 @@ Claude should look up details in these files rather than relying on this summary
 | Document | When to Reference |
 |----------|-------------------|
 | [PRODUCTION-PLAN.md](aws-production/PRODUCTION-PLAN.md) | AWS migration: ECS Fargate, RDS, ALB, Azure AD OIDC |
+| [DEPLOY-ENTERPRISE-AUTH.md](aws-production/docs/DEPLOY-ENTERPRISE-AUTH.md) | Claude Code Enterprise auth deployment guide (step-by-step) |
 | `terraform/` | IaC modules (VPC, ECS, RDS, ALB, IAM, S3, Secrets, ElastiCache, EFS) |
 
 ### Claude Skills (`.claude/skills/`)
