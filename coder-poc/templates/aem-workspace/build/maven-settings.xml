@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Maven settings for AEM 6.5 development workspaces.
+
+  - Adobe Public Repository: AEM SDK, uber-jar, and OSGi dependencies
+  - Server credentials: Used by maven-content-package-plugin for
+    autoInstallSinglePackage / autoInstallPackage profiles
+-->
+<settings xmlns="http://maven.apache.org/SETTINGS/1.2.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.2.0
+                              https://maven.apache.org/xsd/settings-1.2.0.xsd">
+
+  <!-- AEM Author/Publisher credentials for content-package deployment -->
+  <servers>
+    <server>
+      <id>aem-author</id>
+      <username>admin</username>
+      <password>admin</password>
+    </server>
+    <server>
+      <id>aem-publisher</id>
+      <username>admin</username>
+      <password>admin</password>
+    </server>
+  </servers>
+
+  <profiles>
+    <profile>
+      <id>adobe-public</id>
+      <activation>
+        <activeByDefault>true</activeByDefault>
+      </activation>
+      <repositories>
+        <repository>
+          <id>adobe-public-releases</id>
+          <name>Adobe Public Repository</name>
+          <url>https://repo.adobe.com/nexus/content/groups/public/</url>
+          <releases>
+            <enabled>true</enabled>
+            <updatePolicy>never</updatePolicy>
+          </releases>
+          <snapshots>
+            <enabled>false</enabled>
+          </snapshots>
+        </repository>
+      </repositories>
+      <pluginRepositories>
+        <pluginRepository>
+          <id>adobe-public-releases</id>
+          <name>Adobe Public Repository</name>
+          <url>https://repo.adobe.com/nexus/content/groups/public/</url>
+          <releases>
+            <enabled>true</enabled>
+            <updatePolicy>never</updatePolicy>
+          </releases>
+          <snapshots>
+            <enabled>false</enabled>
+          </snapshots>
+        </pluginRepository>
+      </pluginRepositories>
+    </profile>
+  </profiles>
+</settings>

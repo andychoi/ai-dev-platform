@@ -1,0 +1,138 @@
+{
+  "editor.fontSize": 12,
+  "editor.fontFamily": "'Fira Code', 'Droid Sans Mono', 'monospace', monospace",
+  "editor.tabSize": 2,
+  "editor.insertSpaces": true,
+  "editor.formatOnSave": true,
+  "editor.formatOnPaste": false,
+  "editor.wordWrap": "on",
+  "editor.minimap.enabled": false,
+  "editor.bracketPairColorization.enabled": true,
+  "editor.guides.bracketPairs": true,
+  "editor.suggestSelection": "first",
+  "editor.acceptSuggestionOnEnter": "on",
+
+  "terminal.integrated.fontSize": 12,
+  "terminal.integrated.cursorStyle": "line",
+  "terminal.integrated.scrollback": 10000,
+
+  "files.autoSave": "afterDelay",
+  "files.autoSaveDelay": 1000,
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true,
+  "files.exclude": {
+    "**/.git": true,
+    "**/.DS_Store": true,
+    "**/node_modules": true,
+    "**/__pycache__": true,
+    "**/.pytest_cache": true,
+    "**/target": true,
+    "**/crx-quickstart/launchpad": true
+  },
+  "files.associations": {
+    "*.htl": "html",
+    "*.content.xml": "xml",
+    ".content.xml": "xml"
+  },
+
+  "workbench.colorTheme": "Default Dark Modern",
+  "workbench.startupEditor": "none",
+  "workbench.editor.enablePreview": false,
+
+  "git.autofetch": true,
+  "git.enableSmartCommit": true,
+  "git.confirmSync": false,
+
+  // ── Java 11 (AEM 6.5 requirement) ─────────────────────────────────
+  "java.configuration.runtimes": [
+    {
+      "name": "JavaSE-11",
+      "path": "/usr/lib/jvm/java-11-openjdk-amd64",
+      "default": true
+    }
+  ],
+  "java.compile.nullAnalysis.mode": "automatic",
+  "java.completion.favoriteStaticMembers": [
+    "org.junit.Assert.*",
+    "org.junit.jupiter.api.Assertions.*",
+    "org.mockito.Mockito.*",
+    "org.apache.sling.api.resource.ResourceUtil.*"
+  ],
+  "java.debug.settings.hotCodeReplace": "auto",
+
+  // ── Maven ──────────────────────────────────────────────────────────
+  "maven.executable.path": "/opt/apache-maven-3.9.9/bin/mvn",
+  "java.configuration.maven.userSettings": "/home/coder/.m2/settings.xml",
+
+  // ── XML / JCR content ─────────────────────────────────────────────
+  "xml.format.splitAttributes": true,
+
+  // ── Language-specific tab sizes (AEM convention) ──────────────────
+  "[java]": {
+    "editor.tabSize": 4
+  },
+  "[xml]": {
+    "editor.tabSize": 4
+  },
+
+  // ── .NET / Python / JS inherited from base ────────────────────────
+  "python.defaultInterpreterPath": "/usr/bin/python3",
+  "python.formatting.provider": "none",
+  "[python]": {
+    "editor.defaultFormatter": "ms-python.black-formatter",
+    "editor.formatOnSave": true
+  },
+  "[javascript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[typescript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[json]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+
+  "security.workspace.trust.enabled": true,
+  "telemetry.telemetryLevel": "off",
+
+  // ── Disable ALL built-in AI / Copilot / Chat features ──────────────
+  "chat.agent.enabled": false,
+  "chat.commandCenter.enabled": false,
+  "chat.editor.fontFamily": "",
+  "chat.disableAIFeatures": true,
+  "github.copilot.enable": {
+    "*": false
+  },
+  "github.copilot.editor.enableAutoCompletions": false,
+  "github.copilot.chat.enabled": false,
+  "github.copilot.advanced": {},
+  "github.copilot.renameSuggestions.triggerAutomatically": false,
+  "inlineChat.mode": "off",
+  "editor.inlineSuggest.enabled": false,
+
+  "workbench.secondarySideBar.defaultVisibility": "hidden",
+
+  "cody.enabled": false,
+  "cody.autocomplete.enabled": false,
+
+  // ── .NET settings (inherited from base) ───────────────────────────
+  "dotnet.defaultSolution": "disable",
+  "csharp.suppressDotnetInstallWarning": true,
+  "[csharp]": {
+    "editor.defaultFormatter": "ms-dotnettools.csharp"
+  },
+
+  // ── SQL settings (inherited from base) ────────────────────────────
+  "sqltools.useNodeRuntime": true,
+  "sqltools.autoOpenSessionFiles": false,
+  "sqltools.results.limit": 1000,
+
+  // ── AI agent (Roo Code auto-imports config on startup) ────────────
+  "roo-cline.autoImportSettingsPath": "/home/coder/.config/roo-code/settings.json",
+
+  // ── Go settings (inherited from base) ─────────────────────────────
+  "go.toolsManagement.autoUpdate": true,
+  "[go]": {
+    "editor.defaultFormatter": "golang.go"
+  }
+}
