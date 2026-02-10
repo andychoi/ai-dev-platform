@@ -383,6 +383,74 @@ See [AI.md Section 12](AI.md#12-design-first-ai-enforcement-layer) for the full 
 
 ---
 
+### Q: Can I use Claude Code CLI with Ollama running on my Mac?
+
+**A:** Yes. However, because your Claude CLI is inside a container (Coder workspace) and Ollama is on your host Mac, they are on different "networks." Inside the container, `localhost` refers to the container itself, not your Mac.
+
+To bridge this gap, you need to configure both the **Host (Mac)** and the **Container (Coder)**.
+
+#### Step 1: Configure Ollama on your Mac (Host)
+
+By default, Ollama only listens to your Mac's internal traffic (`127.0.0.1`). You must tell it to listen to connections coming from your Docker/Coder containers.
+
+1. **Quit Ollama** completely (via the Menu Bar icon).
+2. Open your **Mac Terminal** and run:
+   ```bash
+   launchctl setenv OLLAMA_HOST "0.0.0.0"
+   ```
+3. **Restart Ollama** by opening the app again.
+   - Now Ollama is "visible" to your local network and containers.
+
+#### Step 2: Find the Host Address inside the Container
+
+Docker for Mac provides a special DNS name that points from a container back to the host machine.
+
+1. In your **Coder Workspace Terminal**, test if you can reach the host:
+   ```bash
+   curl http://host.docker.internal:11434
+   ```
+2. **If you see "Ollama is running"**: Proceed to Step 3.
+3. **If it fails**: Your container might need your Mac's actual Local IP. Find it on your Mac (Settings > Wi-Fi > Details) and use that instead (e.g., `http://192.168.1.XX:11434`).
+
+#### Step 3: Set up the Alias in your Coder Workspace
+
+Update `~/.bashrc` **inside your Coder workspace** (not your Mac) to point Claude Code to the host's Ollama service.
+
+1. Open the workspace config:
+   ```bash
+   nano ~/.bashrc
+   ```
+2. Add this alias (adjust the model name to match your Ollama model):
+   ```bash
+   alias claude-host='ANTHROPIC_BASE_URL="http://host.docker.internal:11434" ANTHROPIC_AUTH_TOKEN="ollama" claude --model gemma3:12b'
+   ```
+   *(Replace `host.docker.internal` with your IP if the curl test above required it.)*
+3. Save (`Ctrl+O`, `Enter`, `Ctrl+X`) and reload:
+   ```bash
+   source ~/.bashrc
+   ```
+
+#### How it Works (Network Map)
+
+- **Claude CLI**: Thinks it is talking to Anthropic's cloud.
+- **Env Variables**: Intercept the request and reroute it to `host.docker.internal` (your Mac).
+- **Ollama (Mac)**: Receives the request on port 11434 and runs the model using your Mac's GPU.
+
+> **Tip for Coder Admins:** To make this permanent across all workspaces, add these environment variables directly to your Coder Template (`main.tf`) under the `coder_agent` resource:
+>
+> ```hcl
+> resource "coder_agent" "main" {
+>   env = {
+>     ANTHROPIC_BASE_URL  = "http://host.docker.internal:11434"
+>     ANTHROPIC_AUTH_TOKEN = "ollama"
+>   }
+> }
+> ```
+
+> **Note:** Using Ollama directly bypasses LiteLLM's budget tracking, guardrails, and audit logging. For governed AI usage, use the default LiteLLM route (`http://litellm:4000/anthropic`) instead. This direct-to-Ollama approach is best for local experimentation with open-weight models.
+
+---
+
 ### Q: Are my prompts logged or stored?
 
 **A:**
@@ -996,3 +1064,4 @@ For a single template manual push, see [ADMIN-HOWTO.md — Pushing a Template to
 | 1.2 | 2026-02-06 | Platform Team | OpenCode CLI references, auto-provisioned keys, updated AI assistant section |
 | 1.3 | 2026-02-07 | Platform Team | Fixed sudo/apt-get section (now restricted), updated credentials to match RBAC doc |
 | 1.4 | 2026-02-09 | Platform Team | Added Claude Code CLI references, updated template push docs, updated Quick Reference |
+| 1.5 | 2026-02-10 | Platform Team | Added Ollama + Claude Code CLI from Coder workspace FAQ |

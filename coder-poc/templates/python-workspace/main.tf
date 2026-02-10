@@ -204,10 +204,14 @@ data "coder_parameter" "ai_model" {
   display_name = "AI Model"
   description  = "Select the AI model for chat and code assistance"
   type         = "string"
-  default      = "bedrock-claude-haiku"
+  default      = "gemma3"
   mutable      = true
   icon         = "/icon/widgets.svg"
 
+  option {
+    name  = "Gemma 3 12B (Local, Default)"
+    value = "gemma3"
+  }
   option {
     name  = "Claude Sonnet 4.5 (Balanced)"
     value = "claude-sonnet"
@@ -396,6 +400,10 @@ resource "coder_agent" "main" {
   # Disable devcontainer detection (requires Docker-in-Docker which we don't support)
   env = {
     CODER_AGENT_DEVCONTAINERS_ENABLE = "false"
+    # Ollama: Route Claude Code CLI to host Mac's Ollama server (GPU-accelerated)
+    # Requires: launchctl setenv OLLAMA_HOST "0.0.0.0" on host Mac + restart Ollama
+    ANTHROPIC_BASE_URL  = "http://host.docker.internal:11434"
+    ANTHROPIC_AUTH_TOKEN = "ollama"
   }
 
   # Startup script runs when workspace starts
@@ -476,12 +484,13 @@ password=${data.coder_parameter.git_password.value}
     if [ "$AI_ASSISTANT" != "none" ]; then
       # Determine model name for LiteLLM
       case "$AI_MODEL" in
+        "gemma3")                LITELLM_MODEL="gemma3" ;;
         "claude-sonnet")         LITELLM_MODEL="claude-sonnet-4-5" ;;
         "claude-haiku")          LITELLM_MODEL="claude-haiku-4-5" ;;
         "claude-opus")           LITELLM_MODEL="claude-opus-4" ;;
         "bedrock-claude-sonnet") LITELLM_MODEL="bedrock-claude-sonnet" ;;
         "bedrock-claude-haiku")  LITELLM_MODEL="bedrock-claude-haiku" ;;
-        *)                       LITELLM_MODEL="claude-sonnet-4-5" ;;
+        *)                       LITELLM_MODEL="gemma3" ;;
       esac
 
       # Auto-provision key if not provided
@@ -654,6 +663,7 @@ ENFORCEMENTMD
         "apiKey": "$LITELLM_KEY"
       },
       "models": {
+        "gemma3": { "name": "Gemma 3 12B (Local)" },
         "claude-sonnet-4-5": { "name": "Claude Sonnet 4.5" },
         "claude-haiku-4-5": { "name": "Claude Haiku 4.5" },
         "claude-opus-4": { "name": "Claude Opus 4" },
@@ -663,7 +673,7 @@ ENFORCEMENTMD
     }
   },
   "model": "litellm/$LITELLM_MODEL",
-  "small_model": "litellm/claude-haiku-4-5"
+  "small_model": "litellm/gemma3"
 }
 OPENCODECONFIG
             echo "OpenCode configured: model=litellm/$LITELLM_MODEL enforcement=$ENFORCEMENT_LEVEL"
@@ -727,12 +737,14 @@ alias ai-models="echo 'Agent: $AI_ASSISTANT, Model: $LITELLM_MODEL, Gateway: lit
 alias ai-usage="curl -s http://litellm:4000/user/info -H 'Authorization: Bearer $LITELLM_KEY' | python3 -m json.tool"
 AICONFIG
 
-        # Claude Code CLI environment (Anthropic pass-through via LiteLLM)
+        # Claude Code CLI environment (Ollama on host Mac)
         if [ "$AI_ASSISTANT" = "claude-code" ] || [ "$AI_ASSISTANT" = "all" ]; then
           cat >> ~/.bashrc << CLAUDEENV
-# Claude Code CLI (Anthropic pass-through via LiteLLM)
-export ANTHROPIC_BASE_URL="http://litellm:4000/anthropic"
-export ANTHROPIC_API_KEY="$LITELLM_KEY"
+# Claude Code CLI (Ollama on host Mac — GPU-accelerated)
+export ANTHROPIC_BASE_URL="http://host.docker.internal:11434"
+export ANTHROPIC_AUTH_TOKEN="ollama"
+# Governed route via LiteLLM (budget tracking, guardrails, audit)
+alias claude-litellm='ANTHROPIC_BASE_URL="http://litellm:4000/anthropic" ANTHROPIC_API_KEY="$OPENAI_API_KEY" ANTHROPIC_AUTH_TOKEN="" claude'
 CLAUDEENV
         fi
         echo "AI environment configured: gateway=litellm:4000"
@@ -817,6 +829,26 @@ DBCONFIG
       rm -f /tmp/db_creds.txt
     fi
 
+    # ==========================================================================
+    # OLLAMA — Host Mac's Ollama server (GPU-accelerated)
+    # The ollama CLI in the container acts as a client to the host's server.
+    # Requires: launchctl setenv OLLAMA_HOST "0.0.0.0" on host Mac
+    # ==========================================================================
+    OLLAMA_URL="http://host.docker.internal:11434"
+
+    if curl -sf "$OLLAMA_URL" >/dev/null 2>&1; then
+      echo "Host Ollama reachable at $OLLAMA_URL"
+    else
+      echo "WARNING: Host Ollama not reachable at $OLLAMA_URL"
+      echo "  → On your Mac, run: launchctl setenv OLLAMA_HOST \"0.0.0.0\" and restart Ollama"
+    fi
+
+    # Add Ollama environment to shell
+    cat >> ~/.bashrc << 'OLLAMACONFIG'
+# Ollama — Host Mac's Ollama server (GPU-accelerated)
+export OLLAMA_HOST=http://host.docker.internal:11434
+OLLAMACONFIG
+
     # Start code-server (redirect output to prevent "pipes not closed" warning)
     echo "Starting code-server..."
     code-server --auth none --bind-addr 0.0.0.0:8080 /home/coder/workspace > /tmp/code-server.log 2>&1 &
@@ -826,6 +858,7 @@ DBCONFIG
     echo "AI Gateway: $${AI_GATEWAY_URL}"
     echo "AI Agent: $${AI_ASSISTANT}"
     echo "AI Behavior: $${ENFORCEMENT_LEVEL}"
+    echo "Ollama: host.docker.internal:11434 (host Mac)"
     if [ "$AI_ASSISTANT" = "claude-code" ] || [ "$AI_ASSISTANT" = "all" ]; then
       echo "Claude Code: litellm:4000/anthropic (Anthropic pass-through)"
     fi
@@ -959,6 +992,8 @@ resource "docker_container" "workspace" {
     "NODE_EXTRA_CA_CERTS=/certs/coder.crt",
     # Network egress exceptions (admin-controlled, read by setup-firewall.sh)
     "EGRESS_EXTRA_PORTS=${data.coder_parameter.egress_extra_ports.value}",
+    # Ollama: Point CLI to host Mac's Ollama server (GPU-accelerated)
+    "OLLAMA_HOST=http://host.docker.internal:11434",
   ]
 
   # Start the Coder agent
