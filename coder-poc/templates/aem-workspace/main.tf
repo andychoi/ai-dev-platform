@@ -1028,7 +1028,7 @@ alias aem-logs='tail -f /home/coder/aem/author/crx-quickstart/logs/error.log'
 alias aem-logs-publish='tail -f /home/coder/aem/publisher/crx-quickstart/logs/error.log'
 
 # Status
-alias aem-status='echo "Author:"; curl -sf -o /dev/null -w "  HTTP %{http_code}\n" http://localhost:4502/libs/granite/core/content/login.html || echo "  Stopped"; echo "Publisher:"; curl -sf -o /dev/null -w "  HTTP %{http_code}\n" http://localhost:4503/libs/granite/core/content/login.html || echo "  Stopped/Disabled"'
+alias aem-status='echo "Author:"; curl -sf -o /dev/null -w "  HTTP %%{http_code}\n" http://localhost:4502/libs/granite/core/content/login.html || echo "  Stopped"; echo "Publisher:"; curl -sf -o /dev/null -w "  HTTP %%{http_code}\n" http://localhost:4503/libs/granite/core/content/login.html || echo "  Stopped/Disabled"'
 alias aem-bundles='curl -sf -u admin:admin http://localhost:4502/system/console/bundles.json | python3 -c "import sys,json; d=json.load(sys.stdin); print(f\"Bundles: {d[\"s\"][3]}/{d[\"s\"][0]} active ({d[\"s\"][4]} fragments)\")" 2>/dev/null || echo "AEM not running or not ready"'
 
 # Instance management
@@ -1036,8 +1036,8 @@ aem-start-author() {
   local JAR="/home/coder/aem/aem-quickstart.jar"
   [ ! -f /home/coder/aem/author/aem-quickstart.jar ] && cp "$JAR" /home/coder/aem/author/aem-quickstart.jar
   cd /home/coder/aem/author
-  java ${AEM_AUTHOR_JVM:-"-Xmx2048m"} \
-    -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:${AEM_DEBUG_PORT:-5005} \
+  java $${AEM_AUTHOR_JVM:-"-Xmx2048m"} \
+    -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:$${AEM_DEBUG_PORT:-5005} \
     -Dsling.run.modes=author \
     -jar aem-quickstart.jar -p 4502 -r author -nobrowser -nofork > stdout.log 2>&1 &
   echo $! > /home/coder/aem/author.pid
@@ -1071,7 +1071,7 @@ aem-start-publisher() {
   local JAR="/home/coder/aem/aem-quickstart.jar"
   [ ! -f /home/coder/aem/publisher/aem-quickstart.jar ] && cp "$JAR" /home/coder/aem/publisher/aem-quickstart.jar
   cd /home/coder/aem/publisher
-  java ${AEM_PUBLISHER_JVM:-"-Xmx1024m"} \
+  java $${AEM_PUBLISHER_JVM:-"-Xmx1024m"} \
     -Dsling.run.modes=publish \
     -jar aem-quickstart.jar -p 4503 -r publish -nobrowser -nofork > stdout.log 2>&1 &
   echo $! > /home/coder/aem/publisher.pid

@@ -187,7 +187,7 @@ else
 fi
 
 # Check Maven version
-MVN_VERSION=$(docker run --rm "${IMAGE_NAME}:latest" mvn --version 2>&1 | head -1)
+MVN_VERSION=$(docker run --rm -e JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64 "${IMAGE_NAME}:latest" mvn --version 2>&1 | head -1)
 if echo "$MVN_VERSION" | grep -q "3.9.9"; then
     log_success "Maven: $MVN_VERSION"
 else
