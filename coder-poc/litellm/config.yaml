@@ -2,8 +2,26 @@
 # Replaces custom AI Gateway with standardized OpenAI-compatible proxy
 
 model_list:
-  # Claude Sonnet 4.5 — Anthropic direct (primary) + Bedrock (fallback)
-  # LiteLLM routes to whichever provider has valid credentials
+  # ==========================================================================
+  # OLLAMA — Local models via host Ollama server (DEFAULT)
+  # Ollama runs on the host machine; containers reach it via host.docker.internal
+  # ==========================================================================
+
+  # Gemma 3 12B — default general-purpose model (local, no API key needed)
+  - model_name: gemma3
+    litellm_params:
+      model: ollama_chat/gemma3:12b
+      api_base: http://host.docker.internal:11434
+    model_info:
+      max_tokens: 8192
+      input_cost_per_token: 0.0
+      output_cost_per_token: 0.0
+
+  # ==========================================================================
+  # ANTHROPIC — Claude models via Anthropic API (direct)
+  # ==========================================================================
+
+  # Claude Sonnet 4.5 — Anthropic direct
   - model_name: claude-sonnet-4-5
     litellm_params:
       model: anthropic/claude-sonnet-4-5-20250929
@@ -13,14 +31,7 @@ model_list:
       input_cost_per_token: 0.000003
       output_cost_per_token: 0.000015
 
-  - model_name: claude-sonnet-4-5
-    litellm_params:
-      model: bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0
-      aws_access_key_id: os.environ/AWS_ACCESS_KEY_ID
-      aws_secret_access_key: os.environ/AWS_SECRET_ACCESS_KEY
-      aws_region_name: os.environ/AWS_REGION
-
-  # Claude Haiku 4.5 — Anthropic direct (primary) + Bedrock (fallback)
+  # Claude Haiku 4.5 — Anthropic direct
   - model_name: claude-haiku-4-5
     litellm_params:
       model: anthropic/claude-haiku-4-5-20251001
@@ -30,14 +41,7 @@ model_list:
       input_cost_per_token: 0.0000008
       output_cost_per_token: 0.000004
 
-  - model_name: claude-haiku-4-5
-    litellm_params:
-      model: bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0
-      aws_access_key_id: os.environ/AWS_ACCESS_KEY_ID
-      aws_secret_access_key: os.environ/AWS_SECRET_ACCESS_KEY
-      aws_region_name: os.environ/AWS_REGION
-
-  # Claude Opus 4 via Anthropic API (no Bedrock equivalent)
+  # Claude Opus 4 via Anthropic API
   - model_name: claude-opus-4
     litellm_params:
       model: anthropic/claude-opus-4-20250514
@@ -46,6 +50,10 @@ model_list:
       max_tokens: 8192
       input_cost_per_token: 0.000015
       output_cost_per_token: 0.000075
+
+  # ==========================================================================
+  # AWS BEDROCK — Fallback / dedicated Bedrock aliases
+  # ==========================================================================
 
   # Claude Sonnet 4.5 via AWS Bedrock
   - model_name: bedrock-claude-sonnet
