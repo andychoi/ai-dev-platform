@@ -35,13 +35,14 @@ RUN mkdir -p /home/coder/aem/author \
     && mkdir -p /home/coder/.m2
 
 # Copy Maven settings with Adobe repo + AEM server credentials
-COPY maven-settings.xml /home/coder/.m2/settings.xml
+# --chown required: COPY defaults to root:root regardless of USER directive
+COPY --chown=coder:coder maven-settings.xml /home/coder/.m2/settings.xml
 
 # Copy VS Code settings (Java 11 runtime, AEM file associations)
-COPY settings.json /home/coder/.local/share/code-server/User/settings.json
+COPY --chown=coder:coder settings.json /home/coder/.local/share/code-server/User/settings.json
 
 # Copy debug launch config (JPDA attach to AEM Author)
-COPY .vscode/launch.json /home/coder/.local/share/code-server/User/launch.json
+COPY --chown=coder:coder .vscode/launch.json /home/coder/.local/share/code-server/User/launch.json
 
 # VS Code extensions: Java development
 RUN code-server --install-extension redhat.java \
