@@ -104,9 +104,9 @@ data "coder_parameter" "disk_size" {
 data "coder_parameter" "aem_jar_path" {
   name         = "aem_jar_path"
   display_name = "AEM Quickstart JAR Path"
-  description  = "Path to the proprietary AEM quickstart JAR (admin pre-places this)"
+  description  = "Path to the shared AEM quickstart JAR (admin places in coder-poc/aem-install/)"
   type         = "string"
-  default      = "/home/coder/aem/aem-quickstart.jar"
+  default      = "/opt/aem-install/aem-quickstart.jar"
   mutable      = false
   icon         = "/icon/database.svg"
 }
@@ -132,43 +132,43 @@ data "coder_parameter" "aem_publisher_enabled" {
 
 data "coder_parameter" "aem_author_jvm_opts" {
   name         = "aem_author_jvm_opts"
-  display_name = "Author JVM Heap"
-  description  = "Max heap size for AEM Author instance"
+  display_name = "Author JVM Memory"
+  description  = "Heap allocation (-Xms/-Xmx) for AEM Author instance"
   type         = "string"
-  default      = "-Xmx2048m"
+  default      = "-Xms2g -Xmx3g"
   mutable      = true
   icon         = "/icon/memory.svg"
 
   option {
     name  = "2 GB (Standard)"
-    value = "-Xmx2048m"
+    value = "-Xms1g -Xmx2g"
   }
   option {
     name  = "3 GB (Recommended)"
-    value = "-Xmx3072m"
+    value = "-Xms2g -Xmx3g"
   }
   option {
     name  = "4 GB (Large projects)"
-    value = "-Xmx4096m"
+    value = "-Xms3g -Xmx4g"
   }
 }
 
 data "coder_parameter" "aem_publisher_jvm_opts" {
   name         = "aem_publisher_jvm_opts"
-  display_name = "Publisher JVM Heap"
-  description  = "Max heap size for AEM Publisher instance"
+  display_name = "Publisher JVM Memory"
+  description  = "Heap allocation (-Xms/-Xmx) for AEM Publisher instance"
   type         = "string"
-  default      = "-Xmx1024m"
+  default      = "-Xms512m -Xmx1g"
   mutable      = true
   icon         = "/icon/memory.svg"
 
   option {
     name  = "1 GB (Standard)"
-    value = "-Xmx1024m"
+    value = "-Xms512m -Xmx1g"
   }
   option {
     name  = "2 GB (Large projects)"
-    value = "-Xmx2048m"
+    value = "-Xms1g -Xmx2g"
   }
 }
 
@@ -587,15 +587,12 @@ MAVENSETTINGS
       echo ""
       echo "  Expected at: $AEM_JAR"
       echo ""
-      echo "  The AEM quickstart JAR is proprietary and cannot be"
-      echo "  baked into the workspace image."
+      echo "  Admin: place files in coder-poc/aem-install/ on the host:"
+      echo "    - aem-quickstart.jar  (from Adobe Software Distribution)"
+      echo "    - license.properties  (from your AEM license)"
       echo ""
-      echo "  To get started:"
-      echo "    1. Obtain the JAR from Adobe Software Distribution"
-      echo "       (https://experience.adobe.com/#/downloads/content/software-distribution/en/aem.html)"
-      echo "    2. Upload it to your workspace:"
-      echo "       coder scp local:aem-quickstart-6.5.x.jar <workspace>:$AEM_JAR"
-      echo "    3. Restart the workspace"
+      echo "  These are mounted read-only at /opt/aem-install/ in every"
+      echo "  AEM workspace. After placing files, restart the workspace."
       echo ""
       echo "  VS Code and Maven are ready — you can work on code"
       echo "  without AEM running. Deploy when AEM is available."
@@ -607,17 +604,23 @@ MAVENSETTINGS
       mkdir -p /home/coder/aem/author
       cd /home/coder/aem/author
 
-      # Copy JAR on first start (crx-quickstart doesn't exist yet)
-      if [ ! -d /home/coder/aem/author/crx-quickstart ]; then
-        echo "First start detected — copying quickstart JAR (initial unpack takes 5-10 minutes)..."
-        cp "$AEM_JAR" /home/coder/aem/author/aem-quickstart.jar
+      # Symlink license.properties from shared mount (AEM expects it in working dir)
+      if [ -f /opt/aem-install/license.properties ]; then
+        ln -sf /opt/aem-install/license.properties /home/coder/aem/author/license.properties
       fi
 
-      # Start Author with JPDA debug enabled
-      java $AEM_AUTHOR_JVM \
+      if [ ! -d /home/coder/aem/author/crx-quickstart ]; then
+        echo "First start detected — AEM will unpack crx-quickstart (takes 5-10 minutes)..."
+      fi
+
+      # Base JVM flags for AEM (GC, metaspace cap, headless mode, log path)
+      AEM_BASE_JVM_OPTS="-XX:+UseG1GC -XX:MaxMetaspaceSize=512m -Djava.awt.headless=true -Dorg.apache.sling.commons.log.file=logs/error.log"
+
+      # Start Author with JPDA debug enabled — references shared JAR directly (no copy)
+      java $AEM_AUTHOR_JVM $AEM_BASE_JVM_OPTS \
         -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:$AEM_DEBUG_PORT \
         -Dsling.run.modes=author \
-        -jar /home/coder/aem/author/aem-quickstart.jar \
+        -jar "$AEM_JAR" \
         -p 4502 -r author -nobrowser -nofork \
         > /home/coder/aem/author/stdout.log 2>&1 &
       echo $! > /home/coder/aem/author.pid
@@ -643,14 +646,18 @@ MAVENSETTINGS
         mkdir -p /home/coder/aem/publisher
         cd /home/coder/aem/publisher
 
-        if [ ! -d /home/coder/aem/publisher/crx-quickstart ]; then
-          echo "First Publisher start — copying quickstart JAR..."
-          cp "$AEM_JAR" /home/coder/aem/publisher/aem-quickstart.jar
+        # Symlink license.properties for Publisher too
+        if [ -f /opt/aem-install/license.properties ]; then
+          ln -sf /opt/aem-install/license.properties /home/coder/aem/publisher/license.properties
         fi
 
-        java $AEM_PUBLISHER_JVM \
+        if [ ! -d /home/coder/aem/publisher/crx-quickstart ]; then
+          echo "First Publisher start — AEM will unpack crx-quickstart..."
+        fi
+
+        java $AEM_PUBLISHER_JVM $AEM_BASE_JVM_OPTS \
           -Dsling.run.modes=publish \
-          -jar /home/coder/aem/publisher/aem-quickstart.jar \
+          -jar "$AEM_JAR" \
           -p 4503 -r publish -nobrowser -nofork \
           > /home/coder/aem/publisher/stdout.log 2>&1 &
         echo $! > /home/coder/aem/publisher.pid
@@ -1033,13 +1040,14 @@ alias aem-bundles='curl -sf -u admin:admin http://localhost:4502/system/console/
 
 # Instance management
 aem-start-author() {
-  local JAR="/home/coder/aem/aem-quickstart.jar"
-  [ ! -f /home/coder/aem/author/aem-quickstart.jar ] && cp "$JAR" /home/coder/aem/author/aem-quickstart.jar
+  local JAR="/opt/aem-install/aem-quickstart.jar"
+  if [ ! -f "$JAR" ]; then echo "ERROR: AEM JAR not found at $JAR (admin must place it in coder-poc/aem-install/)"; return 1; fi
   cd /home/coder/aem/author
-  java $${AEM_AUTHOR_JVM:-"-Xmx2048m"} \
+  [ -f /opt/aem-install/license.properties ] && ln -sf /opt/aem-install/license.properties ./license.properties
+  java $${AEM_AUTHOR_JVM:-"-Xms2g -Xmx3g"} $${AEM_BASE_JVM_OPTS} \
     -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:$${AEM_DEBUG_PORT:-5005} \
     -Dsling.run.modes=author \
-    -jar aem-quickstart.jar -p 4502 -r author -nobrowser -nofork > stdout.log 2>&1 &
+    -jar "$JAR" -p 4502 -r author -nobrowser -nofork > stdout.log 2>&1 &
   echo $! > /home/coder/aem/author.pid
   echo "AEM Author starting (PID: $!)"
   cd -
@@ -1068,12 +1076,13 @@ aem-stop-author() {
 }
 
 aem-start-publisher() {
-  local JAR="/home/coder/aem/aem-quickstart.jar"
-  [ ! -f /home/coder/aem/publisher/aem-quickstart.jar ] && cp "$JAR" /home/coder/aem/publisher/aem-quickstart.jar
+  local JAR="/opt/aem-install/aem-quickstart.jar"
+  if [ ! -f "$JAR" ]; then echo "ERROR: AEM JAR not found at $JAR (admin must place it in coder-poc/aem-install/)"; return 1; fi
   cd /home/coder/aem/publisher
-  java $${AEM_PUBLISHER_JVM:-"-Xmx1024m"} \
+  [ -f /opt/aem-install/license.properties ] && ln -sf /opt/aem-install/license.properties ./license.properties
+  java $${AEM_PUBLISHER_JVM:-"-Xms512m -Xmx1g"} $${AEM_BASE_JVM_OPTS} \
     -Dsling.run.modes=publish \
-    -jar aem-quickstart.jar -p 4503 -r publish -nobrowser -nofork > stdout.log 2>&1 &
+    -jar "$JAR" -p 4503 -r publish -nobrowser -nofork > stdout.log 2>&1 &
   echo $! > /home/coder/aem/publisher.pid
   echo "AEM Publisher starting (PID: $!)"
   cd -
@@ -1106,6 +1115,7 @@ AEMALIAS
     cat >> ~/.bashrc << AEMENV
 export AEM_AUTHOR_JVM="$AEM_AUTHOR_JVM"
 export AEM_PUBLISHER_JVM="$AEM_PUBLISHER_JVM"
+export AEM_BASE_JVM_OPTS="$AEM_BASE_JVM_OPTS"
 export AEM_DEBUG_PORT="$AEM_DEBUG_PORT"
 AEMENV
 
@@ -1157,7 +1167,7 @@ LAUNCHJSON
         echo "AEM Publisher: http://localhost:4503"
       fi
     else
-      echo "AEM: Not started (quickstart JAR not found)"
+      echo "AEM: Not started (place JAR in coder-poc/aem-install/ on host)"
     fi
     echo ""
     echo "Aliases: aem-build, aem-deploy, aem-logs, aem-status, aem-bundles"
@@ -1394,10 +1404,49 @@ resource "coder_app" "aem-publisher" {
 
 locals {
   workspace_image = "aem-workspace:latest"
+
+  # Authorization: user must be in "aem-users" group (Authentik → OIDC → Coder)
+  template_authorized = contains(data.coder_workspace_owner.me.groups, "aem-users")
+}
+
+# ============================================================================
+# ACCESS CONTROL: Template Authorization
+#
+# Coder OSS has no template ACLs. This check enforces group-based access:
+#   1. Admin creates "aem-users" group in Authentik
+#   2. Authentik OIDC token includes "groups" claim
+#   3. Coder syncs groups (CODER_OIDC_GROUP_FIELD=groups)
+#   4. This template checks data.coder_workspace_owner.me.groups
+#
+# Users NOT in "aem-users" get a clear error at workspace creation time.
+# See: coder-poc/docs/ADMIN-HOWTO.md → Template Access Control
+# ============================================================================
+
+resource "null_resource" "template_access_check" {
+  count = local.template_authorized ? 0 : 1
+
+  lifecycle {
+    precondition {
+      condition     = local.template_authorized
+      error_message = <<-EOT
+        ACCESS DENIED: AEM workspace requires membership in the "aem-users" group.
+
+        Your groups: ${jsonencode(data.coder_workspace_owner.me.groups)}
+
+        To request access:
+          1. Ask your platform admin to add you to the "aem-users" group in Authentik
+          2. Log out and log back in (group changes sync on login)
+          3. Try creating this workspace again
+      EOT
+    }
+  }
 }
 
 # Persistent volume for workspace data
 resource "docker_volume" "workspace_data" {
+  # Block provisioning if user is not authorized
+  depends_on = [null_resource.template_access_check]
+
   name = "coder-${data.coder_workspace_owner.me.name}-${lower(data.coder_workspace.me.name)}-data"
 
   lifecycle {
@@ -1464,6 +1513,13 @@ resource "docker_container" "workspace" {
   volumes {
     host_path      = "/Users/andymini/ai/dev-platform/coder-poc/certs"
     container_path = "/certs"
+    read_only      = true
+  }
+
+  # AEM shared install files (admin-managed JAR + license)
+  volumes {
+    host_path      = "/Users/andymini/ai/dev-platform/coder-poc/aem-install"
+    container_path = "/opt/aem-install"
     read_only      = true
   }
 

@@ -8,7 +8,7 @@ The team develops custom AEM (Adobe Experience Manager) 6.5 components — Sling
 - **AEM 6.5 On-Premise** (requires Java 11, NOT 21)
 - **JVM in workspace** — Author + optional Publisher run as Java processes inside the container
 - **Standard archetype** — core, ui.apps, ui.content, ui.frontend, dispatcher modules
-- **AEM quickstart JAR is proprietary** — NOT baked into image; admin pre-places it
+- **AEM quickstart JAR is proprietary** — NOT baked into image; admin places it in shared `coder-poc/aem-install/` directory, mounted read-only into all AEM workspaces at `/opt/aem-install/`
 
 ---
 
@@ -22,6 +22,7 @@ The team develops custom AEM (Adobe Experience Manager) 6.5 components — Sling
 | `coder-poc/templates/aem-workspace/main.tf` | Terraform: params, AEM startup/shutdown, Coder apps, Docker resources |
 | `coder-poc/egress/aem-workspace.conf` | Template-specific egress rules (port 80 for HTTP Maven repos) |
 | `coder-poc/templates/aem-workspace/build/.vscode/launch.json` | Debug config for JPDA attach to AEM Author |
+| `coder-poc/aem-install/` | Shared directory for proprietary AEM files (JAR + license) |
 
 ---
 
@@ -95,7 +96,7 @@ Only addition: `port:80` for legacy HTTP Maven repositories. Port 443 is already
 
 | Parameter | Type | Default | Mutable | Description |
 |-----------|------|---------|---------|-------------|
-| `aem_jar_path` | string | `/home/coder/aem/aem-quickstart.jar` | No | Path to proprietary quickstart JAR |
+| `aem_jar_path` | string | `/opt/aem-install/aem-quickstart.jar` | No | Path to shared quickstart JAR (admin-managed) |
 | `aem_publisher_enabled` | string | `false` | No | Enable Publisher instance |
 | `aem_author_jvm_opts` | string | `-Xmx2048m` | Yes | Author heap: 2G/3G/4G |
 | `aem_publisher_jvm_opts` | string | `-Xmx1024m` | Yes | Publisher heap: 1G/2G |
@@ -120,21 +121,26 @@ Phases 1-2 (git config, repo clone) — identical to java-workspace.
 - If `/home/coder/.m2/settings.xml` missing (persistent volume wiped it), recreate from template default
 
 **Phase 4 (NEW): AEM Instance Management**
+
+The AEM quickstart JAR and `license.properties` are admin-managed in `coder-poc/aem-install/` and mounted read-only at `/opt/aem-install/` in every AEM workspace. The JAR is referenced directly (not copied), saving ~1 GB disk per workspace.
+
 ```
-1. Check if AEM JAR exists at aem_jar_path
-   - If missing: Print clear instructions (where to get it, how to place it)
+1. Check if AEM JAR exists at /opt/aem-install/aem-quickstart.jar
+   - If missing: Print instructions (admin must place files in coder-poc/aem-install/)
    - If present: Continue to start
 
 2. AEM Author startup:
    - mkdir -p /home/coder/aem/author && cd
-   - If crx-quickstart/ doesn't exist: first-start (copy JAR, takes 5-10 min)
-   - Start AEM Author as background JVM process:
-     java $JVM_OPTS -agentlib:jdwp=...:address=*:5005 -jar aem-quickstart.jar -p 4502 -r author -nobrowser -nofork &
+   - Symlink license.properties from /opt/aem-install/ (AEM expects it in working dir)
+   - If crx-quickstart/ doesn't exist: first-start (AEM unpacks, takes 5-10 min)
+   - Start AEM Author — references shared JAR directly (no copy):
+     java $JVM_OPTS -agentlib:jdwp=...:address=*:5005 -jar /opt/aem-install/aem-quickstart.jar -p 4502 -r author -nobrowser -nofork &
    - Save PID to /home/coder/aem/author.pid
-   - Wait loop: curl login page up to 5 minutes
+   - Wait loop: curl login page up to 10 minutes
 
 3. AEM Publisher startup (if enabled):
    - Same pattern on port 4503, no JPDA debug
+   - Symlinks license.properties separately
    - Save PID to /home/coder/aem/publisher.pid
 ```
 
@@ -233,8 +239,8 @@ Copied into the workspace image at `/home/coder/.local/share/code-server/User/` 
 
 1. **Image build:** `docker build -t aem-workspace:latest .` → verify `java -version` shows 11, `mvn --version` shows 3.9.9
 2. **Template push:** `coder templates push aem-workspace` → verify appears in Coder UI
-3. **Without JAR:** Create workspace → startup prints "JAR NOT FOUND" with instructions → VS Code opens, Java LSP works
-4. **With JAR:** Place JAR at `/home/coder/aem/aem-quickstart.jar` → restart → Author starts → Coder app goes green
+3. **Without JAR:** Create workspace → startup prints "JAR NOT FOUND" with admin instructions → VS Code opens, Java LSP works
+4. **With JAR:** Place JAR + license in `coder-poc/aem-install/` → restart workspace → Author starts → Coder app goes green
 5. **Maven build:** Clone archetype project → `aem-build` → packages deploy to Author
 6. **Debug:** VS Code → "Attach to AEM Author" → breakpoint in Sling Model → triggered on page request
 7. **AI tools:** Roo Code, Claude Code, OpenCode all work (same pattern as java-workspace)

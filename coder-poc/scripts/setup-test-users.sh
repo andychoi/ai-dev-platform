@@ -262,12 +262,13 @@ from authentik.core.models import User, Group
 
 # Group assignments: username -> list of group names
 # RBAC groups control Coder roles (via OIDC group-to-role mapping)
+# Template groups (*-users) control workspace template access (Terraform precondition)
 # Team groups (team-*) control Activity page scoping (manager sees their contractors)
 assignments = {
-    'appmanager':   ['coder-template-admins', 'team-appmanager'],
-    'contractor1':  ['coder-members', 'team-appmanager'],
-    'contractor2':  ['coder-members', 'team-appmanager'],
-    'contractor3':  ['coder-members'],
+    'appmanager':   ['coder-template-admins', 'team-appmanager', 'python-users', 'java-users', 'nodejs-users', 'dotnet-users', 'aem-users'],
+    'contractor1':  ['coder-members', 'team-appmanager', 'python-users'],
+    'contractor2':  ['coder-members', 'team-appmanager', 'python-users'],
+    'contractor3':  ['coder-members', 'java-users'],
     'readonly':     ['coder-auditors'],
 }
 
@@ -392,15 +393,23 @@ done
 echo "└─────────────┴─────────────────────────┴────────────────┴─────────────┴───────────────┘"
 echo ""
 echo "Group Assignments (Authentik):"
-echo "┌─────────────┬──────────────────────────┬───────────────────┐"
-echo "│ Username    │ RBAC Group               │ Team Group        │"
-echo "├─────────────┼──────────────────────────┼───────────────────┤"
-echo "│ appmanager  │ coder-template-admins    │ team-appmanager   │"
-echo "│ contractor1 │ coder-members            │ team-appmanager   │"
-echo "│ contractor2 │ coder-members            │ team-appmanager   │"
-echo "│ contractor3 │ coder-members            │ (none)            │"
-echo "│ readonly    │ coder-auditors           │ (none)            │"
-echo "└─────────────┴──────────────────────────┴───────────────────┘"
+echo "┌─────────────┬──────────────────────────┬───────────────────┬──────────────────────┐"
+echo "│ Username    │ RBAC Group               │ Team Group        │ Template Access      │"
+echo "├─────────────┼──────────────────────────┼───────────────────┼──────────────────────┤"
+echo "│ appmanager  │ coder-template-admins    │ team-appmanager   │ all templates        │"
+echo "│ contractor1 │ coder-members            │ team-appmanager   │ python-workspace     │"
+echo "│ contractor2 │ coder-members            │ team-appmanager   │ python-workspace     │"
+echo "│ contractor3 │ coder-members            │ (none)            │ java-workspace       │"
+echo "│ readonly    │ coder-auditors           │ (none)            │ (none)               │"
+echo "└─────────────┴──────────────────────────┴───────────────────┴──────────────────────┘"
+echo ""
+echo "Template Access Control (group → template):"
+echo "  - python-users  → python-workspace   (contractor1, contractor2)"
+echo "  - java-users    → java-workspace     (contractor3)"
+echo "  - nodejs-users  → nodejs-workspace   (appmanager only)"
+echo "  - dotnet-users  → dotnet-workspace   (appmanager only)"
+echo "  - aem-users     → aem-workspace      (appmanager only)"
+echo "  - docker-users  → docker-workspace   (create separately)"
 echo ""
 echo "Activity Page Visibility:"
 echo "  - admin       → sees ALL contractors (platform admin)"

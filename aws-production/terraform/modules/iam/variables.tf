@@ -34,7 +34,7 @@ variable "secrets_arns" {
 variable "s3_bucket_arns" {
   description = <<-EOT
     Map of logical bucket name to its ARN. Expected keys:
-      terraform_state
+      terraform_state, artifacts
   EOT
   type        = map(string)
   default     = {}

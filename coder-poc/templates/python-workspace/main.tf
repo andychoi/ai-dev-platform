@@ -947,10 +947,49 @@ resource "coder_app" "code-server" {
 # Build once with: docker build -t contractor-workspace:latest ./build
 locals {
   workspace_image = "python-workspace:latest"
+
+  # Authorization: user must be in "python-users" group (Authentik → OIDC → Coder)
+  template_authorized = contains(data.coder_workspace_owner.me.groups, "python-users")
+}
+
+# ============================================================================
+# ACCESS CONTROL: Template Authorization
+#
+# Coder OSS has no template ACLs. This check enforces group-based access:
+#   1. Admin creates "python-users" group in Authentik
+#   2. Authentik OIDC token includes "groups" claim
+#   3. Coder syncs groups (CODER_OIDC_GROUP_FIELD=groups)
+#   4. This template checks data.coder_workspace_owner.me.groups
+#
+# Users NOT in "python-users" get a clear error at workspace creation time.
+# See: coder-poc/docs/ADMIN-HOWTO.md → Template Access Control
+# ============================================================================
+
+resource "null_resource" "template_access_check" {
+  count = local.template_authorized ? 0 : 1
+
+  lifecycle {
+    precondition {
+      condition     = local.template_authorized
+      error_message = <<-EOT
+        ACCESS DENIED: Python workspace requires membership in the "python-users" group.
+
+        Your groups: ${jsonencode(data.coder_workspace_owner.me.groups)}
+
+        To request access:
+          1. Ask your platform admin to add you to the "python-users" group in Authentik
+          2. Log out and log back in (group changes sync on login)
+          3. Try creating this workspace again
+      EOT
+    }
+  }
 }
 
 # Persistent volume for workspace data
 resource "docker_volume" "workspace_data" {
+  # Block provisioning if user is not authorized
+  depends_on = [null_resource.template_access_check]
+
   name = "coder-${data.coder_workspace_owner.me.name}-${lower(data.coder_workspace.me.name)}-data"
 
   lifecycle {

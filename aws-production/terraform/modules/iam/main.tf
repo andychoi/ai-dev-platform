@@ -3,10 +3,11 @@
 #
 # Creates ECS task roles for Fargate services:
 #   - Shared task execution role (ECR pull, Secrets Manager, CloudWatch Logs)
-#   - coder-task-role        (Secrets Manager, S3, ECS provisioning, EFS)
-#   - litellm-task-role      (Bedrock invoke, Secrets Manager)
-#   - authentik-task-role    (Secrets Manager, SES)
-#   - workspace-task-role    (CloudWatch Logs only)
+#   - coder-task-role            (Secrets Manager, S3, ECS provisioning, EFS)
+#   - litellm-task-role          (Bedrock invoke, Secrets Manager)
+#   - authentik-task-role        (Secrets Manager, SES)
+#   - workspace-task-role        (CloudWatch Logs only)
+#   - aem-workspace-task-role    (CloudWatch Logs + S3 artifacts read)
 ###############################################################################
 
 terraform {
@@ -163,7 +164,7 @@ data "aws_iam_policy_document" "coder" {
     ]
   }
 
-  # IAM – pass execution role and workspace task role to ECS tasks
+  # IAM – pass execution role and workspace task roles to ECS tasks
   statement {
     sid    = "IAMPassRole"
     effect = "Allow"
@@ -173,6 +174,7 @@ data "aws_iam_policy_document" "coder" {
     resources = [
       aws_iam_role.task_execution.arn,
       aws_iam_role.workspace.arn,
+      aws_iam_role.aem_workspace.arn,
     ]
     condition {
       test     = "StringEquals"
@@ -424,4 +426,76 @@ resource "aws_iam_role_policy" "workspace" {
   name   = "${var.name_prefix}-workspace-task-role-policy"
   role   = aws_iam_role.workspace.id
   policy = data.aws_iam_policy_document.workspace.json
+}
+
+###############################################################################
+# 8. AEM Workspace Task Role
+#
+# Extended workspace role for AEM workspaces that need S3 access to download
+# the proprietary AEM quickstart JAR and license from the artifacts bucket.
+# Separate from the base workspace role to maintain least-privilege — only
+# AEM workspaces get S3 access.
+#
+# Permissions:
+#   - CloudWatch Logs (same as base workspace)
+#   - S3 GetObject on artifacts/aem/* (JAR + license download)
+#   - S3 ListBucket with aem/ prefix (enumerate available artifacts)
+###############################################################################
+
+resource "aws_iam_role" "aem_workspace" {
+  name               = "${var.name_prefix}-aem-workspace-task-role"
+  assume_role_policy = data.aws_iam_policy_document.ecs_task_trust.json
+  tags               = var.tags
+}
+
+data "aws_iam_policy_document" "aem_workspace" {
+  # CloudWatch Logs – write workspace logs
+  statement {
+    sid    = "CloudWatchLogs"
+    effect = "Allow"
+    actions = [
+      "logs:CreateLogStream",
+      "logs:PutLogEvents",
+    ]
+    resources = [
+      "arn:${data.aws_partition.current.partition}:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/ecs/${var.name_prefix}-workspace*",
+      "arn:${data.aws_partition.current.partition}:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/ecs/${var.name_prefix}-workspace*:*",
+    ]
+  }
+
+  # S3 – read AEM artifacts (JAR + license) from the artifacts bucket
+  # Scoped to aem/* prefix via resource ARN (s3:prefix condition only works on ListBucket)
+  statement {
+    sid    = "S3ArtifactsRead"
+    effect = "Allow"
+    actions = [
+      "s3:GetObject",
+    ]
+    resources = [
+      "${lookup(var.s3_bucket_arns, "artifacts", "")}/aem/*",
+    ]
+  }
+
+  # S3 – list objects under the aem/ prefix only
+  statement {
+    sid    = "S3ArtifactsList"
+    effect = "Allow"
+    actions = [
+      "s3:ListBucket",
+    ]
+    resources = [
+      lookup(var.s3_bucket_arns, "artifacts", ""),
+    ]
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["aem/*"]
+    }
+  }
+}
+
+resource "aws_iam_role_policy" "aem_workspace" {
+  name   = "${var.name_prefix}-aem-workspace-task-role-policy"
+  role   = aws_iam_role.aem_workspace.id
+  policy = data.aws_iam_policy_document.aem_workspace.json
 }

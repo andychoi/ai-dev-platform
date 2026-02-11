@@ -1,0 +1,3 @@
+# AEM proprietary files — do NOT commit (Adobe license)
+*.jar
+license.properties

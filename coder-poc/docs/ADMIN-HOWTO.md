@@ -48,6 +48,12 @@ coder-poc/
     main.tf                          # Terraform config (parameters, resources, startup)
     build/Dockerfile                 # Workspace Docker image
     build/settings.json              # VS Code settings baked into image
+  templates/aem-workspace/           # AEM 6.5 workspace template
+    main.tf                          # AEM-specific Terraform config
+    build/Dockerfile                 # Java 11 + Maven 3.9 + AEM tooling
+  aem-install/                       # Shared AEM proprietary files (admin-managed)
+    aem-quickstart.jar               # Adobe quickstart JAR (place here)
+    license.properties               # AEM license file (place here)
   litellm/config.yaml                # LiteLLM model routing config
   certs/                             # TLS certificates (coder.crt, coder.key)
   scripts/                           # Setup and admin scripts
@@ -124,24 +130,27 @@ Templates are `.tf` files — **not YAML**. There is no web-based template edito
 
 ```
 templates/
-  python-workspace/       # Standard Python workspace (no Docker)
+  python-workspace/       # Python workspace (requires "python-users" group)
     main.tf
     build/Dockerfile
-  nodejs-workspace/       # Standard Node.js workspace (no Docker)
+  nodejs-workspace/       # Node.js workspace (requires "nodejs-users" group)
     main.tf
     build/Dockerfile
-  java-workspace/         # Standard Java workspace (no Docker)
+  java-workspace/         # Java workspace (requires "java-users" group)
     main.tf
     build/Dockerfile
-  dotnet-workspace/       # Standard .NET workspace (no Docker)
+  dotnet-workspace/       # .NET workspace (requires "dotnet-users" group)
     main.tf
     build/Dockerfile
-  docker-workspace/       # Docker-enabled (rootless DinD sidecar)
-    main.tf               # Includes access control precondition
+  aem-workspace/          # AEM 6.5 workspace (requires "aem-users" group)
+    main.tf               # AEM-specific startup, shared JAR mount
+    build/Dockerfile      # Extends workspace-base + Java 11 + Maven
+  docker-workspace/       # Docker-enabled (requires "docker-users" group)
+    main.tf               # Includes access control precondition + DinD sidecar
     build/Dockerfile      # Extends python-workspace + Docker CLI
 ```
 
-> **Docker workspace access control:** The `docker-workspace` template checks `docker-users` group membership at creation time. See [Docker Workspace Access](#docker-workspace-access-docker-users-group) in Section 6.
+> **Template access control:** All templates enforce group-based access via Terraform preconditions. See [Template Access Control](#template-access-control-group-per-template) in Section 6.
 
 ### Viewing the Current Template
 
@@ -516,44 +525,96 @@ When using OIDC/SSO (Authentik), users are created automatically on first login.
 | Member | Create/manage own workspaces only |
 | Auditor | View audit logs only |
 
-### Docker Workspace Access (docker-users Group)
+### Template Access Control (Group-per-Template)
 
-The Docker-enabled workspace template requires membership in the `docker-users` group. This is enforced in the template via Terraform precondition — Coder OSS has no template ACLs.
+Coder OSS has no template ACLs (that's an Enterprise feature). All members can see and create all templates by default. To restrict access, each template enforces **group-based access control** via Terraform preconditions that check `data.coder_workspace_owner.me.groups`.
 
-**Grant Docker workspace access:**
+#### How It Works
 
-1. **Authentik Admin** → Directory → Groups → `docker-users`
-2. Click **Add existing user** → select the user
-3. Tell the user to **log out and log back in** (group changes sync on OIDC login via `CODER_OIDC_GROUP_AUTO_CREATE=true`)
-4. User can now create workspaces from the `docker-workspace` template
-
-**Create the docker-users group (first-time setup):**
-
-1. **Authentik Admin** → Directory → Groups → **Create Group**
-2. Name: `docker-users`
-3. No special attributes needed — it's just a membership group
-4. Ensure the group appears in the OIDC `groups` claim (already configured — Authentik includes all user groups by default)
-
-**Revoke Docker workspace access:**
-
-1. **Authentik Admin** → Directory → Groups → `docker-users`
-2. Remove the user from the group
-3. User must log out and back in for the change to take effect
-4. Existing Docker workspaces continue running — delete them manually if needed
-
-**Verify group membership (via Coder API):**
-
-```bash
-# Check a user's groups
-curl -sf http://localhost:7080/api/v2/users/{username} \
-  -H "Coder-Session-Token: $ADMIN_TOKEN" | jq '.organization_ids, .roles'
-
-# Or check from the template perspective (when user creates a workspace):
-# The template logs: "Your groups: [\"docker-users\", ...]"
-# Visible in Coder workspace build logs
+```
+Authentik Group → OIDC Token "groups" claim → Coder syncs groups → Template precondition check
 ```
 
-> **See also:** [DOCKER-DEV.md Section 17](DOCKER-DEV.md#17-access-control-docker-workspace-authorization) for the full layered authorization architecture.
+1. Admin creates a group in Authentik (e.g., `python-users`)
+2. Adds approved users to the group
+3. When a user creates a workspace, the template checks if their OIDC groups include the required group
+4. If not in the group → Terraform plan fails immediately with a clear error message (no infrastructure created)
+5. If in the group → workspace creation proceeds normally
+
+#### Template-to-Group Mapping
+
+| Template | Required Group | Description |
+|----------|---------------|-------------|
+| `python-workspace` | `python-users` | Python development |
+| `java-workspace` | `java-users` | Java development |
+| `nodejs-workspace` | `nodejs-users` | Node.js/TypeScript development |
+| `dotnet-workspace` | `dotnet-users` | .NET/C# development |
+| `aem-workspace` | `aem-users` | AEM 6.5 development |
+| `docker-workspace` | `docker-users` | Docker-enabled (rootless DinD) |
+
+#### Design Decision: Why Group-per-Template?
+
+Four options were evaluated:
+
+| Option | Description | Pros | Cons | Decision |
+|--------|-------------|------|------|----------|
+| **1. Group-per-template** | One Authentik group per template | Fine-grained control, clear audit trail | More groups to manage | **Selected for PoC** |
+| 2. Single gate group | One `workspace-users` group for all | Simple to manage | All-or-nothing, no per-template control | Too coarse |
+| 3. Role-based tiers | Combine groups (basic + elevated + specialized) | Flexible tiering | Complex group logic in templates | Over-engineered for PoC |
+| 4. ECS init container | Authorization service call before task start | Defense-in-depth, fail-closed | Production only (Docker-in-Docker) | Used in production as Layer 3 |
+
+#### Creating Template Access Groups (First-Time Setup)
+
+For each template, create the corresponding group in Authentik:
+
+1. **Authentik Admin** (`http://host.docker.internal:9000`) → Directory → Groups → **Create Group**
+2. Name: group name from the table above (e.g., `python-users`)
+3. No special attributes needed — it's a membership group
+4. Repeat for each template that needs access control
+
+Groups are automatically included in the OIDC `groups` claim (Authentik includes all user groups by default).
+
+#### Granting Template Access
+
+1. **Authentik Admin** → Directory → Groups → select the group (e.g., `python-users`)
+2. Click **Add existing user** → select the user
+3. Tell the user to **log out and log back in** (group changes sync on OIDC login via `CODER_OIDC_GROUP_AUTO_CREATE=true`)
+4. User can now create workspaces from that template
+
+**Assign multiple templates:** Add the user to multiple groups. For example, a full-stack developer might be in both `python-users` and `nodejs-users`.
+
+#### Revoking Template Access
+
+1. **Authentik Admin** → Directory → Groups → select the group
+2. Remove the user from the group
+3. User must log out and back in for the change to take effect
+4. **Existing workspaces continue running** — delete them manually if needed
+
+#### Verifying Group Membership
+
+```bash
+# Check from the Coder API (shows synced groups)
+TOKEN=$(curl -sf http://localhost:7080/api/v2/users/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@example.com","password":"CoderAdmin123!"}' | python3 -c "import sys,json; print(json.load(sys.stdin)['session_token'])")
+
+curl -sf http://localhost:7080/api/v2/users/{username} \
+  -H "Coder-Session-Token: $TOKEN" | python3 -c "import sys,json; print(json.load(sys.stdin).get('groups',[]))"
+
+# Or check from workspace build logs (when user creates a workspace):
+# The template logs: "Your groups: [\"python-users\", ...]"
+# Visible in Coder Dashboard → Workspace → Build Log
+```
+
+#### PoC User-to-Group Assignments
+
+| User | Groups | Templates Accessible |
+|------|--------|---------------------|
+| contractor1 | `python-users` | python-workspace |
+| contractor2 | `python-users` | python-workspace |
+| contractor3 | `java-users` | java-workspace |
+
+> **See also:** [DOCKER-DEV.md Section 17](DOCKER-DEV.md#17-access-control-docker-workspace-authorization) for the Docker workspace layered authorization architecture (Layers 1-3).
 
 ### Identity Consistency
 
@@ -648,6 +709,35 @@ cd coder-poc && docker compose up -d
 # 5. Access platform
 open https://host.docker.internal:7443
 ```
+
+### Task: Set Up AEM Workspaces (Quickstart JAR)
+
+AEM workspaces require the proprietary Adobe quickstart JAR and license file. These are shared across all AEM workspaces via a read-only host mount.
+
+```bash
+# 1. Place files in the shared directory
+cp /path/to/aem-quickstart-6.5.x.jar coder-poc/aem-install/aem-quickstart.jar
+cp /path/to/license.properties coder-poc/aem-install/license.properties
+
+# 2. Build the AEM workspace image (first time only)
+docker build -t workspace-base:latest coder-poc/templates/workspace-base/build
+docker build -t aem-workspace:latest coder-poc/templates/aem-workspace/build
+
+# 3. Push the template
+# (use setup-workspace.sh or manual push — see Template Management section)
+
+# 4. Create/restart AEM workspaces — AEM Author will start automatically
+```
+
+**How it works:**
+- `coder-poc/aem-install/` is mounted read-only at `/opt/aem-install/` in every AEM workspace
+- The JAR is referenced directly by `java -jar` (not copied) — saves ~1 GB disk per workspace
+- `license.properties` is symlinked into each AEM instance directory at startup
+- `crx-quickstart/` (AEM runtime) is unpacked on each workspace's persistent volume
+
+**Files are `.gitignore`d** — the JAR and license must NOT be committed (Adobe proprietary license).
+
+**If AEM Author/Publisher show "unhealthy"** in Coder dashboard — the JAR is missing. Place it in `coder-poc/aem-install/` and restart the workspace.
 
 ### Task: Add a New AI Model Option for Users
 

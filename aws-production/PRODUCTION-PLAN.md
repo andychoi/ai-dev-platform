@@ -321,6 +321,7 @@ These findings confirm the production approach (ACM + Internal ALB) will work wi
 | `litellm` | `litellm-task-role` | Bedrock (InvokeModel), Secrets Manager (read own) |
 | `key-provisioner` | `key-provisioner-task-role` | Secrets Manager (read own), RDS (team tables) |
 | `workspace` | `workspace-task-role` | Minimal (LiteLLM accessed via network, no direct AWS API access) |
+| `aem-workspace` | `aem-workspace-task-role` | CloudWatch Logs + S3 GetObject on `artifacts/aem/*` (JAR + license download) |
 | All tasks (shared) | `ecs-task-execution-role` | ECR (pull images), Secrets Manager (inject secrets), CloudWatch Logs (write) |
 
 **Key design:** LiteLLM uses an **ECS task role** to call Bedrock — no `ANTHROPIC_API_KEY` or `AWS_ACCESS_KEY_ID` in config. The task assumes the role automatically via the ECS task role mechanism.
@@ -938,7 +939,18 @@ resource "aws_ecs_service" "workspace" {
 **Deliverables:**
 - `templates/contractor-workspace/main.tf` — ECS Fargate workspace template
 - `templates/contractor-workspace/build/Dockerfile` — Hardened workspace image
-- ECR repository for workspace images
+- `templates/aem-workspace/main.tf` — AEM 6.5 ECS Fargate workspace template (S3 JAR delivery)
+- `templates/aem-workspace/build/Dockerfile` — AEM workspace image (Java 11, Maven 3.9.9, AWS CLI v2)
+- ECR repositories for workspace images (contractor-workspace, aem-workspace)
+
+#### AEM Workspace — S3 Artifact Delivery
+
+AEM workspaces use **S3 download** for the proprietary AEM quickstart JAR:
+- Admin uploads `aem-quickstart.jar` + `license.properties` to `s3://artifacts/aem/`
+- Workspace startup downloads on first boot via `aws s3 cp` (IAM task role, no keys)
+- EFS persistence means subsequent starts skip the download
+- Dedicated IAM role (`aem-workspace-task-role`) scopes S3 access to `aem/*` prefix only
+- See `docs/ADMIN-HOWTO-AEM.md` for full admin procedures
 
 ---
 
@@ -1238,10 +1250,18 @@ aws-production/
 │       ├── iam/                    # ECS task roles + execution roles
 │       └── cloudwatch/             # Alarms, log groups
 ├── templates/
-│   └── contractor-workspace/
-│       ├── main.tf                 # ECS Fargate workspace template
+│   ├── contractor-workspace/
+│   │   ├── main.tf                 # ECS Fargate workspace template
+│   │   └── build/
+│   │       └── Dockerfile          # Hardened workspace image
+│   └── aem-workspace/
+│       ├── main.tf                 # AEM 6.5 ECS Fargate template (S3 JAR delivery)
 │       └── build/
-│           └── Dockerfile          # Hardened workspace image
+│           ├── Dockerfile          # AEM workspace image (Java 11, Maven, AWS CLI)
+│           ├── maven-settings.xml  # Adobe repo + AEM server credentials
+│           ├── settings.json       # VS Code settings (Java 11, AEM extensions)
+│           └── .vscode/
+│               └── launch.json     # JPDA debug config (attach to AEM Author)
 ├── .gitlab-ci.yml                  # GitLab CI/CD pipeline
 ├── scripts/
 │   ├── bootstrap.sh               # First-time setup

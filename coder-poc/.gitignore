@@ -28,6 +28,10 @@ Thumbs.db
 # TLS certificates (private keys must not be committed)
 certs/*.key
 
+# AEM proprietary files (Adobe license — never commit)
+aem-install/*.jar
+aem-install/license.properties
+
 # Temporary files
 tmp/
 temp/

@@ -36,3 +36,8 @@ output "workspace_task_role_arn" {
   description = "ARN of the Workspace ECS task role."
   value       = aws_iam_role.workspace.arn
 }
+
+output "aem_workspace_task_role_arn" {
+  description = "ARN of the AEM Workspace ECS task role (CloudWatch Logs + S3 artifacts read)."
+  value       = aws_iam_role.aem_workspace.arn
+}

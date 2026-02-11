@@ -119,13 +119,50 @@ print(results[0]['pk'] if results else '')
     fi
 done
 
-# ─── Step 3b: Create Team Groups ─────────────────────────────────────────────
+# ─── Step 3b: Create Template Access Groups ──────────────────────────────────
+# Template access groups control which users can create workspaces from each
+# template. Each template checks for its corresponding group via Terraform
+# precondition on data.coder_workspace_owner.me.groups.
+#
+# See: coder-poc/docs/ADMIN-HOWTO.md → Template Access Control
+
+echo ""
+echo -e "${BLUE}[3b/7] Creating template access groups...${NC}"
+
+TEMPLATE_GROUP_NAMES="python-users java-users nodejs-users dotnet-users aem-users"
+
+for group_name in $TEMPLATE_GROUP_NAMES; do
+
+    EXISTING=$(api_call GET "/core/groups/?name=${group_name}" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+results = data.get('results', [])
+print(results[0]['pk'] if results else '')
+" 2>/dev/null)
+
+    if [ -n "$EXISTING" ]; then
+        echo -e "  ${YELLOW}⊘${NC} Template group '${group_name}' already exists (pk: ${EXISTING})"
+    else
+        RESULT=$(api_call POST "/core/groups/" "{
+            \"name\": \"${group_name}\",
+            \"is_superuser\": false
+        }")
+        PK=$(echo "$RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('pk',''))" 2>/dev/null)
+        if [ -n "$PK" ]; then
+            echo -e "  ${GREEN}✓${NC} Created template group '${group_name}' (pk: ${PK})"
+        else
+            echo -e "  ${RED}✗${NC} Failed to create template group '${group_name}': $RESULT"
+        fi
+    fi
+done
+
+# ─── Step 3c: Create Team Groups ─────────────────────────────────────────────
 # Team groups define the manager-contractor relationship for the Activity page.
 # Convention: team-<manager_username>
 # Both the manager AND their contractors are members of the same team group.
 
 echo ""
-echo -e "${BLUE}[3b/7] Creating team groups (manager-contractor scoping)...${NC}"
+echo -e "${BLUE}[3c/7] Creating team groups (manager-contractor scoping)...${NC}"
 
 TEAM_GROUP_NAMES="team-appmanager"
 
@@ -345,13 +382,23 @@ echo ""
 echo -e "${GREEN}=== RBAC Setup Complete ===${NC}"
 echo ""
 echo "Authentik groups created:"
-echo "  coder-admins          → Coder Owner role"
-echo "  coder-template-admins → Coder Template Admin role"
-echo "  coder-auditors        → Coder Auditor role"
-echo "  coder-members         → Coder Member role (default)"
 echo ""
-echo "Team groups created (for Activity page scoping):"
-echo "  team-appmanager       → App Manager's contractor team"
+echo "  RBAC groups (Coder role mapping):"
+echo "    coder-admins          → Coder Owner role"
+echo "    coder-template-admins → Coder Template Admin role"
+echo "    coder-auditors        → Coder Auditor role"
+echo "    coder-members         → Coder Member role (default)"
+echo ""
+echo "  Template access groups (workspace creation gate):"
+echo "    python-users          → python-workspace template"
+echo "    java-users            → java-workspace template"
+echo "    nodejs-users          → nodejs-workspace template"
+echo "    dotnet-users          → dotnet-workspace template"
+echo "    aem-users             → aem-workspace template"
+echo "    docker-users          → docker-workspace template (created separately)"
+echo ""
+echo "  Team groups (Activity page scoping):"
+echo "    team-appmanager       → App Manager's contractor team"
 echo ""
 echo "OIDC 'groups' claim added to Coder + Platform Admin providers."
 echo ""
