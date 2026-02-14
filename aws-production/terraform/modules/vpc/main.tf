@@ -217,6 +217,7 @@ locals {
     ecs_agent           = "com.amazonaws.${data.aws_region.current.name}.ecs-agent"
     ecs_telemetry       = "com.amazonaws.${data.aws_region.current.name}.ecs-telemetry"
     elasticfilesystem   = "com.amazonaws.${data.aws_region.current.name}.elasticfilesystem"
+    ssmmessages         = "com.amazonaws.${data.aws_region.current.name}.ssmmessages"
   }
 }
 

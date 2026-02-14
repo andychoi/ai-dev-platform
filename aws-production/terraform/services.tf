@@ -117,11 +117,12 @@ resource "aws_ecs_task_definition" "coder" {
 }
 
 resource "aws_ecs_service" "coder" {
-  name            = "${local.name_prefix}-coder"
-  cluster         = module.ecs.cluster_arn
-  task_definition = aws_ecs_task_definition.coder.arn
-  desired_count   = 1 # OSS: single instance (multi-replica requires Enterprise license)
-  launch_type     = "FARGATE"
+  name                   = "${local.name_prefix}-coder"
+  cluster                = module.ecs.cluster_arn
+  task_definition        = aws_ecs_task_definition.coder.arn
+  desired_count          = 1 # OSS: single instance (multi-replica requires Enterprise license)
+  launch_type            = "FARGATE"
+  enable_execute_command = true
 
   network_configuration {
     subnets          = module.vpc.private_app_subnet_ids
@@ -240,11 +241,12 @@ resource "aws_ecs_task_definition" "litellm" {
 }
 
 resource "aws_ecs_service" "litellm" {
-  name            = "${local.name_prefix}-litellm"
-  cluster         = module.ecs.cluster_arn
-  task_definition = aws_ecs_task_definition.litellm.arn
-  desired_count   = 2
-  launch_type     = "FARGATE"
+  name                   = "${local.name_prefix}-litellm"
+  cluster                = module.ecs.cluster_arn
+  task_definition        = aws_ecs_task_definition.litellm.arn
+  desired_count          = 2
+  launch_type            = "FARGATE"
+  enable_execute_command = true
 
   network_configuration {
     subnets          = module.vpc.private_app_subnet_ids
@@ -350,11 +352,12 @@ resource "aws_ecs_task_definition" "key_provisioner" {
 }
 
 resource "aws_ecs_service" "key_provisioner" {
-  name            = "${local.name_prefix}-key-provisioner"
-  cluster         = module.ecs.cluster_arn
-  task_definition = aws_ecs_task_definition.key_provisioner.arn
-  desired_count   = 1
-  launch_type     = "FARGATE"
+  name                   = "${local.name_prefix}-key-provisioner"
+  cluster                = module.ecs.cluster_arn
+  task_definition        = aws_ecs_task_definition.key_provisioner.arn
+  desired_count          = 1
+  launch_type            = "FARGATE"
+  enable_execute_command = true
 
   network_configuration {
     subnets          = module.vpc.private_app_subnet_ids
@@ -482,11 +485,12 @@ resource "aws_ecs_task_definition" "clickhouse" {
 }
 
 resource "aws_ecs_service" "clickhouse" {
-  name            = "${local.name_prefix}-clickhouse"
-  cluster         = module.ecs.cluster_arn
-  task_definition = aws_ecs_task_definition.clickhouse.arn
-  desired_count   = 1
-  launch_type     = "FARGATE"
+  name                   = "${local.name_prefix}-clickhouse"
+  cluster                = module.ecs.cluster_arn
+  task_definition        = aws_ecs_task_definition.clickhouse.arn
+  desired_count          = 1
+  launch_type            = "FARGATE"
+  enable_execute_command = true
 
   network_configuration {
     subnets          = module.vpc.private_app_subnet_ids
@@ -607,11 +611,12 @@ resource "aws_ecs_task_definition" "langfuse_web" {
 }
 
 resource "aws_ecs_service" "langfuse_web" {
-  name            = "${local.name_prefix}-langfuse-web"
-  cluster         = module.ecs.cluster_arn
-  task_definition = aws_ecs_task_definition.langfuse_web.arn
-  desired_count   = 1
-  launch_type     = "FARGATE"
+  name                   = "${local.name_prefix}-langfuse-web"
+  cluster                = module.ecs.cluster_arn
+  task_definition        = aws_ecs_task_definition.langfuse_web.arn
+  desired_count          = 1
+  launch_type            = "FARGATE"
+  enable_execute_command = true
 
   network_configuration {
     subnets          = module.vpc.private_app_subnet_ids
@@ -714,11 +719,12 @@ resource "aws_ecs_task_definition" "langfuse_worker" {
 }
 
 resource "aws_ecs_service" "langfuse_worker" {
-  name            = "${local.name_prefix}-langfuse-worker"
-  cluster         = module.ecs.cluster_arn
-  task_definition = aws_ecs_task_definition.langfuse_worker.arn
-  desired_count   = 1
-  launch_type     = "FARGATE"
+  name                   = "${local.name_prefix}-langfuse-worker"
+  cluster                = module.ecs.cluster_arn
+  task_definition        = aws_ecs_task_definition.langfuse_worker.arn
+  desired_count          = 1
+  launch_type            = "FARGATE"
+  enable_execute_command = true
 
   network_configuration {
     subnets          = module.vpc.private_app_subnet_ids

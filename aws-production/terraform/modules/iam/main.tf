@@ -95,6 +95,35 @@ resource "aws_iam_role_policy" "task_execution" {
 }
 
 ###############################################################################
+# ECS Exec – SSM Messages Policy (shared by all platform task roles)
+#
+# Allows `aws ecs execute-command` for interactive container debugging.
+# The SSM agent injected by Fargate authenticates using the task role,
+# so these permissions must be on each task role (not the execution role).
+###############################################################################
+
+data "aws_iam_policy_document" "ecs_exec" {
+  statement {
+    sid    = "ECSExecSSM"
+    effect = "Allow"
+    actions = [
+      "ssmmessages:CreateControlChannel",
+      "ssmmessages:CreateDataChannel",
+      "ssmmessages:OpenControlChannel",
+      "ssmmessages:OpenDataChannel",
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_policy" "ecs_exec" {
+  name        = "${var.name_prefix}-ecs-exec"
+  description = "Allows ECS Exec (SSM session) for interactive container access"
+  policy      = data.aws_iam_policy_document.ecs_exec.json
+  tags        = var.tags
+}
+
+###############################################################################
 # 2. Coder Task Role
 #
 # Permissions:
@@ -207,6 +236,11 @@ resource "aws_iam_role_policy" "coder" {
   policy = data.aws_iam_policy_document.coder.json
 }
 
+resource "aws_iam_role_policy_attachment" "coder_ecs_exec" {
+  role       = aws_iam_role.coder.name
+  policy_arn = aws_iam_policy.ecs_exec.arn
+}
+
 ###############################################################################
 # 3. LiteLLM Task Role
 #
@@ -256,6 +290,11 @@ resource "aws_iam_role_policy" "litellm" {
   policy = data.aws_iam_policy_document.litellm.json
 }
 
+resource "aws_iam_role_policy_attachment" "litellm_ecs_exec" {
+  role       = aws_iam_role.litellm.name
+  policy_arn = aws_iam_policy.ecs_exec.arn
+}
+
 ###############################################################################
 # 4. Authentik Task Role
 #
@@ -302,6 +341,11 @@ resource "aws_iam_role_policy" "authentik" {
   policy = data.aws_iam_policy_document.authentik.json
 }
 
+resource "aws_iam_role_policy_attachment" "authentik_ecs_exec" {
+  role       = aws_iam_role.authentik.name
+  policy_arn = aws_iam_policy.ecs_exec.arn
+}
+
 ###############################################################################
 # 5. Key Provisioner Task Role
 #
@@ -335,6 +379,11 @@ resource "aws_iam_role_policy" "key_provisioner" {
   name   = "${var.name_prefix}-key-provisioner-task-role-policy"
   role   = aws_iam_role.key_provisioner.id
   policy = data.aws_iam_policy_document.key_provisioner.json
+}
+
+resource "aws_iam_role_policy_attachment" "key_provisioner_ecs_exec" {
+  role       = aws_iam_role.key_provisioner.name
+  policy_arn = aws_iam_policy.ecs_exec.arn
 }
 
 ###############################################################################
@@ -391,6 +440,11 @@ resource "aws_iam_role_policy" "langfuse" {
   name   = "${var.name_prefix}-langfuse-task-role-policy"
   role   = aws_iam_role.langfuse.id
   policy = data.aws_iam_policy_document.langfuse.json
+}
+
+resource "aws_iam_role_policy_attachment" "langfuse_ecs_exec" {
+  role       = aws_iam_role.langfuse.name
+  policy_arn = aws_iam_policy.ecs_exec.arn
 }
 
 ###############################################################################
