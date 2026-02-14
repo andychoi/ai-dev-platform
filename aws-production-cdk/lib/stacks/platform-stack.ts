@@ -11,6 +11,7 @@ import { NetworkStackOutputs } from './network-stack.js';
 import { DataStackOutputs } from './data-stack.js';
 import { CoderService } from '../constructs/coder-service.js';
 import { LiteLLMService } from '../constructs/litellm-service.js';
+import { KeyProvisionerService } from '../constructs/key-provisioner-service.js';
 
 export interface PlatformStackProps extends cdk.StackProps {
   config: EnvironmentConfig;
@@ -356,6 +357,18 @@ export class PlatformStack extends cdk.Stack {
       listener,
       executionRole,
       taskRole: litellmTaskRole,
+      securityGroup: network.securityGroups.ecsServices,
+      namespace: network.namespace,
+      secrets: data.secrets,
+    });
+
+    new KeyProvisionerService(this, 'KeyProvisionerService', {
+      config,
+      cluster,
+      vpc: network.vpc,
+      listener,
+      executionRole,
+      taskRole: keyProvisionerTaskRole,
       securityGroup: network.securityGroups.ecsServices,
       namespace: network.namespace,
       secrets: data.secrets,
