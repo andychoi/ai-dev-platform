@@ -72,6 +72,8 @@ export class NetworkStack extends cdk.Stack {
       description: 'Security group for Application Load Balancer',
       allowAllOutbound: false,
     });
+    // VPN clients are expected to have VPC-routable source IPs.
+    // If VPN uses a CIDR outside the VPC range, add it here.
     sgAlb.addIngressRule(
       ec2.Peer.ipv4(config.vpcCidr),
       ec2.Port.tcp(443),
@@ -178,6 +180,18 @@ export class NetworkStack extends cdk.Stack {
       'ECS workspaces to EFS',
     );
 
+    // 7. VPC Endpoints Security Group
+    const sgVpcEndpoints = new ec2.SecurityGroup(this, 'SgVpcEndpoints', {
+      vpc,
+      description: 'Allow HTTPS from VPC to interface VPC endpoints',
+      allowAllOutbound: false,
+    });
+    sgVpcEndpoints.addIngressRule(
+      ec2.Peer.ipv4(config.vpcCidr),
+      ec2.Port.tcp(443),
+      'HTTPS from VPC',
+    );
+
     // ---------------------------------------------------------------
     // VPC Endpoints
     // ---------------------------------------------------------------
@@ -202,6 +216,9 @@ export class NetworkStack extends cdk.Stack {
       { id: 'StsEndpoint', service: ec2.InterfaceVpcEndpointAwsService.STS },
       { id: 'EcsEndpoint', service: ec2.InterfaceVpcEndpointAwsService.ECS },
       { id: 'SsmEndpoint', service: ec2.InterfaceVpcEndpointAwsService.SSM },
+      { id: 'EcsAgentEndpoint', service: ec2.InterfaceVpcEndpointAwsService.ECS_AGENT },
+      { id: 'EcsTelemetryEndpoint', service: ec2.InterfaceVpcEndpointAwsService.ECS_TELEMETRY },
+      { id: 'SsmMessagesEndpoint', service: ec2.InterfaceVpcEndpointAwsService.SSM_MESSAGES },
       { id: 'EfsEndpoint', service: ec2.InterfaceVpcEndpointAwsService.ELASTIC_FILESYSTEM },
     ];
 
@@ -209,7 +226,7 @@ export class NetworkStack extends cdk.Stack {
       vpc.addInterfaceEndpoint(endpoint.id, {
         service: endpoint.service,
         subnets: privateAppSubnets,
-        securityGroups: [sgEcsServices],
+        securityGroups: [sgVpcEndpoints],
       });
     }
 
@@ -217,10 +234,10 @@ export class NetworkStack extends cdk.Stack {
     new ec2.InterfaceVpcEndpoint(this, 'BedrockEndpoint', {
       vpc,
       service: new ec2.InterfaceVpcEndpointService(
-        `com.amazonaws.${config.region}.bedrock-runtime`,
+        `com.amazonaws.${this.region}.bedrock-runtime`,
       ),
       subnets: privateAppSubnets,
-      securityGroups: [sgEcsServices],
+      securityGroups: [sgVpcEndpoints],
     });
 
     // ---------------------------------------------------------------
