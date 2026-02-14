@@ -40,7 +40,7 @@ Claude should look up details in these files rather than relying on this summary
 | [DATABASE.md](shared/docs/DATABASE.md) | Developer database provisioning (DevDB) |
 | [FAQ.md](shared/docs/FAQ.md) | End-user frequently asked questions |
 
-### AWS Production (`aws-production/`)
+### AWS Production — Terraform (`aws-production/`)
 
 | Document | When to Reference |
 |----------|-------------------|
@@ -48,6 +48,17 @@ Claude should look up details in these files rather than relying on this summary
 | [DEPLOY-ENTERPRISE-AUTH.md](aws-production/docs/DEPLOY-ENTERPRISE-AUTH.md) | Claude Code Enterprise auth deployment guide (step-by-step) |
 | [ECS-EXEC.md](aws-production/docs/ECS-EXEC.md) | Direct Fargate container access via ECS Exec (prerequisites, usage, troubleshooting) |
 | `terraform/` | IaC modules (VPC, ECS, RDS, ALB, IAM, S3, Secrets, ElastiCache, EFS) |
+
+### AWS Production — CDK (`aws-production-cdk/`)
+
+| Document | When to Reference |
+|----------|-------------------|
+| [README.md](aws-production-cdk/README.md) | CDK architecture, stack details, deployment, operations, CDK-Terraform bridge |
+| [CDK Design](docs/plans/2026-02-14-aws-cdk-migration-design.md) | Design decisions, stack breakdown, rationale |
+| [CDK Implementation Plan](docs/plans/2026-02-14-aws-cdk-migration.md) | Task-by-task build plan with tests |
+| `lib/stacks/` | 4 CDK stacks: Network, Data, Platform, Observability |
+| `lib/constructs/` | Service constructs: Coder, LiteLLM, KeyProvisioner, Langfuse |
+| `lib/config/environment.ts` | Typed environment config (domain, AZs, instance sizes, OIDC) |
 
 ### Claude Skills (`.claude/skills/`)
 
