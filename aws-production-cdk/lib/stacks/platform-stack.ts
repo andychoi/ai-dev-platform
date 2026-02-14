@@ -176,6 +176,8 @@ export class PlatformStack extends cdk.Stack {
           'elasticfilesystem:CreateAccessPoint',
           'elasticfilesystem:DescribeAccessPoints',
           'elasticfilesystem:DeleteAccessPoint',
+          'elasticfilesystem:ClientMount',
+          'elasticfilesystem:ClientWrite',
         ],
         resources: [data.fileSystem.fileSystemArn],
       }),
@@ -253,6 +255,16 @@ export class PlatformStack extends cdk.Stack {
           data.buckets.langfuseMedia.bucketArn,
           `${data.buckets.langfuseMedia.bucketArn}/*`,
         ],
+      }),
+    );
+    langfuseTaskRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          'elasticfilesystem:ClientMount',
+          'elasticfilesystem:ClientWrite',
+        ],
+        resources: [data.fileSystem.fileSystemArn],
       }),
     );
 
