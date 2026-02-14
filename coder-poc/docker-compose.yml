@@ -268,6 +268,46 @@ services:
       start_period: 10s
 
   # ==========================================================================
+  # IDLE MONITOR - Automatic idle workspace shutdown (FR-2.2)
+  # Polls Coder API for running workspaces; stops those idle > threshold
+  # API: http://localhost:8200  Endpoints: /health, /status, /config
+  # ==========================================================================
+  idle-monitor:
+    build:
+      context: ./idle-monitor
+      dockerfile: Dockerfile
+    container_name: idle-monitor
+    restart: unless-stopped
+    depends_on:
+      coder:
+        condition: service_started
+    environment:
+      # Coder API connection
+      CODER_URL: http://coder-server:7080
+      CODER_SESSION_TOKEN: ${CODER_SESSION_TOKEN:-}
+      # Idle detection settings
+      IDLE_TIMEOUT_MINUTES: ${IDLE_TIMEOUT_MINUTES:-30}
+      CHECK_INTERVAL_SECONDS: ${IDLE_CHECK_INTERVAL:-300}
+      # SAFETY: dry-run mode logs actions without stopping workspaces
+      # Set to "false" to enable actual auto-stop
+      DRY_RUN: ${IDLE_DRY_RUN:-true}
+      # Grace period: don't stop workspaces started less than N minutes ago
+      GRACE_PERIOD_MINUTES: ${IDLE_GRACE_PERIOD:-15}
+      # Comma-separated usernames to never auto-stop (e.g., admin accounts)
+      EXCLUDED_OWNERS: ${IDLE_EXCLUDED_OWNERS:-}
+      LOG_LEVEL: ${IDLE_LOG_LEVEL:-INFO}
+    ports:
+      - "8200:8200"
+    networks:
+      - coder-network
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8200/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ==========================================================================
   # GITEA - Self-hosted Git Server with native OIDC support
   # Provides Git repositories with access control for testing
   # ==========================================================================
