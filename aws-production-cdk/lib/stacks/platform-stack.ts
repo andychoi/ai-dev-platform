@@ -9,6 +9,7 @@ import { Construct } from 'constructs';
 import { EnvironmentConfig } from '../config/environment.js';
 import { NetworkStackOutputs } from './network-stack.js';
 import { DataStackOutputs } from './data-stack.js';
+import { CoderService } from '../constructs/coder-service.js';
 
 export interface PlatformStackProps extends cdk.StackProps {
   config: EnvironmentConfig;
@@ -328,6 +329,23 @@ export class PlatformStack extends cdk.Stack {
     new ssm.StringParameter(this, 'ParamAlbListenerArn', {
       parameterName: `${ssmPrefix}/alb-listener-arn`,
       stringValue: listener.listenerArn,
+    });
+
+    // ---------------------------------------------------------------
+    // Service Constructs
+    // ---------------------------------------------------------------
+    new CoderService(this, 'CoderService', {
+      config,
+      cluster,
+      vpc: network.vpc,
+      listener,
+      executionRole,
+      taskRole: coderTaskRole,
+      securityGroup: network.securityGroups.ecsServices,
+      fileSystem: data.fileSystem,
+      namespace: network.namespace,
+      secrets: data.secrets,
+      databaseSecret: data.database.secret,
     });
 
     // ---------------------------------------------------------------
