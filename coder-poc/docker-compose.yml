@@ -415,6 +415,11 @@ services:
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
       - AWS_REGION=${AWS_REGION:-us-east-1}
+      # Custom LLM services (corporate proxy)
+      - CUSTOM_LLM_API_KEY=${CUSTOM_LLM_API_KEY:-}
+      - CUSTOM_LLM_API_BASE=${CUSTOM_LLM_API_BASE:-}
+      - CUSTOM_LLM_CLAUDE_API_BASE=${CUSTOM_LLM_CLAUDE_API_BASE:-}
+      - LITELLM_ANTHROPIC_DISABLE_URL_SUFFIX=true
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-poc-litellm-master-key-change-in-production}
       - DATABASE_URL=${LITELLM_DATABASE_URL:-postgresql://litellm:litellm@postgres:5432/litellm}
       - DEFAULT_ENFORCEMENT_LEVEL=${DEFAULT_ENFORCEMENT_LEVEL:-standard}

@@ -22,10 +22,13 @@ model_list:
   # ==========================================================================
 
   # Claude Sonnet 4.5 — Anthropic direct
+  # NOTE: api_base is explicit because LITELLM_ANTHROPIC_DISABLE_URL_SUFFIX=true
+  #       (required for custom Claude endpoints — disables auto-append of /v1/messages)
   - model_name: claude-sonnet-4-5
     litellm_params:
       model: anthropic/claude-sonnet-4-5-20250929
       api_key: os.environ/ANTHROPIC_API_KEY
+      api_base: https://api.anthropic.com/v1/messages
     model_info:
       max_tokens: 8192
       input_cost_per_token: 0.000003
@@ -36,6 +39,7 @@ model_list:
     litellm_params:
       model: anthropic/claude-haiku-4-5-20251001
       api_key: os.environ/ANTHROPIC_API_KEY
+      api_base: https://api.anthropic.com/v1/messages
     model_info:
       max_tokens: 8192
       input_cost_per_token: 0.0000008
@@ -46,6 +50,145 @@ model_list:
     litellm_params:
       model: anthropic/claude-opus-4-20250514
       api_key: os.environ/ANTHROPIC_API_KEY
+      api_base: https://api.anthropic.com/v1/messages
+    model_info:
+      max_tokens: 8192
+      input_cost_per_token: 0.000015
+      output_cost_per_token: 0.000075
+
+  # ==========================================================================
+  # CUSTOM LLM — Corporate proxy (h-chat-api.autoever.com)
+  # All services share CUSTOM_LLM_API_KEY; base URLs from env vars
+  # ==========================================================================
+
+  # --- OpenAI Custom: Azure OpenAI format via corporate proxy ---
+
+  - model_name: custom-gpt-4o
+    litellm_params:
+      model: azure/gpt-4o
+      api_base: os.environ/CUSTOM_LLM_API_BASE
+      api_version: "2024-10-21"
+      api_key: os.environ/CUSTOM_LLM_API_KEY
+    model_info:
+      max_tokens: 16384
+      input_cost_per_token: 0.0000025
+      output_cost_per_token: 0.00001
+
+  - model_name: custom-gpt-4o-mini
+    litellm_params:
+      model: azure/gpt-4o-mini
+      api_base: os.environ/CUSTOM_LLM_API_BASE
+      api_version: "2024-10-21"
+      api_key: os.environ/CUSTOM_LLM_API_KEY
+    model_info:
+      max_tokens: 16384
+      input_cost_per_token: 0.00000015
+      output_cost_per_token: 0.0000006
+
+  - model_name: custom-gpt-4.1
+    litellm_params:
+      model: azure/gpt-4.1
+      api_base: os.environ/CUSTOM_LLM_API_BASE
+      api_version: "2024-10-21"
+      api_key: os.environ/CUSTOM_LLM_API_KEY
+    model_info:
+      max_tokens: 32768
+      input_cost_per_token: 0.000002
+      output_cost_per_token: 0.000008
+
+  - model_name: custom-gpt-4.1-mini
+    litellm_params:
+      model: azure/gpt-4.1-mini
+      api_base: os.environ/CUSTOM_LLM_API_BASE
+      api_version: "2024-10-21"
+      api_key: os.environ/CUSTOM_LLM_API_KEY
+    model_info:
+      max_tokens: 32768
+      input_cost_per_token: 0.0000004
+      output_cost_per_token: 0.0000016
+
+  - model_name: custom-gpt-4.1-nano
+    litellm_params:
+      model: azure/gpt-4.1-nano
+      api_base: os.environ/CUSTOM_LLM_API_BASE
+      api_version: "2024-10-21"
+      api_key: os.environ/CUSTOM_LLM_API_KEY
+    model_info:
+      max_tokens: 32768
+      input_cost_per_token: 0.0000001
+      output_cost_per_token: 0.0000004
+
+  - model_name: custom-o3-mini
+    litellm_params:
+      model: azure/o3-mini
+      api_base: os.environ/CUSTOM_LLM_API_BASE
+      api_version: "2024-10-21"
+      api_key: os.environ/CUSTOM_LLM_API_KEY
+    model_info:
+      max_tokens: 65536
+      input_cost_per_token: 0.0000011
+      output_cost_per_token: 0.0000044
+
+  # --- Gemini Custom: native Gemini format via corporate proxy ---
+
+  - model_name: custom-gemini-2.5-flash
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_base: os.environ/CUSTOM_LLM_API_BASE
+      api_key: os.environ/CUSTOM_LLM_API_KEY
+    model_info:
+      max_tokens: 8192
+      input_cost_per_token: 0.00000015
+      output_cost_per_token: 0.0000006
+
+  - model_name: custom-gemini-2.5-pro
+    litellm_params:
+      model: gemini/gemini-2.5-pro
+      api_base: os.environ/CUSTOM_LLM_API_BASE
+      api_key: os.environ/CUSTOM_LLM_API_KEY
+    model_info:
+      max_tokens: 8192
+      input_cost_per_token: 0.00000125
+      output_cost_per_token: 0.00001
+
+  - model_name: custom-gemini-2.0-flash
+    litellm_params:
+      model: gemini/gemini-2.0-flash
+      api_base: os.environ/CUSTOM_LLM_API_BASE
+      api_key: os.environ/CUSTOM_LLM_API_KEY
+    model_info:
+      max_tokens: 8192
+      input_cost_per_token: 0.0000001
+      output_cost_per_token: 0.0000004
+
+  # --- Claude Custom: Anthropic format via corporate proxy ---
+  # Requires LITELLM_ANTHROPIC_DISABLE_URL_SUFFIX=true in litellm env
+
+  - model_name: custom-claude-haiku
+    litellm_params:
+      model: anthropic/claude-haiku-4-5
+      api_base: os.environ/CUSTOM_LLM_CLAUDE_API_BASE
+      api_key: os.environ/CUSTOM_LLM_API_KEY
+    model_info:
+      max_tokens: 8192
+      input_cost_per_token: 0.0000008
+      output_cost_per_token: 0.000004
+
+  - model_name: custom-claude-sonnet
+    litellm_params:
+      model: anthropic/claude-sonnet-4-5
+      api_base: os.environ/CUSTOM_LLM_CLAUDE_API_BASE
+      api_key: os.environ/CUSTOM_LLM_API_KEY
+    model_info:
+      max_tokens: 8192
+      input_cost_per_token: 0.000003
+      output_cost_per_token: 0.000015
+
+  - model_name: custom-claude-opus
+    litellm_params:
+      model: anthropic/claude-opus-4
+      api_base: os.environ/CUSTOM_LLM_CLAUDE_API_BASE
+      api_key: os.environ/CUSTOM_LLM_API_KEY
     model_info:
       max_tokens: 8192
       input_cost_per_token: 0.000015
