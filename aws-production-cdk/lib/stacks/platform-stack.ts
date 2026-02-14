@@ -10,6 +10,7 @@ import { EnvironmentConfig } from '../config/environment.js';
 import { NetworkStackOutputs } from './network-stack.js';
 import { DataStackOutputs } from './data-stack.js';
 import { CoderService } from '../constructs/coder-service.js';
+import { LiteLLMService } from '../constructs/litellm-service.js';
 
 export interface PlatformStackProps extends cdk.StackProps {
   config: EnvironmentConfig;
@@ -346,6 +347,18 @@ export class PlatformStack extends cdk.Stack {
       namespace: network.namespace,
       secrets: data.secrets,
       databaseSecret: data.database.secret,
+    });
+
+    new LiteLLMService(this, 'LiteLLMService', {
+      config,
+      cluster,
+      vpc: network.vpc,
+      listener,
+      executionRole,
+      taskRole: litellmTaskRole,
+      securityGroup: network.securityGroups.ecsServices,
+      namespace: network.namespace,
+      secrets: data.secrets,
     });
 
     // ---------------------------------------------------------------
